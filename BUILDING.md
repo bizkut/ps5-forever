@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.003
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.004
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -95,6 +95,22 @@ caused the Linux `.002` explorer startup fault at the first delayed
 loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchanged.
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
+
+The corrected `.004` sources address two independent drive-reporting causes:
+
+- Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
+  `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
+  `\Device\HarddiskVolume2` devices. `C:` maps to the prefix's `drive_c`; `W:`
+  maps to its parent (`/data/forever` for the default prefix). Ordinary file
+  access alone did not populate the object namespace used for drive enumeration.
+- The SDK's `platform/src/libc.c` sets `MNT_LOCAL` in its FreeBSD
+  `statfs`/`fstatfs` responses. Without this flag Wine classified the console's
+  local storage as a network volume, leading to Battle.net's network-folder
+  rejection.
+
+This is a bounded namespace/device and local-filesystem reporting fix, not a
+registry drive-label override. It does **not** expose `Z:` or add UNC/network-share
+support. Source pins and host qualification do not establish native acceptance.
 
 `deps.json` inventories SHA-256-pinned downloads. The established recipes also
 verify those digests: FreeType; pacbrew Nettle/mini-gmp, libtasn1 and GnuTLS;
@@ -169,4 +185,17 @@ must be readable/executable code without write permission; the IAT must remain
 writable data without execute permission. It fails against the old Wine host
 tool even when ordinary `.text` and the delay helper are executable. No Wine
 runtime, full title build or console execution is needed for this regression.
+
+## Native release gate
+
+Before publishing the corrected release or promoting its catalog entry, install
+the exact final `PPSA99030.zip` on the PS5. Repeat the unchanged raw drive probe
+in both 32-bit and 64-bit modes, then run Wine's opt-in, read-only regression
+`kernel32_test.exe volume ps5-title-drives` in both architectures. Require only
+`C:`/`W:` in drive enumeration, local fixed-disk device information for both
+roots and their DOS-device targets, and rejection of unsupported `D:`, `Z:`
+and UNC paths. Finally restore the default Battle.net startup and confirm its
+install destination is accepted rather than rejected as a network folder.
+These are required checks, **not recorded native-pass results**; the existing
+delay-import regression gate remains required as well.
 

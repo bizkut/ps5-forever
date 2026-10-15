@@ -9,10 +9,10 @@
     {
       "name": "ps5-wine",
       "url": "https://github.com/bizkut/ps5-forever-wine.git",
-      "commit": "f78e273ffc8268297b68ee428ca2f3126591562a",
-      "original_commit": "f78e273ffc8268297b68ee428ca2f3126591562a",
-      "content_sha256": "8f580a43477060948221d5929b17332a560c0cbe36cdf4b6e3da24c8f5333757",
-      "describe": "wine-8.0-21023-forever-01.000.003",
+      "commit": "1b404c1ddd0b750f657e8297fd9c088da53f24ec",
+      "original_commit": "1b404c1ddd0b750f657e8297fd9c088da53f24ec",
+      "content_sha256": "203938fe471f8930d31f8b24d849533e5a8a32f17fe4d64c997716052fdb6128",
+      "describe": "wine-8.0-21023-forever-01.000.004",
       "path": "ps5-proton/ps5-wine"
     },
     {
@@ -34,10 +34,10 @@
     {
       "name": "PS5_PayloadSDK",
       "url": "https://github.com/bizkut/ps5-forever-sdk.git",
-      "commit": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
-      "content_sha256": "ab1a054673c6a9d11a373075982f77f13a6360c8ef386a29278f1c269cfc6e85",
+      "commit": "fdb2763789a50a4fcc9a98dcae13f5e336c6a1ee",
+      "content_sha256": "81c02d096acb692055f192ed8838acd9bc1274c678dd85cf17bd3022611d83b9",
       "path": "PS5_PayloadSDK",
-      "original_commit": "ce068b1857ed9203ace0b65a285821e0c254a47c"
+      "original_commit": "fdb2763789a50a4fcc9a98dcae13f5e336c6a1ee"
     },
     {
       "name": "pacbrew-repo",
@@ -143,7 +143,7 @@
       "path": "ps5-proton/ps5-wow/dxvk/subprojects/libdisplay-info"
     }
   ],
-  "sdk_revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+  "sdk_revision": "fdb2763789a50a4fcc9a98dcae13f5e336c6a1ee",
   "radv_revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
   "downloads": [
     {
