@@ -1,0 +1,8 @@
+/ps5/build/
+/vkd3d-proton/
+/dxvk/
+__pycache__/
+*.py[cod]
+.tokensave/
+.omp/
+.claude/

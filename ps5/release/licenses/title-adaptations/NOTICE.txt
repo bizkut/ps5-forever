@@ -1,0 +1,30 @@
+ps5/probes/psmkit-wine/title-icon.h
+/* The home-screen icon from the installed Battle.net Launcher.exe: its
+ * largest PNG icon resource, scaled to 448 pixels on a dark 512x512 tile.
+ * The write broker copies the result over the home screen's copies, which a
+ * title cannot reach (WB_ICON_MAGIC); they show after the console restarts.
+ *
+ * Adapted from ps5-forever examples/battlenet/icon.c (commit 6cf23f2d):
+ * Copyright (C) 2026 Mihawk
+ * SPDX-License-Identifier: MIT
+ * Changes: header-only; writes the icon and the record of its source program
+ * to caller-given paths through forever-setup.h; the PNG is built in memory;
+ * stb_image v2.30 (third_party/stb). */
+
+ps5/title/compositor.c
+/* Font and message panel adapted from ps5-forever examples/battlenet/cpu_desktop.c
+ * (commit 6cf23f2d, Copyright (C) 2026 Mihawk, MIT) */
+
+ps5/title/tools/make-title-art.py
+# Adapted from ps5-forever ps5/tools/make-title-art.py (commit 6cf23f2d):
+# Copyright (C) 2026 Mihawk
+# SPDX-License-Identifier: MIT
+# Changes: writes ps5/title/sce_sys/icon0.png.
+
+ps5/title/tools/make-title-background.py
+# Adapted from ps5-forever ps5/tools/make-title-background.py (commit 6cf23f2d):
+# Copyright (C) 2026 Mihawk
+# SPDX-License-Identifier: MIT
+# Changes: writes ps5/title/sce_sys/pic0.dds only; the option that fetched
+# Battle.net's artwork is removed (this tree holds no Blizzard artwork).
+

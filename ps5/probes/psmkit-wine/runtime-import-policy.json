@@ -1,0 +1,3874 @@
+{
+  "format": 2,
+  "imports": [
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "_Unwind_Find_FDE",
+      "target": "_Unwind_Find_FDE"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__assert",
+      "target": "__assert"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__error",
+      "target": "__error"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__pthread_cleanup_pop_imp",
+      "target": "__pthread_cleanup_pop_imp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__pthread_cleanup_push_imp",
+      "target": "__pthread_cleanup_push_imp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__stderrp",
+      "target": "__stderrp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__stdoutp",
+      "target": "__stdoutp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "_exit",
+      "target": "_exit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "_umtx_op",
+      "target": "_umtx_op"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "abort",
+      "target": "abort"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "access",
+      "target": "access"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "asctime",
+      "target": "asctime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "asprintf",
+      "target": "asprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atoi",
+      "target": "atoi"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atoll",
+      "target": "atoll"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "bsearch",
+      "target": "bsearch"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "calloc",
+      "target": "calloc"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "cfgetospeed",
+      "target": "cfgetospeed"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "cfsetispeed",
+      "target": "cfsetispeed"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "cfsetospeed",
+      "target": "cfsetospeed"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "chdir",
+      "target": "chdir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "clock_gettime",
+      "target": "clock_gettime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "close",
+      "target": "close"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "closedir",
+      "target": "closedir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "connect",
+      "target": "connect"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ctime",
+      "target": "ctime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_loader",
+      "symbol": "dladdr",
+      "target": "pw_public_dladdr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_loader",
+      "symbol": "dlclose",
+      "target": "pw_public_dlclose"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_loader",
+      "symbol": "dlerror",
+      "target": "pw_public_dlerror"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_loader",
+      "symbol": "dlopen",
+      "target": "pw_public_dlopen"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_loader",
+      "symbol": "dlsym",
+      "target": "pw_public_dlsym"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "custom_fd",
+      "symbol": "dup",
+      "target": "pw_native_dup_fd"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "environ",
+      "target": "environ"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "execv",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "exit",
+      "target": "exit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_delete_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_get_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_get_file",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_set_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "fchdir",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fchmod",
+      "target": "fchmod"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fclose",
+      "target": "fclose"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fcntl",
+      "target": "fcntl"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fdopen",
+      "target": "fdopen"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fdopendir",
+      "target": "fdopendir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fgets",
+      "target": "fgets"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fopen",
+      "target": "fopen"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fprintf",
+      "target": "fprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fputc",
+      "target": "fputc"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "free",
+      "target": "free"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "freeifaddrs",
+      "target": "freeifaddrs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fstat",
+      "target": "fstat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "fstatat",
+      "target": "ps5_fstatat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "fstatfs",
+      "target": "ps5_fstatfs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fstatvfs",
+      "target": "fstatvfs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fsync",
+      "target": "fsync"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ftruncate",
+      "target": "ftruncate"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "futimens",
+      "target": "ps5_futimens"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fwrite",
+      "target": "fwrite"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getcwd",
+      "target": "getcwd"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getenv",
+      "target": "getenv"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getifaddrs",
+      "target": "getifaddrs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "getmntinfo",
+      "target": "pw_native_fail_getmntinfo"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpeername",
+      "target": "getpeername"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpid",
+      "target": "getpid"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpwuid",
+      "target": "getpwuid"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getrlimit",
+      "target": "getrlimit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getrusage",
+      "target": "getrusage"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getsockname",
+      "target": "getsockname"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getsockopt",
+      "target": "getsockopt"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "gettimeofday",
+      "target": "gettimeofday"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getuid",
+      "target": "getuid"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "gmtime",
+      "target": "gmtime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ioctl",
+      "target": "ioctl"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "isatty",
+      "target": "ps5_isatty"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isspace",
+      "target": "isspace"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isxdigit",
+      "target": "isxdigit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "kevent",
+      "target": "kevent"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "kqueue",
+      "target": "kqueue"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "localtime",
+      "target": "localtime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "longjmp",
+      "target": "longjmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "lseek",
+      "target": "lseek"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "lstat",
+      "target": "lstat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "madvise",
+      "target": "madvise"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "malloc",
+      "target": "malloc"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcmp",
+      "target": "memcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcpy",
+      "target": "memcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memmove",
+      "target": "memmove"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memset",
+      "target": "memset"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mkdir",
+      "target": "mkdir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mktime",
+      "target": "mktime"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mlock",
+      "target": "mlock"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mmap",
+      "target": "mmap"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mprotect",
+      "target": "mprotect"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "msync",
+      "target": "msync"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "munlock",
+      "target": "munlock"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "munmap",
+      "target": "munmap"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "nanosleep",
+      "target": "nanosleep"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "open",
+      "target": "open"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "openat",
+      "target": "ps5_openat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "opendir",
+      "target": "opendir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "perror",
+      "target": "perror"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "poll",
+      "target": "poll"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "posix_fallocate",
+      "target": "ps5_posix_fallocate"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pread",
+      "target": "pread"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_closedir",
+      "target": "ps5_closedir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fdopendir",
+      "target": "ps5_fdopendir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fstatat",
+      "target": "ps5_fstatat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fstatfs",
+      "target": "ps5_fstatfs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fstatvfs",
+      "target": "ps5_fstatvfs"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_getcwd",
+      "target": "ps5_getcwd"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_openat",
+      "target": "ps5_openat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_opendir",
+      "target": "ps5_opendir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_pthread_getaffinity_np",
+      "target": "ps5_pthread_getaffinity_np"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_readdir",
+      "target": "ps5_readdir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_destroy",
+      "target": "pthread_attr_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_init",
+      "target": "pthread_attr_init"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_setdetachstate",
+      "target": "pthread_attr_setdetachstate"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_setguardsize",
+      "target": "pthread_attr_setguardsize"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_setscope",
+      "target": "pthread_attr_setscope"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_setstack",
+      "target": "pthread_attr_setstack"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_cond_broadcast",
+      "target": "pthread_cond_broadcast"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_cond_signal",
+      "target": "pthread_cond_signal"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_cond_wait",
+      "target": "pthread_cond_wait"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_create",
+      "target": "pthread_create"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_detach",
+      "target": "pthread_detach"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_exit",
+      "target": "pthread_exit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_getspecific",
+      "target": "pthread_getspecific"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_getthreadid_np",
+      "target": "pthread_getthreadid_np"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_join",
+      "target": "pthread_join"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_key_create",
+      "target": "pthread_key_create"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_key_delete",
+      "target": "pthread_key_delete"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_kill",
+      "target": "pthread_kill"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_init",
+      "target": "pthread_mutex_init"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_lock",
+      "target": "pthread_mutex_lock"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_trylock",
+      "target": "pthread_mutex_trylock"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_unlock",
+      "target": "pthread_mutex_unlock"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_destroy",
+      "target": "pthread_mutexattr_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_init",
+      "target": "pthread_mutexattr_init"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_settype",
+      "target": "pthread_mutexattr_settype"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_once",
+      "target": "pthread_once"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_self",
+      "target": "pthread_self"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_setspecific",
+      "target": "pthread_setspecific"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_sigmask",
+      "target": "pthread_sigmask"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "putenv",
+      "target": "putenv"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "puts",
+      "target": "puts"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pwrite",
+      "target": "pwrite"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "qsort",
+      "target": "qsort"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "read",
+      "target": "read"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "readdir",
+      "target": "readdir"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "readlink",
+      "target": "ps5_readlink"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "realloc",
+      "target": "realloc"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "realpath",
+      "target": "ps5_realpath"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "recv",
+      "target": "recv"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "recvmsg",
+      "target": "recvmsg"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "rename",
+      "target": "rename"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelAllocateDirectMemory",
+      "target": "sceKernelAllocateDirectMemory"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelAvailableDirectMemorySize",
+      "target": "sceKernelAvailableDirectMemorySize"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelAvailableFlexibleMemorySize",
+      "target": "sceKernelAvailableFlexibleMemorySize"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelConfiguredFlexibleMemorySize",
+      "target": "sceKernelConfiguredFlexibleMemorySize"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelDebugOutText",
+      "target": "sceKernelDebugOutText"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelGetCpuFrequency",
+      "target": "sceKernelGetCpuFrequency"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelGetDirectMemorySize",
+      "target": "sceKernelGetDirectMemorySize"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelGetTscFrequency",
+      "target": "sceKernelGetTscFrequency"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelMapDirectMemory",
+      "target": "sceKernelMapDirectMemory"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelMprotect",
+      "target": "sceKernelMprotect"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelMunmap",
+      "target": "sceKernelMunmap"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelReleaseDirectMemory",
+      "target": "sceKernelReleaseDirectMemory"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelReserveVirtualRange",
+      "target": "sceKernelReserveVirtualRange"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sched_yield",
+      "target": "sched_yield"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "select",
+      "target": "select"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "send",
+      "target": "send"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sendmsg",
+      "target": "sendmsg"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setbuf",
+      "target": "setbuf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setenv",
+      "target": "setenv"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setjmp",
+      "target": "setjmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setlocale",
+      "target": "setlocale"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setrlimit",
+      "target": "setrlimit"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setsockopt",
+      "target": "setsockopt"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "shm_open",
+      "target": "shm_open"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "shutdown",
+      "target": "shutdown"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigaction",
+      "target": "sigaction"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigaddset",
+      "target": "sigaddset"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigaltstack",
+      "target": "sigaltstack"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigdelset",
+      "target": "sigdelset"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigemptyset",
+      "target": "sigemptyset"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigfillset",
+      "target": "sigfillset"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigprocmask",
+      "target": "sigprocmask"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "snprintf",
+      "target": "snprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "socket",
+      "target": "socket"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "socketpair",
+      "target": "socketpair"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sprintf",
+      "target": "sprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sscanf",
+      "target": "sscanf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "stat",
+      "target": "stat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "stpcpy",
+      "target": "stpcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcasecmp",
+      "target": "strcasecmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcat",
+      "target": "strcat"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strchr",
+      "target": "strchr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcmp",
+      "target": "strcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcpy",
+      "target": "strcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcspn",
+      "target": "strcspn"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strdup",
+      "target": "strdup"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strerror",
+      "target": "strerror"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strlen",
+      "target": "strlen"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strncasecmp",
+      "target": "strncasecmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strncmp",
+      "target": "strncmp"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strpbrk",
+      "target": "strpbrk"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strrchr",
+      "target": "strrchr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strstr",
+      "target": "strstr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strtok",
+      "target": "strtok"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strtol",
+      "target": "strtol"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strtoul",
+      "target": "strtoul"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "symlink",
+      "target": "ps5_symlink"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sysarch",
+      "target": "sysarch"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "syscall",
+      "target": "pw_native_fail_syscall"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sysconf",
+      "target": "sysconf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sysctl",
+      "target": "sysctl"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sysctlbyname",
+      "target": "sysctlbyname"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcdrain",
+      "target": "tcdrain"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcflow",
+      "target": "tcflow"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcflush",
+      "target": "tcflush"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcgetattr",
+      "target": "tcgetattr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcsetattr",
+      "target": "tcsetattr"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fail_closed",
+      "symbol": "thr_set_name",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "time",
+      "target": "time"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "times",
+      "target": "times"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tolower",
+      "target": "tolower"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "platform",
+      "symbol": "umask",
+      "target": "ps5_umask"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "unlink",
+      "target": "unlink"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "unsetenv",
+      "target": "unsetenv"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "usleep",
+      "target": "usleep"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "vfprintf",
+      "target": "vfprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "vsnprintf",
+      "target": "vsnprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "write",
+      "target": "write"
+    },
+    {
+      "binding": "strong",
+      "module": "ntdll.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "writev",
+      "target": "writev"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "KeAddSystemServiceTable",
+      "target": "KeAddSystemServiceTable"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "KeUserModeCallback",
+      "target": "KeUserModeCallback"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtAddAtom",
+      "target": "NtAddAtom"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtAllocateLocallyUniqueId",
+      "target": "NtAllocateLocallyUniqueId"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtAllocateVirtualMemory",
+      "target": "NtAllocateVirtualMemory"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtClose",
+      "target": "NtClose"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtCreateKey",
+      "target": "NtCreateKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtCreateMutant",
+      "target": "NtCreateMutant"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtCreateUserProcess",
+      "target": "NtCreateUserProcess"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtCurrentTeb",
+      "target": "NtCurrentTeb"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtDelayExecution",
+      "target": "NtDelayExecution"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtDeleteKey",
+      "target": "NtDeleteKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtDeleteValueKey",
+      "target": "NtDeleteValueKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtDeviceIoControlFile",
+      "target": "NtDeviceIoControlFile"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtDuplicateObject",
+      "target": "NtDuplicateObject"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtEnumerateKey",
+      "target": "NtEnumerateKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtEnumerateValueKey",
+      "target": "NtEnumerateValueKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtFreeVirtualMemory",
+      "target": "NtFreeVirtualMemory"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtGetContextThread",
+      "target": "NtGetContextThread"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtGetNlsSectionPtr",
+      "target": "NtGetNlsSectionPtr"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtGetTickCount",
+      "target": "NtGetTickCount"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtInitializeNlsFiles",
+      "target": "NtInitializeNlsFiles"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtMapViewOfSection",
+      "target": "NtMapViewOfSection"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtOpenDirectoryObject",
+      "target": "NtOpenDirectoryObject"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtOpenFile",
+      "target": "NtOpenFile"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtOpenKeyEx",
+      "target": "NtOpenKeyEx"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtOpenSection",
+      "target": "NtOpenSection"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryDefaultLocale",
+      "target": "NtQueryDefaultLocale"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryDirectoryFile",
+      "target": "NtQueryDirectoryFile"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryFullAttributesFile",
+      "target": "NtQueryFullAttributesFile"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryInformationAtom",
+      "target": "NtQueryInformationAtom"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryInformationToken",
+      "target": "NtQueryInformationToken"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryKey",
+      "target": "NtQueryKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryObject",
+      "target": "NtQueryObject"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryPerformanceCounter",
+      "target": "NtQueryPerformanceCounter"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQuerySystemInformation",
+      "target": "NtQuerySystemInformation"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQuerySystemTime",
+      "target": "NtQuerySystemTime"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtQueryValueKey",
+      "target": "NtQueryValueKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtRaiseException",
+      "target": "NtRaiseException"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtReleaseMutant",
+      "target": "NtReleaseMutant"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtResumeThread",
+      "target": "NtResumeThread"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtSetEvent",
+      "target": "NtSetEvent"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtSetValueKey",
+      "target": "NtSetValueKey"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtTerminateProcess",
+      "target": "NtTerminateProcess"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtUnmapViewOfSection",
+      "target": "NtUnmapViewOfSection"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtWaitForMultipleObjects",
+      "target": "NtWaitForMultipleObjects"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtWaitForSingleObject",
+      "target": "NtWaitForSingleObject"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "NtYieldExecution",
+      "target": "NtYieldExecution"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlCustomCPToUnicodeN",
+      "target": "RtlCustomCPToUnicodeN"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlDowncaseUnicodeChar",
+      "target": "RtlDowncaseUnicodeChar"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlGetLastWin32Error",
+      "target": "RtlGetLastWin32Error"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlInitCodePageTable",
+      "target": "RtlInitCodePageTable"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlInitUnicodeString",
+      "target": "RtlInitUnicodeString"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlNtStatusToDosError",
+      "target": "RtlNtStatusToDosError"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlSetLastWin32Error",
+      "target": "RtlSetLastWin32Error"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlUTF8ToUnicodeN",
+      "target": "RtlUTF8ToUnicodeN"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlUnicodeToCustomCPN",
+      "target": "RtlUnicodeToCustomCPN"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlUnicodeToUTF8N",
+      "target": "RtlUnicodeToUTF8N"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "RtlUpcaseUnicodeChar",
+      "target": "RtlUpcaseUnicodeChar"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__assert",
+      "target": "__assert"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_dbg_get_channel_flags",
+      "target": "__wine_dbg_get_channel_flags"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_dbg_header",
+      "target": "__wine_dbg_header"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_dbg_output",
+      "target": "__wine_dbg_output"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_dbg_strdup",
+      "target": "__wine_dbg_strdup"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_get_hdr_luminance",
+      "target": "__wine_ps5_get_hdr_luminance"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_get_specific",
+      "target": "__wine_ps5_get_specific"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_get_vulkan_proc",
+      "target": "__wine_ps5_get_vulkan_proc"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_is_title",
+      "target": "__wine_ps5_is_title"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_key_create",
+      "target": "__wine_ps5_key_create"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_key_delete",
+      "target": "__wine_ps5_key_delete"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "__wine_ps5_set_specific",
+      "target": "__wine_ps5_set_specific"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "asprintf",
+      "target": "asprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atan2",
+      "target": "atan2"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atoi",
+      "target": "atoi"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "calloc",
+      "target": "calloc"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "close",
+      "target": "close"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "cos",
+      "target": "cos"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "custom_loader",
+      "symbol": "dlclose",
+      "target": "pw_public_dlclose"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "custom_loader",
+      "symbol": "dlopen",
+      "target": "pw_public_dlopen"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "custom_loader",
+      "symbol": "dlsym",
+      "target": "pw_public_dlsym"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fclose",
+      "target": "fclose"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fopen",
+      "target": "fopen"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "free",
+      "target": "free"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fscanf",
+      "target": "fscanf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fstat",
+      "target": "fstat"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getenv",
+      "target": "getenv"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "hypot",
+      "target": "hypot"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isprint",
+      "target": "isprint"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isspace",
+      "target": "isspace"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "log",
+      "target": "log"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "malloc",
+      "target": "malloc"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcmp",
+      "target": "memcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcpy",
+      "target": "memcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memmove",
+      "target": "memmove"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memset",
+      "target": "memset"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mmap",
+      "target": "mmap"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "munmap",
+      "target": "munmap"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_add_syscall_debug_info",
+      "target": "ntdll_add_syscall_debug_info"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_get_build_dir",
+      "target": "ntdll_get_build_dir"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_get_data_dir",
+      "target": "ntdll_get_data_dir"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_get_dos_file_name",
+      "target": "ntdll_get_dos_file_name"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_get_unix_file_name",
+      "target": "ntdll_get_unix_file_name"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_set_exception_jmp_buf",
+      "target": "ntdll_set_exception_jmp_buf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_umbstowcs",
+      "target": "ntdll_umbstowcs"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_wcsicmp",
+      "target": "ntdll_wcsicmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_wcsnicmp",
+      "target": "ntdll_wcsnicmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "ntdll_wcstoumbs",
+      "target": "ntdll_wcstoumbs"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "open",
+      "target": "open"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pow",
+      "target": "pow"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_destroy",
+      "target": "pthread_mutex_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_init",
+      "target": "pthread_mutex_init"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_lock",
+      "target": "pthread_mutex_lock"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_unlock",
+      "target": "pthread_mutex_unlock"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_destroy",
+      "target": "pthread_mutexattr_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_init",
+      "target": "pthread_mutexattr_init"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutexattr_settype",
+      "target": "pthread_mutexattr_settype"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_once",
+      "target": "pthread_once"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_rwlock_destroy",
+      "target": "pthread_rwlock_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_rwlock_init",
+      "target": "pthread_rwlock_init"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_rwlock_rdlock",
+      "target": "pthread_rwlock_rdlock"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_rwlock_unlock",
+      "target": "pthread_rwlock_unlock"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_rwlock_wrlock",
+      "target": "pthread_rwlock_wrlock"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "qsort",
+      "target": "qsort"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "realloc",
+      "target": "realloc"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelDebugOutText",
+      "target": "sceKernelDebugOutText"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setjmp",
+      "target": "setjmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sin",
+      "target": "sin"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sincos",
+      "target": "sincos"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "snprintf",
+      "target": "snprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sprintf",
+      "target": "sprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sscanf",
+      "target": "sscanf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcat",
+      "target": "strcat"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strchr",
+      "target": "strchr"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcmp",
+      "target": "strcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcpy",
+      "target": "strcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strdup",
+      "target": "strdup"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strlen",
+      "target": "strlen"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strncmp",
+      "target": "strncmp"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strrchr",
+      "target": "strrchr"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strstr",
+      "target": "strstr"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "toupper",
+      "target": "toupper"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "vsnprintf",
+      "target": "vsnprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "wine_server_call",
+      "target": "wine_server_call"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "wine_server_handle_to_fd",
+      "target": "wine_server_handle_to_fd"
+    },
+    {
+      "binding": "strong",
+      "module": "win32u.so",
+      "owner": "title_ntdll",
+      "symbol": "wine_server_send_fd",
+      "target": "wine_server_send_fd"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__assert",
+      "target": "__assert"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__error",
+      "target": "__error"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__inet_ntop",
+      "target": "__inet_ntop"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__isthreaded",
+      "target": "__isthreaded"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__pthread_cleanup_pop_imp",
+      "target": "__pthread_cleanup_pop_imp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__pthread_cleanup_push_imp",
+      "target": "__pthread_cleanup_push_imp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "native_pthread",
+      "symbol": "__real_pthread_getspecific",
+      "target": "pthread_getspecific"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "native_pthread",
+      "symbol": "__real_pthread_key_create",
+      "target": "pthread_key_create"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "native_pthread",
+      "symbol": "__real_pthread_setspecific",
+      "target": "pthread_setspecific"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__stderrp",
+      "target": "__stderrp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "__stdoutp",
+      "target": "__stdoutp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "_exit",
+      "target": "_exit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "abort",
+      "target": "abort"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "accept",
+      "target": "accept"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "alarm",
+      "target": "alarm"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "asprintf",
+      "target": "asprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atexit",
+      "target": "atexit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "atoi",
+      "target": "atoi"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "bind",
+      "target": "bind"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "calloc",
+      "target": "calloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "chdir",
+      "target": "chdir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "chmod",
+      "target": "chmod"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "clock_gettime",
+      "target": "clock_gettime"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "close",
+      "target": "close"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "closedir",
+      "target": "closedir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "connect",
+      "target": "connect"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "custom_fd",
+      "symbol": "dup",
+      "target": "pw_native_dup_fd"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "dup2",
+      "target": "dup2"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "exit",
+      "target": "exit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_delete_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_get_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "extattr_set_fd",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "fchdir",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fchmod",
+      "target": "fchmod"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fclose",
+      "target": "fclose"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fcntl",
+      "target": "fcntl"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fdopen",
+      "target": "fdopen"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fdopendir",
+      "target": "fdopendir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fflush",
+      "target": "fflush"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fgets",
+      "target": "fgets"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fileno",
+      "target": "fileno"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fopen",
+      "target": "fopen"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "fork",
+      "target": "pw_native_fail_fork"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fprintf",
+      "target": "fprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fputc",
+      "target": "fputc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fputs",
+      "target": "fputs"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fread",
+      "target": "fread"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "free",
+      "target": "free"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "freeifaddrs",
+      "target": "freeifaddrs"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fstat",
+      "target": "fstat"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "platform",
+      "symbol": "fstatfs",
+      "target": "ps5_fstatfs"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fsync",
+      "target": "fsync"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ftruncate",
+      "target": "ftruncate"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "fwrite",
+      "target": "fwrite"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getenv",
+      "target": "getenv"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "geteuid",
+      "target": "geteuid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getifaddrs",
+      "target": "getifaddrs"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpeername",
+      "target": "getpeername"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpid",
+      "target": "getpid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getpwuid",
+      "target": "getpwuid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getrlimit",
+      "target": "getrlimit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getsockname",
+      "target": "getsockname"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getsockopt",
+      "target": "getsockopt"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "gettimeofday",
+      "target": "gettimeofday"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "getuid",
+      "target": "getuid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "gmtime",
+      "target": "gmtime"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "if_nametoindex",
+      "target": "pw_native_fail_if_nametoindex"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ioctl",
+      "target": "ioctl"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isspace",
+      "target": "isspace"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "isxdigit",
+      "target": "isxdigit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "kevent",
+      "target": "kevent"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "kill",
+      "target": "kill"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "kqueue",
+      "target": "kqueue"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "platform",
+      "symbol": "link",
+      "target": "ps5_link"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "listen",
+      "target": "listen"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "localtime",
+      "target": "localtime"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "lseek",
+      "target": "lseek"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "lstat",
+      "target": "lstat"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "malloc",
+      "target": "malloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memchr",
+      "target": "memchr"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcmp",
+      "target": "memcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memcpy",
+      "target": "memcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memmove",
+      "target": "memmove"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "memset",
+      "target": "memset"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mkdir",
+      "target": "mkdir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mktime",
+      "target": "mktime"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "mmap",
+      "target": "mmap"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "munmap",
+      "target": "munmap"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "open",
+      "target": "open"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "perror",
+      "target": "perror"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "physhm_open",
+      "target": "physhm_open"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "physhm_unlink",
+      "target": "physhm_unlink"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pipe",
+      "target": "pipe"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "poll",
+      "target": "poll"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "posix_fadvise",
+      "target": "pw_native_fail_posix_error"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pread",
+      "target": "pread"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_closedir",
+      "target": "ps5_closedir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fdopendir",
+      "target": "ps5_fdopendir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_fstatfs",
+      "target": "ps5_fstatfs"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_calloc",
+      "target": "ps5_heap_calloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_free",
+      "target": "ps5_heap_free"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_malloc",
+      "target": "ps5_heap_malloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_owns",
+      "target": "ps5_heap_owns"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_realloc",
+      "target": "ps5_heap_realloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_heap_stats",
+      "target": "ps5_heap_stats"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_readdir",
+      "target": "ps5_readdir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "ps5_realpath",
+      "target": "ps5_realpath"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_destroy",
+      "target": "pthread_attr_destroy"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_init",
+      "target": "pthread_attr_init"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_attr_setstacksize",
+      "target": "pthread_attr_setstacksize"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_exit",
+      "target": "pthread_exit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_lock",
+      "target": "pthread_mutex_lock"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_trylock",
+      "target": "pthread_mutex_trylock"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_mutex_unlock",
+      "target": "pthread_mutex_unlock"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pthread_sigmask",
+      "target": "pthread_sigmask"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "pwrite",
+      "target": "pwrite"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "read",
+      "target": "read"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "readdir",
+      "target": "readdir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "realloc",
+      "target": "realloc"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "platform",
+      "symbol": "realpath",
+      "target": "ps5_realpath"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "recv",
+      "target": "recv"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "recvmsg",
+      "target": "recvmsg"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "rename",
+      "target": "rename"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "rmdir",
+      "target": "rmdir"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sceKernelDebugOutText",
+      "target": "sceKernelDebugOutText"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "send",
+      "target": "send"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sendmsg",
+      "target": "sendmsg"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setrlimit",
+      "target": "setrlimit"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "setsid",
+      "target": "pw_native_fail_setsid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setsockopt",
+      "target": "setsockopt"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "setvbuf",
+      "target": "setvbuf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "shm_open",
+      "target": "shm_open"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "shm_unlink",
+      "target": "shm_unlink"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "shutdown",
+      "target": "shutdown"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigaction",
+      "target": "sigaction"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigaddset",
+      "target": "sigaddset"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigdelset",
+      "target": "sigdelset"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigemptyset",
+      "target": "sigemptyset"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigfillset",
+      "target": "sigfillset"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "signal",
+      "target": "signal"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sigprocmask",
+      "target": "sigprocmask"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "snprintf",
+      "target": "snprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "socket",
+      "target": "socket"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "socketpair",
+      "target": "socketpair"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sprintf",
+      "target": "sprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sscanf",
+      "target": "sscanf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "stat",
+      "target": "stat"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcasecmp",
+      "target": "strcasecmp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcat",
+      "target": "strcat"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strchr",
+      "target": "strchr"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcmp",
+      "target": "strcmp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strcpy",
+      "target": "strcpy"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strdup",
+      "target": "strdup"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strerror",
+      "target": "strerror"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strlen",
+      "target": "strlen"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strncmp",
+      "target": "strncmp"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strrchr",
+      "target": "strrchr"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strtoul",
+      "target": "strtoul"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "strtoull",
+      "target": "strtoull"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "sysconf",
+      "target": "sysconf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcgetattr",
+      "target": "tcgetattr"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tcsetattr",
+      "target": "tcsetattr"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fail_closed",
+      "symbol": "thr_kill2",
+      "target": "pw_native_fail_minus_one"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "time",
+      "target": "time"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "tolower",
+      "target": "tolower"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "unlink",
+      "target": "unlink"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "usleep",
+      "target": "usleep"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "vfprintf",
+      "target": "vfprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "vsnprintf",
+      "target": "vsnprintf"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "waitpid",
+      "target": "waitpid"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "write",
+      "target": "write"
+    }
+  ],
+  "modules": [
+    "ntdll.so",
+    "win32u.so",
+    "wineserver.so"
+  ],
+  "native_roles": {
+    "child": {},
+    "parent": {
+      "sceSystemServiceAddLocalProcessForPsmKit": "libSceSystemService.prx",
+      "sceSystemServiceKillLocalProcessForPsmKit": "libSceSystemService.prx"
+    }
+  }
+}

@@ -1,0 +1,1800 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -21,7 +21,11 @@
+  * screen keeps its last frame in between.
+  *
+  * A present waits for the frame on a thread and flips it with
+- * sceVideoOutSubmitFlip at the next vblank; FIFO is the only present mode. A
++ * sceVideoOutSubmitFlip at the next vblank. FIFO flips every frame in order,
++ * so an application gets as many frames as the screen shows; MAILBOX
++ * (PS5_VIDEOOUT_MAILBOX=0 leaves it out) flips the latest frame finished at
++ * each vblank and gives the others' buffers back unshown, so an application
++ * draws as fast as it can and nothing tears. A
+  * title may ask VideoOut to show each flip for at least two or three vblanks
+  * (wsi_videoout_set_flip_rate): at 119.88 Hz, three paces 40 fps evenly. An
+  * acquire takes a buffer that is neither on screen, nor waiting for its flip
+@@ -57,6 +61,74 @@
+ #define VIDEOOUT_WIDTH 3840
+ #define VIDEOOUT_HEIGHT 2160
+ #define VIDEOOUT_BUFFERS 5
++/* MAILBOX implementation below is WoWPS5's videoout-mailbox.patch, with
++ * only buffer-set indexing and the independent IMMEDIATE mode added. */
++#define VIDEOOUT_SETS 3
++#define VIDEOOUT_ATTRIBUTE_HDR 0x20000000u
++#define VIDEOOUT_RGB10A2_PQ UINT64_C(0x8100070422000000)
++#define VIDEOOUT_BGR10A2_PQ UINT64_C(0x8100070400000000)
++#define VIDEOOUT_BGR10A2 UINT64_C(0x8100000600000000)
++#define VIDEOOUT_BGR10A2_SRGB UINT64_C(0x8100000000000000)
++#define VIDEOOUT_BGRA16F_PQ UINT64_C(0xc001070700000000)
++#define VIDEOOUT_HDR_CONFIG "/app0/wine/radv-hdr.conf"
++#define VIDEOOUT_FLIP_ASAP 2u
++#define VIDEOOUT_CAPTURE_REQUEST "/app0/wine/radv-capture.req"
++#define VIDEOOUT_CAPTURE_PREFIX "/app0/wine/radv-capture-"
++#define VIDEOOUT_CAPTURE_PATH_BYTES 96
++
++enum videoout_hdr_output_mode {
++   VIDEOOUT_HDR_OUTPUT_TOKEN_ONLY,
++   VIDEOOUT_HDR_OUTPUT_EXPLICIT,
++   VIDEOOUT_HDR_OUTPUT_WILDCARD,
++};
++
++struct videoout_output_status {
++   uint32_t resolution;
++   uint32_t dynamic_range;
++   uint64_t refresh_rate;
++   uint64_t flags;
++   uint64_t reserved[3];
++};
++
++struct videoout_capture_header {
++   char magic[8];
++   uint32_t width, height;
++   uint32_t source_width, source_height;
++   uint32_t format, color_space;
++   uint64_t pixel_format;
++   uint64_t sequence;
++   uint64_t timestamp_ns;
++};
++
++_Static_assert(sizeof(struct videoout_capture_header) == 56, "capture header ABI");
++
++struct videoout_capture_job {
++   struct videoout_capture_header header;
++   char path[VIDEOOUT_CAPTURE_PATH_BYTES];
++   char temporary[VIDEOOUT_CAPTURE_PATH_BYTES];
++   size_t payload_bytes;
++   uint8_t pixels[];
++};
++
++#if defined(__PROSPERO__)
++extern void sceVideoOutModeSetAny_(void *mode, uint32_t size);
++extern void sceVideoOutConfigureOptionsInitialize_(void *options, uint32_t size);
++extern int sceVideoOutConfigureOutputModeEx_(int32_t handle, uint32_t reserved,
++                                           const void *mode, const void *options,
++                                           uint32_t mode_size, uint32_t options_size);
++extern int sceVideoOutGetCurrentOutputMode_(int32_t handle, void *mode);
++extern int sceVideoOutGetOutputStatus(int32_t handle, void *status);
++extern int sceVideoOutSubmitChangeBufferAttribute2(int32_t handle, int32_t set,
++                                                   const void *attribute, const void *option);
++extern int sceVideoOutCursorEnable(int handle, unsigned index, const void *image);
++extern int sceVideoOutCursorDisable(int handle, unsigned index);
++extern int sceVideoOutCursorSetHotSpot(int handle, unsigned index, int x, int y);
++extern int sceVideoOutCursorSetPosition(int handle, unsigned index, int x, int y);
++#endif
++
++PUBLIC int wsi_videoout_cursor_set(const uint32_t *image, int hotspot_x, int hotspot_y);
++PUBLIC int wsi_videoout_cursor_position(int x, int y, int space_width, int space_height);
++PUBLIC int wsi_videoout_cursor_disable(void);
+ /* A 3840x2160 four-byte image in 64 KiB tiles is 30x17 tiles, 31.9 MiB. */
+ #define VIDEOOUT_BUFFER_BYTES (UINT64_C(32) << 20)
+ #define VIDEOOUT_BUFFER_ALIGNMENT (UINT64_C(2) << 20)
+@@ -196,6 +245,8 @@
+    struct wsi_videoout_swapchain *chain;
+    uint32_t buffer;
+    VkFence fence;
++   bool mailbox;
++   bool immediate;
+ };
+ 
+ /* VideoOut, its framebuffers and what each holds, under lock. */
+@@ -205,9 +256,21 @@
+    bool opened;
+    int handle;
+    bool high_frame_rate;
++   bool hdr;
+    bool modes_settled;
+    bool high_mode_offered;
+-   uint8_t *buffers;
++   struct {
++      uint8_t *memory;
++      uint64_t pixel_format;
++   } set[VIDEOOUT_SETS];
++   uint32_t set_count;
++   bool cursor_enabled;
++   const uint32_t *cursor_image;
++   int cursor_hotspot_x, cursor_hotspot_y;
++   bool cursor_positioned;
++   int cursor_x, cursor_y;
++   bool cursor_enable_logged, cursor_position_logged;
++   int cursor_enable_result, cursor_position_result;
+    /* The argument of the latest flip submitted; each flip's is one more. */
+    int64_t flip_argument;
+    struct {
+@@ -217,7 +280,7 @@
+       bool held;
+       /* Presented, its flip waiting for the frame. */
+       bool pending;
+-   } buffer[VIDEOOUT_BUFFERS];
++   } buffer[VIDEOOUT_SETS * VIDEOOUT_BUFFERS];
+    /* The swapchain presenting now; older ones are retired. */
+    struct wsi_videoout_swapchain *current;
+ 
+@@ -226,6 +289,19 @@
+    thrd_t thread;
+    struct wsi_videoout_present queue[VIDEOOUT_BUFFERS * 2];
+    uint32_t queue_head, queue_count;
++
++   /* MAILBOX: the finished frame to flip once the flip before it has shown,
++    * still pending, and the thread that flips it at a vblank. */
++   bool latest_valid;
++   uint32_t latest_buffer;
++   bool latest_thread_started;
++   thrd_t latest_thread;
++   uint64_t stat_start;
++   unsigned stat_presents, stat_mailbox, stat_replaced;
++
++   bool capture_thread_started, capture_writing;
++   thrd_t capture_thread;
++   struct videoout_capture_job *capture_job;
+ };
+ 
+ static struct wsi_videoout_output videoout_output = {
+@@ -246,6 +318,9 @@
+ struct wsi_videoout_swapchain {
+    struct wsi_swapchain base;
+    bool retired;
++   uint32_t set, first;
++   VkFormat format;
++   VkColorSpaceKHR color_space;
+    /* Presents queued and not yet flipped. */
+    uint32_t in_flight;
+    struct wsi_image images[];
+@@ -257,26 +330,339 @@
+ 
+ /* --- VideoOut ------------------------------------------------------------ */
+ 
+-/* The title's param.json: /app0's, or the one PS5_VIDEOOUT_PARAM_JSON names, for a title
+- * without /app0 (an elevated process does not see it). */
++/* The title's launch parameters determine whether PQ buffers are legal. */
+ static bool
+-videoout_title_declares_high_frame_rate(void)
++videoout_title_attribute(const char *key, uint32_t mask, uint32_t *value_out,
++                        const char **source_out, const char **read_out)
+ {
+    const char *const path = getenv("PS5_VIDEOOUT_PARAM_JSON");
+-   FILE *const file = fopen(path != NULL && path[0] != '\0' ? path : "/app0/sce_sys/param.json", "rb");
++   const char *const source = path != NULL && path[0] != '\0' ? path : "/app0/sce_sys/param.json";
++   if (source_out)
++      *source_out = source;
++   if (value_out)
++      *value_out = 0;
++   if (read_out)
++      *read_out = "failed";
++   FILE *const file = fopen(source, "rb");
+    if (file == NULL)
+       return false;
+    char text[16384];
+    const size_t length = fread(text, 1, sizeof(text) - 1, file);
++   const bool read_ok = !ferror(file);
++   if (read_out)
++      *read_out = read_ok ? "ok" : "failed";
+    fclose(file);
+    text[length] = '\0';
+-   const char *at = strstr(text, "\"attribute3\"");
+-   if (at == NULL || (at = strchr(at, ':')) == NULL)
++   const char *at = strstr(text, key);
++   if (at == NULL || (at = strchr(at, ':')) == NULL) {
++      if (read_out && read_ok)
++         *read_out = "ok-attribute-missing";
+       return false;
++   }
+    const unsigned long value = strtoul(at + 1, NULL, 0);
+-   return (value & VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE) == VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE;
++   if (value_out)
++      *value_out = (uint32_t)value;
++   return (value & mask) == mask;
+ }
+ 
++static bool
++videoout_title_declares_high_frame_rate(void)
++{
++   return videoout_title_attribute("\"attribute3\"", VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE, NULL, NULL, NULL);
++}
++
++static bool
++videoout_title_declares_hdr(void)
++{
++   return videoout_title_attribute("\"attribute\"", VIDEOOUT_ATTRIBUTE_HDR, NULL, NULL, NULL);
++}
++
++/* Shared by both format queries: one log for each distinct offered result. */
++static bool
++videoout_surface_hdr_capable(void)
++{
++   uint32_t attribute;
++   const char *source, *read;
++   const bool hdr = videoout_title_attribute("\"attribute\"", VIDEOOUT_ATTRIBUTE_HDR, &attribute, &source, &read);
++   static uint32_t logged;
++   call_once(&videoout_once, videoout_output_init_once);
++   mtx_lock(&videoout_output.lock);
++   if (!(logged & (1u << hdr))) {
++      logged |= 1u << hdr;
++      fprintf(stderr, "wsi/videoout: surface formats hdr_capable=%d (attribute=0x%x source=%s read=%s) count=%u: "
++                      "B8G8R8A8_UNORM/SRGB_NONLINEAR B8G8R8A8_SRGB/SRGB_NONLINEAR%s\n",
++              hdr, attribute, source, read, hdr ? 4u : 2u,
++              hdr ? " A2B10G10R10_UNORM_PACK32/HDR10_ST2084 A2R10G10B10_UNORM_PACK32/HDR10_ST2084" : "");
++   }
++   mtx_unlock(&videoout_output.lock);
++   return hdr;
++}
++
++/* PQ is selected by the registered buffer token. ConfigureOutputModeEx is
++ * diagnostic-only because it also changes HDMI encoding and refresh. */
++static struct {
++   bool changed, saved_valid;
++   uint8_t saved_mode[32];
++   unsigned working_variant;
++} videoout_diagnostic_mode;
++
++static const char *
++videoout_hdr_output_mode_name(enum videoout_hdr_output_mode mode)
++{
++   switch (mode) {
++   case VIDEOOUT_HDR_OUTPUT_EXPLICIT:
++      return "explicit";
++   case VIDEOOUT_HDR_OUTPUT_WILDCARD:
++      return "wildcard";
++   default:
++      return "token-only";
++   }
++}
++
++static int
++videoout_get_output_status_locked(struct videoout_output_status *status)
++{
++   memset(status, 0, sizeof(*status));
++#if defined(__PROSPERO__)
++   return sceVideoOutGetOutputStatus(videoout_output.handle, status);
++#else
++   return 0;
++#endif
++}
++
++static bool
++videoout_color_locked(bool hdr, enum videoout_hdr_output_mode requested)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   if (out->hdr == hdr)
++      return true;
++
++   static const char *const variant_name[] = {
++      "unprobed", "explicit", "wildcard", "token-only",
++   };
++   struct videoout_output_status before, after;
++   const int before_result = videoout_get_output_status_locked(&before);
++   unsigned variant = 3;
++   int result = 0;
++#if defined(__PROSPERO__)
++   if (hdr && requested != VIDEOOUT_HDR_OUTPUT_TOKEN_ONLY) {
++      if (!videoout_diagnostic_mode.changed) {
++         _Alignas(8) uint8_t current[32] = {0};
++         const int current_result = sceVideoOutGetCurrentOutputMode_(out->handle, current);
++         uint32_t current_size = 0;
++         memcpy(&current_size, current, sizeof(current_size));
++         videoout_diagnostic_mode.saved_valid =
++            current_result == 0 && current_size == sizeof(current);
++         if (videoout_diagnostic_mode.saved_valid)
++            memcpy(videoout_diagnostic_mode.saved_mode, current,
++                   sizeof(videoout_diagnostic_mode.saved_mode));
++      }
++
++      const unsigned requested_variant =
++         requested == VIDEOOUT_HDR_OUTPUT_EXPLICIT ? 1 : 2;
++      variant = MAX2(requested_variant, videoout_diagnostic_mode.working_variant);
++      const uint64_t refresh = before_result == 0 && before.refresh_rate != 0
++                                  ? before.refresh_rate
++                                  : out->high_frame_rate ? UINT64_C(13) : UINT64_C(3);
++      for (;;) {
++         if (variant >= 3) {
++            variant = 3;
++            result = 0;
++            break;
++         }
++         _Alignas(8) uint8_t mode[32] = {0};
++         _Alignas(8) uint64_t options[2] = {0};
++         sceVideoOutModeSetAny_(mode, sizeof(mode));
++         if (variant == 1) {
++            mode[4] = 3;  /* YCbCr 4:2:2. */
++            mode[5] = 2;  /* Limited range. */
++            mode[7] = 30; /* 10 bits per component on the HDMI link. */
++            memcpy(mode + 8, &refresh, sizeof(refresh));
++         }
++         mode[6] = 12; /* BT.2020 PQ. */
++         sceVideoOutConfigureOptionsInitialize_(options, sizeof(options));
++         uint64_t words[4];
++         memcpy(words, mode, sizeof(words));
++         videoout_diagnostic_mode.changed = true;
++         result = sceVideoOutConfigureOutputModeEx_(out->handle, 0, mode, options,
++                                                    sizeof(mode), sizeof(options));
++         fprintf(stderr, "wsi/videoout: HDR diagnostic output attempt variant=%s result=0x%08x"
++                         " fields4..7=%02x,%02x,%02x,%02x refresh=0x%016" PRIx64
++                         " resolution=0x%016" PRIx64 " field24=%02x\n",
++                 variant_name[variant], (unsigned)result, mode[4], mode[5], mode[6], mode[7],
++                 words[1], words[2], mode[24]);
++         if (result == 0)
++            break;
++         variant++;
++      }
++      videoout_diagnostic_mode.working_variant = variant;
++   }
++#endif
++   const int after_result = videoout_get_output_status_locked(&after);
++   out->hdr = hdr;
++   fprintf(stderr,
++           "wsi/videoout: %s output mode=%s requested=%s status_before=0x%08x"
++           " dynamic_range=%u refresh=0x%016" PRIx64 " flags=0x%016" PRIx64
++           " status_after=0x%08x dynamic_range=%u refresh=0x%016" PRIx64
++           " flags=0x%016" PRIx64 "\n",
++           hdr ? "HDR" : "SDR",
++           hdr ? variant_name[variant] : "token-only",
++           videoout_hdr_output_mode_name(requested),
++           (unsigned)before_result, before.dynamic_range, before.refresh_rate, before.flags,
++           (unsigned)after_result, after.dynamic_range, after.refresh_rate, after.flags);
++   return result == 0;
++}
++
++static void
++videoout_restore_diagnostic_mode_locked(void)
++{
++   if (!videoout_diagnostic_mode.changed)
++      return;
++   int result = 0;
++#if defined(__PROSPERO__)
++   int exact = -1;
++   if (videoout_diagnostic_mode.saved_valid) {
++      _Alignas(8) uint64_t options[2] = {0};
++      sceVideoOutConfigureOptionsInitialize_(options, sizeof(options));
++      exact = sceVideoOutConfigureOutputModeEx_(
++         videoout_output.handle, 0, videoout_diagnostic_mode.saved_mode, options,
++         sizeof(videoout_diagnostic_mode.saved_mode), sizeof(options));
++   }
++   result = exact == 0 ? 0 : sceVideoOutConfigureOutput(
++      videoout_output.handle,
++      videoout_output.high_frame_rate ? PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE
++                                      : PS5_VIDEO_OUT_MODE_RESTORE,
++      NULL, NULL, NULL);
++   fprintf(stderr,
++           "wsi/videoout: diagnostic output restore exact=0x%08x selector=%u result=0x%08x\n",
++           (unsigned)exact,
++           videoout_output.high_frame_rate ? PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE
++                                           : PS5_VIDEO_OUT_MODE_RESTORE,
++           (unsigned)result);
++#endif
++   videoout_diagnostic_mode.changed = false;
++   videoout_diagnostic_mode.saved_valid = false;
++}
++
++static int
++videoout_cursor_disable_locked(void)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   if (!out->cursor_enabled)
++      return 0;
++   int result = 0;
++#if defined(__PROSPERO__)
++   if (out->handle >= 0)
++      result = sceVideoOutCursorDisable(out->handle, 0);
++#endif
++   fprintf(stderr, "wsi/videoout: cursor disable handle=%d result=0x%08x\n",
++           out->handle, (unsigned)result);
++   out->cursor_enabled = false;
++   out->cursor_image = NULL;
++   out->cursor_positioned = false;
++   return result;
++}
++
++static void
++videoout_shutdown(void)
++{
++   mtx_lock(&videoout_output.lock);
++   videoout_cursor_disable_locked();
++   if (videoout_output.handle >= 0) {
++      videoout_restore_diagnostic_mode_locked();
++   }
++   mtx_unlock(&videoout_output.lock);
++}
++
++PUBLIC int
++wsi_videoout_cursor_set(const uint32_t *image, int hotspot_x, int hotspot_y)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   call_once(&videoout_once, videoout_output_init_once);
++   mtx_lock(&out->lock);
++   if (!out->opened || out->handle < 0) {
++      mtx_unlock(&out->lock);
++      return 1;
++   }
++   if (!image) {
++      mtx_unlock(&out->lock);
++      return -1;
++   }
++   if (out->cursor_enabled && out->cursor_image == image &&
++       out->cursor_hotspot_x == hotspot_x && out->cursor_hotspot_y == hotspot_y) {
++      mtx_unlock(&out->lock);
++      return 0;
++   }
++   videoout_cursor_disable_locked();
++   int result = 0;
++#if defined(__PROSPERO__)
++   result = sceVideoOutCursorEnable(out->handle, 0, image);
++   if (result == 0)
++      result = sceVideoOutCursorSetHotSpot(out->handle, 0, hotspot_x, hotspot_y);
++   if (result != 0)
++      sceVideoOutCursorDisable(out->handle, 0);
++#endif
++   if (!out->cursor_enable_logged || result != out->cursor_enable_result)
++      fprintf(stderr, "wsi/videoout: cursor enable image=%p hotspot=%d,%d handle=%d result=0x%08x\n",
++              (const void *)image, hotspot_x, hotspot_y, out->handle, (unsigned)result);
++   out->cursor_enable_logged = true;
++   out->cursor_enable_result = result;
++   if (result == 0) {
++      out->cursor_enabled = true;
++      out->cursor_image = image;
++      out->cursor_hotspot_x = hotspot_x;
++      out->cursor_hotspot_y = hotspot_y;
++      out->cursor_positioned = false;
++   }
++   mtx_unlock(&out->lock);
++   return result;
++}
++
++PUBLIC int
++wsi_videoout_cursor_position(int x, int y, int space_width, int space_height)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   call_once(&videoout_once, videoout_output_init_once);
++   mtx_lock(&out->lock);
++   if (!out->opened || out->handle < 0 || !out->cursor_enabled || space_width <= 0 || space_height <= 0) {
++      mtx_unlock(&out->lock);
++      return 1;
++   }
++   x = CLAMP((int)((int64_t)x * VIDEOOUT_WIDTH / space_width), 0, VIDEOOUT_WIDTH - 1);
++   y = CLAMP((int)((int64_t)y * VIDEOOUT_HEIGHT / space_height), 0, VIDEOOUT_HEIGHT - 1);
++   if (out->cursor_positioned && out->cursor_x == x && out->cursor_y == y) {
++      mtx_unlock(&out->lock);
++      return 0;
++   }
++   int result = 0;
++#if defined(__PROSPERO__)
++   result = sceVideoOutCursorSetPosition(out->handle, 0, x, y);
++#endif
++   if (!out->cursor_position_logged || result != out->cursor_position_result)
++      fprintf(stderr, "wsi/videoout: cursor position first/change x=%d y=%d result=0x%08x\n",
++              x, y, (unsigned)result);
++   out->cursor_position_logged = true;
++   out->cursor_position_result = result;
++   if (result == 0) {
++      out->cursor_positioned = true;
++      out->cursor_x = x;
++      out->cursor_y = y;
++   }
++   mtx_unlock(&out->lock);
++   return result;
++}
++
++PUBLIC int
++wsi_videoout_cursor_disable(void)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   call_once(&videoout_once, videoout_output_init_once);
++   mtx_lock(&out->lock);
++   const int result = !out->opened || out->handle < 0 ? 1 : videoout_cursor_disable_locked();
++   mtx_unlock(&out->lock);
++   return result;
++}
++
+ /* The refresh period: the median of a few intervals between vblank waits,
+  * the first wait finding the phase. 0 when a wait fails. */
+ static uint64_t
+@@ -312,6 +698,7 @@
+    if (out->opened)
+       return out->handle >= 0;
+    out->opened = true;
++   atexit(videoout_shutdown);
+    out->handle = sceVideoOutOpen(PS5_VIDEO_OUT_USER_SYSTEM, 0, 0, NULL);
+    if (out->handle < 0) {
+       fprintf(stderr, "wsi/videoout: sceVideoOutOpen failed: 0x%08x\n", (unsigned)out->handle);
+@@ -356,7 +743,7 @@
+    call_once(&videoout_once, videoout_output_init_once);
+    mtx_lock(&videoout_output.lock);
+    videoout_flip_rate = rate;
+-   const int result = videoout_output.handle >= 0 && videoout_output.buffers != NULL
++   const int result = videoout_output.handle >= 0 && videoout_output.set_count != 0
+                          ? sceVideoOutSetFlipRate(videoout_output.handle, rate)
+                          : 0;
+    mtx_unlock(&videoout_output.lock);
+@@ -375,13 +762,52 @@
+    mtx_unlock(&videoout_output.lock);
+ }
+ 
+-/* The framebuffers, cleared and registered once per process. Under lock. */
++/* Fixed 4K scanout. Exact tokens reuse their registered set. Once the prior
++ * swapchain is gone, compatible four-byte buffers can instead be retyped in
++ * place; if firmware refuses that, registration of a distinct set remains the
++ * fallback. */
+ static VkResult
+-videoout_register_locked(void)
++videoout_register_locked(uint64_t pixel_format, uint32_t *set_out)
+ {
+    struct wsi_videoout_output *out = &videoout_output;
+-   if (out->buffers)
+-      return VK_SUCCESS;
++   for (uint32_t i = 0; i < out->set_count; i++) {
++      if (out->set[i].pixel_format == pixel_format) {
++         *set_out = i;
++         return VK_SUCCESS;
++      }
++   }
++   if (out->set_count != 0 && out->current == NULL) {
++      while (out->queue_count)
++         cnd_wait(&out->changed, &out->lock);
++      struct videoout_output_status before, after;
++      const int before_result = videoout_get_output_status_locked(&before);
++      uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES] = {0};
++      sceVideoOutSetBufferAttribute2(attribute, pixel_format,
++                                     PS5_VIDEO_OUT_TILING_64KB_R_X,
++                                     VIDEOOUT_WIDTH, VIDEOOUT_HEIGHT, 0, 0, 0);
++      int result = 0;
++#if defined(__PROSPERO__)
++      result = sceVideoOutSubmitChangeBufferAttribute2(out->handle, 0, attribute, NULL);
++#endif
++      const int after_result = videoout_get_output_status_locked(&after);
++      fprintf(stderr,
++              "wsi/videoout: scanout attribute mode=retype set=0 token=0x%016" PRIx64
++              " result=0x%08x status_before=0x%08x dynamic_range=%u"
++              " refresh=0x%016" PRIx64 " flags=0x%016" PRIx64
++              " status_after=0x%08x dynamic_range=%u refresh=0x%016" PRIx64
++              " flags=0x%016" PRIx64 "\n",
++              pixel_format, (unsigned)result, (unsigned)before_result,
++              before.dynamic_range, before.refresh_rate, before.flags,
++              (unsigned)after_result, after.dynamic_range, after.refresh_rate, after.flags);
++      if (result == 0) {
++         out->set[0].pixel_format = pixel_format;
++         *set_out = 0;
++         return VK_SUCCESS;
++      }
++   }
++   if (out->set_count == VIDEOOUT_SETS)
++      return VK_ERROR_INITIALIZATION_FAILED;
++   const uint32_t set = out->set_count;
+    if (!videoout_open_locked())
+       return VK_ERROR_INITIALIZATION_FAILED;
+ 
+@@ -412,21 +838,46 @@
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ #endif
+ 
++   struct videoout_output_status before, after;
++   const int before_result = videoout_get_output_status_locked(&before);
+-   int result = sceVideoOutSetFlipRate(out->handle, videoout_flip_rate);
++   int result = set == 0 ? sceVideoOutSetFlipRate(out->handle, videoout_flip_rate) : 0;
+    struct ps5_video_out_buffer registered[VIDEOOUT_BUFFERS];
+    for (uint32_t i = 0; i < VIDEOOUT_BUFFERS; i++)
+       registered[i] = (struct ps5_video_out_buffer){.data = buffers + i * VIDEOOUT_BUFFER_BYTES};
+    uint8_t attribute[PS5_VIDEO_OUT_ATTRIBUTE_BYTES] = {0};
+-   sceVideoOutSetBufferAttribute2(attribute, PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR,
++   sceVideoOutSetBufferAttribute2(attribute, pixel_format,
+                                   PS5_VIDEO_OUT_TILING_64KB_R_X, VIDEOOUT_WIDTH, VIDEOOUT_HEIGHT, 0, 0, 0);
+    if (result == 0)
+-      result = sceVideoOutRegisterBuffers2(out->handle, 0, 0, registered, VIDEOOUT_BUFFERS, attribute, 0, NULL);
++      result = sceVideoOutRegisterBuffers2(out->handle, set, set * VIDEOOUT_BUFFERS,
++                                          registered, VIDEOOUT_BUFFERS, attribute, 0, NULL);
++   const int after_result = videoout_get_output_status_locked(&after);
++   fprintf(stderr,
++           "wsi/videoout: scanout attribute mode=register set=%u token=0x%016" PRIx64
++           " result=0x%08x status_before=0x%08x dynamic_range=%u"
++           " refresh=0x%016" PRIx64 " flags=0x%016" PRIx64
++           " status_after=0x%08x dynamic_range=%u refresh=0x%016" PRIx64
++           " flags=0x%016" PRIx64 "\n",
++           set, pixel_format, (unsigned)result, (unsigned)before_result,
++           before.dynamic_range, before.refresh_rate, before.flags,
++           (unsigned)after_result, after.dynamic_range, after.refresh_rate, after.flags);
+    if (result != 0) {
+       fprintf(stderr, "wsi/videoout: the framebuffers were not registered: 0x%08x\n", (unsigned)result);
+-      /* The memory stays: VideoOut may hold a buffer it was given. */
++      /* No buffer was registered: release the failed set's allocation. */
++#if defined(__PROSPERO__)
++      sceKernelMunmap(buffers, bytes);
++      sceKernelReleaseDirectMemory(physical, bytes);
++#else
++      munmap(buffers, bytes);
++#endif
+       return VK_ERROR_INITIALIZATION_FAILED;
+    }
+-   out->buffers = buffers;
++   fprintf(stderr, "wsi/videoout: %ux%u framebuffers registered as set %u, buffers %u-%u pixel_format=0x%016" PRIx64 "\n",
++           VIDEOOUT_WIDTH, VIDEOOUT_HEIGHT, set, set * VIDEOOUT_BUFFERS,
++           (set + 1) * VIDEOOUT_BUFFERS - 1, pixel_format);
++   out->set[set].memory = buffers;
++   out->set[set].pixel_format = pixel_format;
++   out->set_count++;
++   *set_out = set;
+    return VK_SUCCESS;
+ }
+ 
+@@ -439,6 +890,300 @@
+    return (int64_t)status[PS5_VIDEO_OUT_FLIP_STATUS_SHOWN_ARGUMENT];
+ }
+ 
++/* PS5_VIDEOOUT_STATS=1: the swapchains' and the flip thread's steps, and every buffer's state. */
++static void
++videoout_trace(const char *what, const void *chain)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   if (!getenv("PS5_VIDEOOUT_STATS"))
++      return;
++   char states[VIDEOOUT_SETS * VIDEOOUT_BUFFERS * 24 + 1];
++   int used = 0;
++   for (uint32_t i = 0; i < out->set_count * VIDEOOUT_BUFFERS; i++)
++      used += snprintf(states + used, sizeof(states) - used, " %u:%lld%s%s", i, (long long)out->buffer[i].argument,
++                       out->buffer[i].held ? "H" : "", out->buffer[i].pending ? "P" : "");
++   fprintf(stderr, "wsi/videoout: %s chain %p current %p queue %u flip %lld latest %d buffers%s\n", what, chain,
++           (void *)out->current, out->queue_count, (long long)out->flip_argument,
++           out->latest_valid ? (int)out->latest_buffer : -1, states);
++}
++
++/* Flip a buffer at the next vblank, under lock. */
++static void
++videoout_submit_locked(uint32_t buffer, bool immediate)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   const int64_t argument = out->flip_argument + 1;
++   const int result = sceVideoOutSubmitFlip(out->handle, (int32_t)buffer,
++                                           immediate ? VIDEOOUT_FLIP_ASAP : PS5_VIDEO_OUT_FLIP_VSYNC, argument);
++   if (result == 0) {
++      out->flip_argument = argument;
++      out->buffer[buffer].argument = argument;
++   } else {
++      fprintf(stderr, "wsi/videoout: sceVideoOutSubmitFlip(%u) failed: 0x%08x\n", buffer, (unsigned)result);
++   }
++   out->buffer[buffer].pending = false;
++}
++
++/* MAILBOX: a frame that was finished while the flip before it had yet to show
++ * is flipped here, after the vblank that showed that one. VideoOut queues
++ * flips a vblank apart, so flipping it at once would be FIFO again. */
++static int
++videoout_latest_thread(void *data)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   for (;;) {
++      mtx_lock(&out->lock);
++      const int handle = out->opened ? out->handle : -1;
++      mtx_unlock(&out->lock);
++      if (handle < 0 || sceVideoOutWaitVblank(handle) != 0) {
++         os_time_sleep(5000);
++         continue;
++      }
++      mtx_lock(&out->lock);
++      /* The flip status follows the vblank by a moment. */
++      for (unsigned tries = 0; tries < 8 && out->latest_valid &&
++                               videoout_shown_argument_locked() < out->flip_argument; tries++) {
++         mtx_unlock(&out->lock);
++         os_time_sleep(200);
++         mtx_lock(&out->lock);
++      }
++      if (out->latest_valid && videoout_shown_argument_locked() >= out->flip_argument) {
++         videoout_submit_locked(out->latest_buffer, false);
++         out->latest_valid = false;
++      }
++      /* A buffer came off the screen at this vblank. */
++      cnd_broadcast(&out->changed);
++      mtx_unlock(&out->lock);
++   }
++   return 0;
++}
++
++#if defined(__PROSPERO__)
++static int
++videoout_capture_writer(void *data)
++{
++   struct wsi_videoout_output *out = data;
++   for (;;) {
++      mtx_lock(&out->lock);
++      while (!out->capture_job)
++         cnd_wait(&out->changed, &out->lock);
++      struct videoout_capture_job *job = out->capture_job;
++      out->capture_job = NULL;
++      out->capture_writing = true;
++      mtx_unlock(&out->lock);
++
++      bool written = false;
++      FILE *file = fopen(job->temporary, "wb");
++      if (file) {
++         const bool header_ok =
++            fwrite(&job->header, 1, sizeof(job->header), file) == sizeof(job->header);
++         const bool pixels_ok =
++            header_ok && fwrite(job->pixels, 1, job->payload_bytes, file) == job->payload_bytes;
++         const int close_result = fclose(file);
++         written = pixels_ok && close_result == 0 && rename(job->temporary, job->path) == 0;
++      }
++      if (!written)
++         remove(job->temporary);
++
++      const size_t bytes = sizeof(job->header) + job->payload_bytes;
++      if (written)
++         fprintf(stderr, "wsi/videoout: capture seq=%" PRIu64 " file=%s format=%u bytes=%zu\n",
++                 job->header.sequence, job->path, job->header.format, bytes);
++      else
++         fprintf(stderr, "wsi/videoout: capture failed seq=%" PRIu64 " file=%s\n",
++                 job->header.sequence, job->path);
++      free(job);
++
++      mtx_lock(&out->lock);
++      out->capture_writing = false;
++      cnd_broadcast(&out->changed);
++      mtx_unlock(&out->lock);
++   }
++   return 0;
++}
++
++static unsigned
++videoout_capture_read_request(void)
++{
++   FILE *file = fopen(VIDEOOUT_CAPTURE_REQUEST, "rb");
++   if (!file)
++      return 0;
++   unsigned scale = 4;
++   char line[64];
++   while (fgets(line, sizeof(line), file)) {
++      char *at = line;
++      while (*at == ' ' || *at == '\t')
++         at++;
++      if (strncmp(at, "scale=", 6) == 0) {
++         const unsigned requested = (unsigned)strtoul(at + 6, NULL, 0);
++         if (requested == 2 || requested == 4 || requested == 8)
++            scale = requested;
++         else
++            fprintf(stderr, "wsi/videoout: capture request invalid scale=%u fallback=4\n",
++                    requested);
++      }
++   }
++   const bool read_ok = !ferror(file);
++   fclose(file);
++   if (!read_ok || remove(VIDEOOUT_CAPTURE_REQUEST) != 0) {
++      fprintf(stderr, "wsi/videoout: capture request could not be consumed\n");
++      return 0;
++   }
++   return scale;
++}
++
++/* Build the 512x128 64KB_R_X macro-tile map from RADV's AddrLib once. This
++ * avoids hundreds of thousands of AddrLib calls in the pre-flip readback. */
++static uint16_t *videoout_capture_tilemap;
++static bool videoout_capture_tilemap_attempted;
++
++static uint64_t
++videoout_capture_tiled_offset(const struct wsi_device *wsi, VkImage image,
++                              uint32_t x, uint32_t y)
++{
++   if (!videoout_capture_tilemap)
++      return wsi->videoout_image_offset(image, x, y);
++   const uint64_t word =
++      (uint64_t)(y >> 7) * 128 * VIDEOOUT_WIDTH +
++      (uint64_t)(x >> 9) * (512 * 128) +
++      videoout_capture_tilemap[(y & 127) * 512 + (x & 511)];
++   return word * sizeof(uint32_t);
++}
++
++static void
++videoout_capture_prepare_tilemap(const struct wsi_device *wsi, VkImage image)
++{
++   if (videoout_capture_tilemap_attempted || !wsi->videoout_image_offset)
++      return;
++   videoout_capture_tilemap_attempted = true;
++   uint16_t *tilemap = malloc(512 * 128 * sizeof(*tilemap));
++   if (!tilemap)
++      return;
++   for (uint32_t y = 0; y < 128; y++) {
++      for (uint32_t x = 0; x < 512; x++) {
++         const uint64_t offset = wsi->videoout_image_offset(image, x, y);
++         if ((offset & 3) || offset / 4 > UINT16_MAX) {
++            free(tilemap);
++            return;
++         }
++         tilemap[y * 512 + x] = (uint16_t)(offset / 4);
++      }
++   }
++   videoout_capture_tilemap = tilemap;
++   static const uint16_t check[4][2] = {
++      {480, 270}, {1440, 270}, {480, 1080}, {3360, 1080},
++   };
++   for (uint32_t i = 0; i < ARRAY_SIZE(check); i++) {
++      if (videoout_capture_tiled_offset(wsi, image, check[i][0], check[i][1]) !=
++          wsi->videoout_image_offset(image, check[i][0], check[i][1])) {
++         free(videoout_capture_tilemap);
++         videoout_capture_tilemap = NULL;
++         fprintf(stderr, "wsi/videoout: capture tiled LUT rejected; using AddrLib per pixel\n");
++         return;
++      }
++   }
++}
++
++static void
++videoout_capture_presented(struct wsi_videoout_output *out,
++                           struct wsi_videoout_swapchain *chain,
++                           const struct wsi_videoout_present *present)
++{
++   static uint64_t check_ns, sequence;
++   static unsigned pending_scale;
++   const uint64_t now = os_time_get_nano();
++
++   mtx_lock(&out->lock);
++   const bool busy = out->capture_writing || out->capture_job != NULL;
++   mtx_unlock(&out->lock);
++   if (!pending_scale) {
++      if (now - check_ns < UINT64_C(1000000000) || busy)
++         return;
++      check_ns = now;
++      pending_scale = videoout_capture_read_request();
++      if (pending_scale && chain->base.wsi->videoout_image_offset)
++         videoout_capture_prepare_tilemap(chain->base.wsi, chain->images[0].image);
++      return; /* The next presented frame is the one captured. */
++   }
++   if (busy)
++      return;
++   if (!chain->base.wsi->videoout_image_offset) {
++      fprintf(stderr, "wsi/videoout: capture unavailable: no tiled-address callback\n");
++      pending_scale = 0;
++      return;
++   }
++
++   const unsigned scale = pending_scale;
++   pending_scale = 0;
++   const uint32_t width = VIDEOOUT_WIDTH / scale;
++   const uint32_t height = VIDEOOUT_HEIGHT / scale;
++   const size_t payload_bytes = (size_t)width * height * sizeof(uint32_t);
++   struct videoout_capture_job *job = malloc(sizeof(*job) + payload_bytes);
++   if (!job) {
++      fprintf(stderr, "wsi/videoout: capture allocation failed bytes=%zu\n", payload_bytes);
++      return;
++   }
++   memset(job, 0, sizeof(*job));
++   memcpy(job->header.magic, "PS5CAP1", 7);
++   job->header.width = width;
++   job->header.height = height;
++   job->header.source_width = VIDEOOUT_WIDTH;
++   job->header.source_height = VIDEOOUT_HEIGHT;
++   job->header.format = chain->format;
++   job->header.color_space = chain->color_space;
++   job->header.pixel_format = out->set[chain->set].pixel_format;
++   job->header.sequence = ++sequence;
++   job->header.timestamp_ns = now;
++   job->payload_bytes = payload_bytes;
++   if (snprintf(job->path, sizeof(job->path), VIDEOOUT_CAPTURE_PREFIX "%" PRIu64 ".bin",
++                sequence) >= (int)sizeof(job->path) ||
++       snprintf(job->temporary, sizeof(job->temporary), VIDEOOUT_CAPTURE_PREFIX
++                "%" PRIu64 ".tmp", sequence) >= (int)sizeof(job->temporary)) {
++      free(job);
++      return;
++   }
++
++   const uint32_t index = present->buffer - chain->first;
++   const uint8_t *source = out->set[chain->set].memory +
++                           (uint64_t)index * VIDEOOUT_BUFFER_BYTES;
++   for (size_t at = 0; at < VIDEOOUT_BUFFER_BYTES; at += 64)
++      _mm_clflush(source + at);
++   _mm_mfence();
++
++   uint32_t *pixels = (uint32_t *)job->pixels;
++   for (uint32_t y = 0; y < height; y++) {
++      for (uint32_t x = 0; x < width; x++) {
++         const uint64_t offset = videoout_capture_tiled_offset(
++            chain->base.wsi, chain->images[index].image, x * scale, y * scale);
++         if (offset + sizeof(uint32_t) > VIDEOOUT_BUFFER_BYTES) {
++            fprintf(stderr, "wsi/videoout: capture tiled address out of range x=%u y=%u"
++                            " offset=0x%" PRIx64 "\n",
++                    x * scale, y * scale, offset);
++            free(job);
++            return;
++         }
++         memcpy(&pixels[(size_t)y * width + x], source + offset, sizeof(uint32_t));
++      }
++   }
++
++   mtx_lock(&out->lock);
++   bool queued = !out->capture_writing && out->capture_job == NULL;
++   if (queued && !out->capture_thread_started) {
++      queued = thrd_create(&out->capture_thread, videoout_capture_writer, out) == thrd_success;
++      out->capture_thread_started = queued;
++   }
++   if (queued) {
++      out->capture_job = job;
++      cnd_broadcast(&out->changed);
++   }
++   mtx_unlock(&out->lock);
++   if (!queued) {
++      fprintf(stderr, "wsi/videoout: capture skipped: writer busy\n");
++      free(job);
++   }
++}
++#endif
++
+ /* The flip thread: each present's flip once its frame is done, in order. */
+ static int
+ videoout_flip_thread(void *data)
+@@ -453,20 +972,93 @@
+ 
+       struct wsi_videoout_swapchain *chain = present.chain;
+       const struct wsi_device *wsi = chain->base.wsi;
+-      wsi->WaitForFences(chain->base.device, 1, &present.fence, VK_TRUE, UINT64_MAX);
++      {
++         /* a frame that takes over two seconds is said, once a wait */
++         VkResult waited = wsi->WaitForFences(chain->base.device, 1, &present.fence, VK_TRUE, UINT64_C(2000000000));
++         if (waited == VK_TIMEOUT) {
++            mtx_lock(&out->lock);
++            videoout_trace("the flip thread has waited 2 s for a frame of", chain);
++            mtx_unlock(&out->lock);
++            waited = wsi->WaitForFences(chain->base.device, 1, &present.fence, VK_TRUE, UINT64_MAX);
++         }
++         if (waited != VK_SUCCESS && getenv("PS5_VIDEOOUT_STATS"))
++            fprintf(stderr, "wsi/videoout: the wait for a frame ended with %d\n", (int)waited);
++#if defined(__PROSPERO__)
++         if (waited == VK_SUCCESS)
++            videoout_capture_presented(out, chain, &present);
++
++         static uint64_t hdr_sample_ns;
++         if (waited != VK_SUCCESS ||
++             out->set[chain->set].pixel_format == PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR) {
++            hdr_sample_ns = 0;
++         } else {
++            const uint64_t now = os_time_get_nano();
++            if (hdr_sample_ns == 0) {
++               hdr_sample_ns = now;
++            } else if (now - hdr_sample_ns >= UINT64_C(10000000000) &&
++                       wsi->videoout_image_offset) {
++               const uint32_t index = present.buffer - chain->first;
++               const uint8_t *source = out->set[chain->set].memory +
++                                       (uint64_t)index * VIDEOOUT_BUFFER_BYTES;
++               static const uint16_t coords[8][2] = {
++                  {480, 270}, {1440, 270}, {2400, 270}, {3360, 270},
++                  {480, 1080}, {1440, 1080}, {2400, 1080}, {3360, 1080},
++               };
++               uint64_t offsets[8];
++               uint32_t samples[8];
++               for (uint32_t i = 0; i < ARRAY_SIZE(coords); i++) {
++                  offsets[i] = videoout_capture_tiled_offset(
++                     wsi, chain->images[index].image, coords[i][0], coords[i][1]);
++                  _mm_clflush(source + offsets[i]);
++               }
++               _mm_mfence();
++               for (uint32_t i = 0; i < ARRAY_SIZE(coords); i++)
++                  memcpy(&samples[i], source + offsets[i], sizeof(samples[i]));
++               fprintf(stderr, "wsi/videoout: HDR scanout samples interval_s=10 at"
++                               " (480,270) (1440,270) (2400,270) (3360,270)"
++                               " (480,1080) (1440,1080) (2400,1080) (3360,1080):"
++                               " %08x %08x %08x %08x %08x %08x %08x %08x\n",
++                       samples[0], samples[1], samples[2], samples[3],
++                       samples[4], samples[5], samples[6], samples[7]);
++               hdr_sample_ns = now;
++            }
++         }
++#endif
++      }
+ 
+       mtx_lock(&out->lock);
+-      const int64_t argument = out->flip_argument + 1;
+-      const int result = sceVideoOutSubmitFlip(out->handle, (int32_t)present.buffer, PS5_VIDEO_OUT_FLIP_VSYNC,
+-                                               argument);
+-      if (result == 0) {
+-         out->flip_argument = argument;
+-         out->buffer[present.buffer].argument = argument;
++      /* A frame that waited for a vblank is behind this one: never shown, its
++       * buffer is free again. */
++      if (out->latest_valid) {
++         out->buffer[out->latest_buffer].pending = false;
++         out->latest_valid = false;
++         out->stat_replaced++;
++      }
++      /* PS5_VIDEOOUT_STATS=1: what became of the frames, every ten seconds. */
++      out->stat_presents++;
++      out->stat_mailbox += present.mailbox;
++      if (out->stat_start == 0)
++         out->stat_start = os_time_get_nano();
++      else if (os_time_get_nano() - out->stat_start >= UINT64_C(10000000000)) {
++         if (getenv("PS5_VIDEOOUT_STATS"))
++            fprintf(stderr, "wsi/videoout: in 10 s: %u frames presented (%u MAILBOX), %u of them replaced before a refresh\n",
++                    out->stat_presents, out->stat_mailbox, out->stat_replaced);
++         out->stat_presents = out->stat_mailbox = out->stat_replaced = 0;
++         out->stat_start = os_time_get_nano();
++      }
++      if (present.mailbox && videoout_shown_argument_locked() < out->flip_argument) {
++         if (!out->latest_thread_started &&
++             thrd_create(&out->latest_thread, videoout_latest_thread, NULL) == thrd_success)
++            out->latest_thread_started = true;
++         if (out->latest_thread_started) {
++            out->latest_valid = true;
++            out->latest_buffer = present.buffer;
++         } else {
++            videoout_submit_locked(present.buffer, false);
++         }
+       } else {
+-         fprintf(stderr, "wsi/videoout: sceVideoOutSubmitFlip(%u) failed: 0x%08x\n", present.buffer,
+-                 (unsigned)result);
++         videoout_submit_locked(present.buffer, present.immediate);
+       }
+-      out->buffer[present.buffer].pending = false;
+       out->queue_head = (out->queue_head + 1) % ARRAY_SIZE(out->queue);
+       out->queue_count--;
+       chain->in_flight--;
+@@ -678,6 +1257,13 @@
+ 
+ /* --- Surfaces ------------------------------------------------------------ */
+ 
++static bool
++videoout_mailbox_offered(void)
++{
++   const char *setting = getenv("PS5_VIDEOOUT_MAILBOX");
++   return !(setting && setting[0] == '0');
++}
++
+ static VkResult
+ videoout_surface_get_support(VkIcdSurfaceBase *surface, struct wsi_device *wsi_device, uint32_t queueFamilyIndex,
+                              VkBool32 *pSupported)
+@@ -694,7 +1280,9 @@
+    VkSurfaceCapabilitiesKHR *const c = &caps->surfaceCapabilities;
+    const VkSurfacePresentModeKHR *present_mode = vk_find_struct_const(info_next, SURFACE_PRESENT_MODE_KHR);
+ 
+-   c->minImageCount = 2;
++   /* MAILBOX: one on screen, one flipped and yet to show, one finished and
++    * waiting, one being drawn. */
++   c->minImageCount = present_mode && present_mode->presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? 4 : 2;
+    c->maxImageCount = VIDEOOUT_BUFFERS;
+    c->currentExtent = videoout_extent;
+    c->minImageExtent = videoout_extent;
+@@ -728,16 +1316,26 @@
+          break;
+       }
+       case VK_STRUCTURE_TYPE_SURFACE_PRESENT_MODE_COMPATIBILITY_KHR: {
+-         /* FIFO only. */
++         /* FIFO and MAILBOX are the same swapchain: the mode is a present's. */
+          VkSurfacePresentModeCompatibilityKHR *compat = (void *)ext;
++         const bool both = videoout_mailbox_offered() && present_mode &&
++                           (present_mode->presentMode == VK_PRESENT_MODE_FIFO_KHR ||
++                            present_mode->presentMode == VK_PRESENT_MODE_MAILBOX_KHR);
+          if (compat->pPresentModes) {
+             if (compat->presentModeCount) {
+                assert(present_mode);
++               const uint32_t room = compat->presentModeCount;
+                compat->pPresentModes[0] = present_mode->presentMode;
+                compat->presentModeCount = 1;
++               if (both && room > 1) {
++                  compat->pPresentModes[1] = present_mode->presentMode == VK_PRESENT_MODE_FIFO_KHR
++                                                ? VK_PRESENT_MODE_MAILBOX_KHR
++                                                : VK_PRESENT_MODE_FIFO_KHR;
++                  compat->presentModeCount = 2;
++               }
+             }
+          } else {
+-            compat->presentModeCount = 1;
++            compat->presentModeCount = both ? 2 : 1;
+          }
+          break;
+       }
+@@ -757,6 +1355,7 @@
+ videoout_surface_get_formats(VkIcdSurfaceBase *surface, struct wsi_device *wsi_device, uint32_t *pSurfaceFormatCount,
+                              VkSurfaceFormatKHR *pSurfaceFormats)
+ {
++   const bool hdr = videoout_surface_hdr_capable();
+    VK_OUTARRAY_MAKE_TYPED(VkSurfaceFormatKHR, out, pSurfaceFormats, pSurfaceFormatCount);
+    for (unsigned i = 0; i < ARRAY_SIZE(videoout_formats); i++) {
+       vk_outarray_append_typed(VkSurfaceFormatKHR, &out, f)
+@@ -765,6 +1364,16 @@
+          f->colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+       }
+    }
++   if (hdr) {
++      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, f) {
++         f->format = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
++         f->colorSpace = VK_COLOR_SPACE_HDR10_ST2084_EXT;
++      }
++      vk_outarray_append_typed(VkSurfaceFormatKHR, &out, f) {
++         f->format = VK_FORMAT_A2R10G10B10_UNORM_PACK32;
++         f->colorSpace = VK_COLOR_SPACE_HDR10_ST2084_EXT;
++      }
++   }
+    return vk_outarray_status(&out);
+ }
+ 
+@@ -772,6 +1381,7 @@
+ videoout_surface_get_formats2(VkIcdSurfaceBase *surface, struct wsi_device *wsi_device, const void *info_next,
+                               uint32_t *pSurfaceFormatCount, VkSurfaceFormat2KHR *pSurfaceFormats)
+ {
++   const bool hdr = videoout_surface_hdr_capable();
+    VK_OUTARRAY_MAKE_TYPED(VkSurfaceFormat2KHR, out, pSurfaceFormats, pSurfaceFormatCount);
+    for (unsigned i = 0; i < ARRAY_SIZE(videoout_formats); i++) {
+       vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, f)
+@@ -781,6 +1391,14 @@
+          f->surfaceFormat.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+       }
+    }
++   if (hdr) {
++      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, f) {
++         f->surfaceFormat = (VkSurfaceFormatKHR){VK_FORMAT_A2B10G10R10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT};
++      }
++      vk_outarray_append_typed(VkSurfaceFormat2KHR, &out, f) {
++         f->surfaceFormat = (VkSurfaceFormatKHR){VK_FORMAT_A2R10G10B10_UNORM_PACK32, VK_COLOR_SPACE_HDR10_ST2084_EXT};
++      }
++   }
+    return vk_outarray_status(&out);
+ }
+ 
+@@ -791,6 +1409,12 @@
+    VK_OUTARRAY_MAKE_TYPED(VkPresentModeKHR, out, pPresentModes, pPresentModeCount);
+    vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
+       *mode = VK_PRESENT_MODE_FIFO_KHR;
++   if (videoout_mailbox_offered()) {
++      vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
++         *mode = VK_PRESENT_MODE_MAILBOX_KHR;
++   }
++   vk_outarray_append_typed(VkPresentModeKHR, &out, mode)
++      *mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    return vk_outarray_status(&out);
+ }
+ 
+@@ -814,7 +1438,7 @@
+    const struct wsi_videoout_swapchain *chain = (const struct wsi_videoout_swapchain *)wsi_chain;
+    const struct wsi_device *wsi = wsi_chain->wsi;
+    const uint32_t index = image - chain->images;
+-   void *const pointer = videoout_output.buffers + index * VIDEOOUT_BUFFER_BYTES;
++   void *const pointer = videoout_output.set[chain->set].memory + index * VIDEOOUT_BUFFER_BYTES;
+ 
+    VkMemoryRequirements reqs;
+    wsi->GetImageMemoryRequirements(wsi_chain->device, image->image, &reqs);
+@@ -876,21 +1500,21 @@
+  * last, nor on screen; the one flipped longest ago. UINT32_MAX when none is,
+  * with *vblank set when only a flip still to show holds one. */
+ static uint32_t
+-videoout_free_buffer_locked(uint32_t count, bool *vblank)
++videoout_free_buffer_locked(uint32_t first, uint32_t count, bool *vblank)
+ {
+    struct wsi_videoout_output *out = &videoout_output;
+    const int64_t shown = videoout_shown_argument_locked();
+ 
+    /* On screen: the buffer of the latest flip shown. */
+    uint32_t on_screen = UINT32_MAX;
+-   for (uint32_t i = 0; i < VIDEOOUT_BUFFERS; i++)
++   for (uint32_t i = 0; i < out->set_count * VIDEOOUT_BUFFERS; i++)
+       if (out->buffer[i].argument != 0 && out->buffer[i].argument <= shown &&
+           (on_screen == UINT32_MAX || out->buffer[i].argument > out->buffer[on_screen].argument))
+          on_screen = i;
+ 
+    uint32_t best = UINT32_MAX;
+    *vblank = false;
+-   for (uint32_t i = 0; i < count; i++) {
++   for (uint32_t i = first; i < first + count; i++) {
+       if (out->buffer[i].held || out->buffer[i].pending || i == on_screen)
+          continue;
+       if (out->buffer[i].argument > shown) {
+@@ -918,11 +1542,11 @@
+          return VK_ERROR_OUT_OF_DATE_KHR;
+       }
+       bool vblank;
+-      const uint32_t index = videoout_free_buffer_locked(chain->base.image_count, &vblank);
++      const uint32_t index = videoout_free_buffer_locked(chain->first, chain->base.image_count, &vblank);
+       if (index != UINT32_MAX) {
+          out->buffer[index].held = true;
+          mtx_unlock(&out->lock);
+-         *image_index = index;
++         *image_index = index - chain->first;
+          return VK_SUCCESS;
+       }
+       if (info->timeout == 0) {
+@@ -930,15 +1554,20 @@
+          return VK_NOT_READY;
+       }
+       if (os_time_get_nano() >= deadline) {
++         videoout_trace("acquire timed out on", chain);
+          mtx_unlock(&out->lock);
+          return VK_TIMEOUT;
+       }
+-      if (vblank) {
++      if (vblank && chain->base.present_mode == VK_PRESENT_MODE_FIFO_KHR) {
+          /* A flip still to show frees one at a vblank. */
+          const int handle = out->handle;
+          mtx_unlock(&out->lock);
+          sceVideoOutWaitVblank(handle);
+          mtx_lock(&out->lock);
++      } else if (vblank && chain->base.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
++         mtx_unlock(&out->lock);
++         os_time_sleep(200);
++         mtx_lock(&out->lock);
+       } else {
+          /* A flip waiting for its frame, or an image held: wait for either. */
+          struct timespec until;
+@@ -953,10 +1582,11 @@
+ static VkResult
+ videoout_swapchain_release_images(struct wsi_swapchain *wsi_chain, uint32_t count, const uint32_t *indices)
+ {
++   const struct wsi_videoout_swapchain *chain = (const struct wsi_videoout_swapchain *)wsi_chain;
+    struct wsi_videoout_output *out = &videoout_output;
+    mtx_lock(&out->lock);
+    for (uint32_t i = 0; i < count; i++)
+-      out->buffer[indices[i]].held = false;
++      out->buffer[chain->first + indices[i]].held = false;
+    cnd_broadcast(&out->changed);
+    mtx_unlock(&out->lock);
+    return VK_SUCCESS;
+@@ -968,9 +1598,10 @@
+ {
+    struct wsi_videoout_swapchain *chain = (struct wsi_videoout_swapchain *)wsi_chain;
+    struct wsi_videoout_output *out = &videoout_output;
++   const uint32_t buffer = chain->first + image_index;
+ 
+    mtx_lock(&out->lock);
+-   out->buffer[image_index].held = false;
++   out->buffer[buffer].held = false;
+    if (chain->retired) {
+       cnd_broadcast(&out->changed);
+       mtx_unlock(&out->lock);
+@@ -986,17 +1617,30 @@
+    assert(out->queue_count < ARRAY_SIZE(out->queue));
+    out->queue[(out->queue_head + out->queue_count) % ARRAY_SIZE(out->queue)] = (struct wsi_videoout_present){
+       .chain = chain,
+-      .buffer = image_index,
++      .buffer = buffer,
+       .fence = chain->base.fences[image_index],
++      .mailbox = chain->base.present_mode == VK_PRESENT_MODE_MAILBOX_KHR,
++      .immediate = chain->base.present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR,
+    };
+    out->queue_count++;
+-   out->buffer[image_index].pending = true;
++   out->buffer[buffer].pending = true;
+    chain->in_flight++;
+    cnd_broadcast(&out->changed);
+    mtx_unlock(&out->lock);
+    return VK_SUCCESS;
+ }
+ 
++static void
++videoout_swapchain_set_present_mode(struct wsi_swapchain *wsi_chain, VkPresentModeKHR mode)
++{
++   struct wsi_videoout_output *out = &videoout_output;
++   mtx_lock(&out->lock);
++   wsi_chain->present_mode = mode == VK_PRESENT_MODE_IMMEDIATE_KHR ? VK_PRESENT_MODE_IMMEDIATE_KHR
++                            : mode == VK_PRESENT_MODE_MAILBOX_KHR ? VK_PRESENT_MODE_MAILBOX_KHR
++                                                                 : VK_PRESENT_MODE_FIFO_KHR;
++   mtx_unlock(&out->lock);
++}
++
+ static VkResult
+ videoout_swapchain_wait_for_present(struct wsi_swapchain *wsi_chain, uint64_t present_id, uint64_t timeout)
+ {
+@@ -1011,13 +1655,19 @@
+ 
+    /* Its flips use its fences: they go first. */
+    mtx_lock(&out->lock);
++   videoout_trace("destroying", chain);
+    while (chain->in_flight)
+       cnd_wait(&out->changed, &out->lock);
+    for (uint32_t i = 0; i < chain->base.image_count; i++)
+       if (chain->images[i].acquired)
+-         out->buffer[i].held = false;
+-   if (out->current == chain)
++         out->buffer[chain->first + i].held = false;
++   if (out->latest_valid) {
++      out->buffer[out->latest_buffer].pending = false;
++      out->latest_valid = false;
++   }
++   if (out->current == chain) {
+       out->current = NULL;
++   }
+    cnd_broadcast(&out->changed);
+    mtx_unlock(&out->lock);
+ 
+@@ -1039,6 +1689,96 @@
+    struct wsi_videoout_output *out = &videoout_output;
+ 
+    assert(pCreateInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR);
++   fprintf(stderr, "wsi/videoout: create swapchain imageFormat=%u imageColorSpace=%u presentMode=%u "
++                   "extent=%ux%u minImageCount=%u\n",
++           (unsigned)pCreateInfo->imageFormat, (unsigned)pCreateInfo->imageColorSpace,
++           (unsigned)pCreateInfo->presentMode, pCreateInfo->imageExtent.width,
++           pCreateInfo->imageExtent.height, pCreateInfo->minImageCount);
++   const bool hdr = pCreateInfo->imageColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
++   uint64_t pixel_format = PS5_VIDEO_OUT_PIXEL_FORMAT_B8G8R8A8_SDR;
++   enum videoout_hdr_output_mode output_mode = VIDEOOUT_HDR_OUTPUT_TOKEN_ONLY;
++   if (hdr) {
++      if (!videoout_title_declares_hdr())
++         return VK_ERROR_INITIALIZATION_FAILED;
++      if (pCreateInfo->imageFormat == VK_FORMAT_A2B10G10R10_UNORM_PACK32)
++         pixel_format = VIDEOOUT_RGB10A2_PQ; /* R in bits 0-9. */
++      else if (pCreateInfo->imageFormat == VK_FORMAT_A2R10G10B10_UNORM_PACK32)
++         pixel_format = VIDEOOUT_BGR10A2_PQ; /* B in bits 0-9. */
++      else
++         return VK_ERROR_FORMAT_NOT_SUPPORTED;
++
++      const uint64_t fallback = pixel_format;
++      const char *source = "default-missing";
++      FILE *config = fopen(VIDEOOUT_HDR_CONFIG, "rb");
++      if (config) {
++         char line[256];
++         uint64_t configured = 0;
++         bool found = false;
++         while (fgets(line, sizeof(line), config)) {
++            char *at = line;
++            while (*at == ' ' || *at == '\t')
++               at++;
++            if (strncmp(at, "token=", 6) == 0) {
++               configured = (uint64_t)strtoul(at + 6, NULL, 0);
++               found = true;
++               continue;
++            }
++            if (strncmp(at, "output=", 7) == 0) {
++               char *value = at + 7;
++               value[strcspn(value, " \t\r\n")] = '\0';
++               if (strcmp(value, "explicit") == 0)
++                  output_mode = VIDEOOUT_HDR_OUTPUT_EXPLICIT;
++               else if (strcmp(value, "wildcard") == 0)
++                  output_mode = VIDEOOUT_HDR_OUTPUT_WILDCARD;
++               else if (strcmp(value, "token-only") == 0)
++                  output_mode = VIDEOOUT_HDR_OUTPUT_TOKEN_ONLY;
++               else
++                  fprintf(stderr,
++                          "wsi/videoout: HDR output config rejected value=%s fallback=token-only\n",
++                          value);
++            }
++         }
++         const bool read_ok = !ferror(config);
++         fclose(config);
++         if (!read_ok) {
++            source = "default-read-error";
++            output_mode = VIDEOOUT_HDR_OUTPUT_TOKEN_ONLY;
++         } else if (!found) {
++            source = "default-no-token";
++         } else {
++            switch (configured) {
++            case VIDEOOUT_RGB10A2_PQ:
++            case VIDEOOUT_BGR10A2_PQ:
++            case VIDEOOUT_BGR10A2:
++            case VIDEOOUT_BGR10A2_SRGB:
++               pixel_format = configured;
++               source = "config";
++               break;
++            default:
++               source = "fallback-invalid";
++               fprintf(stderr,
++                       "wsi/videoout: HDR scanout config rejected token=0x%016" PRIx64
++                       " reason=%s fallback=0x%016" PRIx64 "\n",
++                       configured, configured == VIDEOOUT_BGRA16F_PQ
++                                      ? "known-8-byte-fp16-token-incompatible-with-4-byte-swapchain"
++                                      : "token-not-in-qualified-10-bit-set",
++                       fallback);
++               break;
++            }
++         }
++      }
++      const uint32_t token_bit = pixel_format == VIDEOOUT_RGB10A2_PQ ? 1u
++                               : pixel_format == VIDEOOUT_BGR10A2_PQ ? 2u
++                               : pixel_format == VIDEOOUT_BGR10A2 ? 4u
++                                                                  : 8u;
++      static uint32_t logged_tokens;
++      if (!(logged_tokens & token_bit)) {
++         logged_tokens |= token_bit;
++         fprintf(stderr, "wsi/videoout: HDR scanout token=0x%016" PRIx64
++                         " source=%s config=%s\n",
++                 pixel_format, source, VIDEOOUT_HDR_CONFIG);
++      }
++   }
+    if (pCreateInfo->imageExtent.width != VIDEOOUT_WIDTH || pCreateInfo->imageExtent.height != VIDEOOUT_HEIGHT ||
+        pCreateInfo->minImageCount > VIDEOOUT_BUFFERS || !wsi_device->GetMemoryHostPointerPropertiesEXT)
+       return VK_ERROR_INITIALIZATION_FAILED;
+@@ -1051,7 +1791,8 @@
+       return VK_ERROR_INITIALIZATION_FAILED;
+ 
+    mtx_lock(&out->lock);
+-   VkResult result = videoout_register_locked();
++   uint32_t set;
++   VkResult result = videoout_register_locked(pixel_format, &set);
+    if (result == VK_SUCCESS && out->current && out->current != (struct wsi_videoout_swapchain *)
+                                                  wsi_swapchain_from_handle(pCreateInfo->oldSwapchain))
+       result = VK_ERROR_NATIVE_WINDOW_IN_USE_KHR;
+@@ -1059,7 +1800,13 @@
+    if (result != VK_SUCCESS)
+       return result;
+ 
+-   const uint32_t num_images = MAX2(pCreateInfo->minImageCount, 3);
++   /* The modes the swapchain may present in: MAILBOX among them wants a fourth image. */
++   const VkSwapchainPresentModesCreateInfoKHR *modes =
++      vk_find_struct_const(pCreateInfo->pNext, SWAPCHAIN_PRESENT_MODES_CREATE_INFO_KHR);
++   bool mailbox = pCreateInfo->presentMode == VK_PRESENT_MODE_MAILBOX_KHR;
++   for (uint32_t i = 0; modes && i < modes->presentModeCount; i++)
++      mailbox |= modes->pPresentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR;
++   const uint32_t num_images = MAX2(pCreateInfo->minImageCount, mailbox ? 4 : 3);
+    const size_t size = sizeof(struct wsi_videoout_swapchain) + num_images * sizeof(struct wsi_image);
+    struct wsi_videoout_swapchain *chain = vk_zalloc(pAllocator, size, 8, VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
+    if (chain == NULL)
+@@ -1080,8 +1827,15 @@
+    chain->base.release_images = videoout_swapchain_release_images;
+    chain->base.queue_present = videoout_swapchain_queue_present;
+    chain->base.wait_for_present = videoout_swapchain_wait_for_present;
+-   chain->base.present_mode = VK_PRESENT_MODE_FIFO_KHR;
++   chain->base.present_mode = pCreateInfo->presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? VK_PRESENT_MODE_IMMEDIATE_KHR
++                             : pCreateInfo->presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? VK_PRESENT_MODE_MAILBOX_KHR
++                                                                                     : VK_PRESENT_MODE_FIFO_KHR;
++   chain->base.set_present_mode = videoout_swapchain_set_present_mode;
+    chain->base.image_count = num_images;
++   chain->set = set;
++   chain->first = set * VIDEOOUT_BUFFERS;
++   chain->format = pCreateInfo->imageFormat;
++   chain->color_space = pCreateInfo->imageColorSpace;
+ 
+    for (uint32_t i = 0; i < num_images; i++) {
+       result = wsi_create_image(&chain->base, &chain->base.image_info, &chain->images[i]);
+@@ -1097,9 +1849,28 @@
+ 
+    /* The old swapchain is retired: its acquires and presents are out of date. */
+    mtx_lock(&out->lock);
++   /* Color transitions drain finished-frame ownership before changing the
++    * output; same-color MAILBOX creation keeps WoWPS5's behavior unchanged. */
++   if (out->hdr != hdr) {
++      while (out->queue_count)
++         cnd_wait(&out->changed, &out->lock);
++      if (out->latest_valid) {
++         out->buffer[out->latest_buffer].pending = false;
++         out->latest_valid = false;
++      }
++      if (!videoout_color_locked(hdr, output_mode)) {
++         mtx_unlock(&out->lock);
++         for (uint32_t i = 0; i < num_images; i++)
++            wsi_destroy_image(&chain->base, &chain->images[i]);
++         wsi_swapchain_finish(&chain->base);
++         vk_free(pAllocator, chain);
++         return VK_ERROR_INITIALIZATION_FAILED;
++      }
++   }
+    if (out->current)
+       out->current->retired = true;
+    out->current = chain;
++   videoout_trace("created", chain);
+    mtx_unlock(&out->lock);
+ 
+    *swapchain_out = &chain->base;
+
+--- a/src/amd/vulkan/radv_image.c
++++ b/src/amd/vulkan/radv_image.c
+@@ -8,6 +8,10 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#if defined(__PROSPERO__)
++#include <stdio.h>
++#endif
++
+ #include "radv_image.h"
+ #include "tools/radv_debug.h"
+ #include "tools/radv_rmv.h"
+@@ -1254,12 +1258,31 @@
+          image->planes[plane].surface.u.gfx9.swizzle_mode = pdev->info.display_swizzle_mode;
+       }
+ 
+       radv_surface_init(pdev, &info, &image->planes[plane].surface);
+ 
+       if (plane == 0) {
+          if (!radv_use_dcc_for_image_late(device, image))
+             ac_surface_zero_dcc_fields(&image->planes[0].surface);
+       }
++
++#if defined(__PROSPERO__)
++      if (plane == 0 && (image->planes[0].surface.flags & RADEON_SURF_SCANOUT) &&
++          image->vk.format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 &&
++          image->vk.extent.width == 3840 && image->vk.extent.height == 2160) {
++         static unsigned logged;
++         if (p_atomic_cmpxchg(&logged, 0, 1) == 0) {
++            const struct radeon_surf *surf = &image->planes[0].surface;
++            fprintf(stderr, "radv/ps5: scanout layout format=%u extent=%ux%u bpe=%u"
++                            " swizzle=%u tile_swizzle=0x%x dcc_levels=%u meta_size=%u"
++                            " surf_size=%llu alignment=%llu flags=0x%llx\n",
++                    (unsigned)image->vk.format, image->vk.extent.width, image->vk.extent.height, surf->bpe,
++                    surf->u.gfx9.swizzle_mode, surf->tile_swizzle, surf->num_meta_levels, surf->meta_size,
++                    (unsigned long long)surf->surf_size,
++                    (unsigned long long)(UINT64_C(1) << surf->surf_alignment_log2),
++                    (unsigned long long)surf->flags);
++         }
++      }
++#endif
+ 
+       if (pdev->info.gfx_level >= GFX12 &&
+           (!radv_surface_has_scanout(device, &create_info) || pdev->info.gfx12_supports_display_dcc)) {
+
+--- a/src/vulkan/wsi/wsi_common.h
++++ b/src/vulkan/wsi/wsi_common.h
+@@ -89,6 +89,10 @@ struct wsi_device {
+     * If false, WSI will always use either modifiers or the prime blit path.
+     */
+    bool supports_scanout;
++#ifdef MESA_WSI_VIDEOOUT
++   /* Byte offset of a pixel in the driver's native scanout layout. */
++   uint64_t (*videoout_image_offset)(VkImage image, uint32_t x, uint32_t y);
++#endif
+ 
+    bool supports_protected[VK_ICD_WSI_PLATFORM_MAX];
+ 
+--- a/src/amd/vulkan/radv_wsi.c
++++ b/src/amd/vulkan/radv_wsi.c
+@@ -11,6 +11,7 @@
+ #include "radv_buffer_view.h"
+ #include "radv_device.h"
+ #include "radv_device_memory.h"
++#include "radv_image.h"
+ #include "radv_entrypoints.h"
+ #include "radv_physical_device.h"
+ #include "radv_pipeline.h"
+@@ -92,6 +93,23 @@ radv_wsi_get_prime_blit_queue(VkDevice _device)
+    simple_mtx_unlock(&device->blit_queue_mtx);
+    return NULL;
+ }
++
++#ifdef MESA_WSI_VIDEOOUT
++static uint64_t
++radv_wsi_videoout_image_offset(VkImage image_handle, uint32_t x, uint32_t y)
++{
++   VK_FROM_HANDLE(radv_image, image, image_handle);
++   if (!image || x >= image->vk.extent.width || y >= image->vk.extent.height)
++      return UINT64_MAX;
++   struct radv_device *device =
++      container_of(image->vk.base.device, struct radv_device, vk);
++   const struct radv_physical_device *pdev = radv_device_physical(device);
++   const struct ac_surf_info info = radv_get_ac_surf_info(device, image);
++   return ac_surface_addr_from_coord(
++      pdev->addrlib, &pdev->info, &image->planes[0].surface, &info,
++      0, x, y, 0, image->vk.image_type == VK_IMAGE_TYPE_3D);
++}
++#endif
+ 
+ VkResult
+ radv_init_wsi(struct radv_physical_device *pdev)
+@@ -106,6 +126,9 @@ radv_init_wsi(struct radv_physical_device *pdev)
+ 
+    pdev->wsi_device.supports_modifiers = pdev->info.gfx_level >= GFX9;
+    pdev->wsi_device.set_memory_ownership = radv_wsi_set_memory_ownership;
++#ifdef MESA_WSI_VIDEOOUT
++   pdev->wsi_device.videoout_image_offset = radv_wsi_videoout_image_offset;
++#endif
+    pdev->wsi_device.get_blit_queue = radv_wsi_get_prime_blit_queue;
+ 
+    for (uint32_t i = 0; i < ARRAY_SIZE(pdev->wsi_device.supports_protected); i++) {
+
+--- a/src/amd/vulkan/radv_shader.h
++++ b/src/amd/vulkan/radv_shader.h
+@@ -346,6 +346,10 @@ struct radv_shader_stage {
+    struct radv_shader_info info;
+    struct radv_shader_args args;
+    struct radv_shader_stage_key key;
++#if defined(__PROSPERO__)
++   /* One file-gated, title-only diagnostic compile. */
++   bool ps5_file_dump;
++#endif
+ 
+    VkPipelineCreationFeedback feedback;
+ 
+@@ -724,6 +728,12 @@ void radv_shader_dump_asm(const struct radv_compiler_info *compiler_info, struct
+                           const struct radv_shader_binary *binary, const struct radv_shader_info *info);
+ 
+ char *radv_dump_nir_shaders(const struct radv_compiler_info *compiler_info, struct nir_shader *const *shaders, int shader_count);
++#if defined(__PROSPERO__)
++bool radv_ps5_dump_shader_artifacts(const struct radv_compiler_info *compiler_info,
++                                    const struct radv_shader_binary *binary,
++                                    struct nir_shader *const *shaders, int shader_count,
++                                    unsigned sequence);
++#endif
+ 
+ VkResult radv_shader_wait_for_upload(struct radv_device *device, uint64_t seq);
+ 
+--- a/src/amd/vulkan/radv_shader.c
++++ b/src/amd/vulkan/radv_shader.c
+@@ -3470,6 +3470,10 @@ radv_shader_nir_to_asm(const struct radv_compiler_info *compiler_info, struct ra
+       struct aco_shader_info ac_info;
+       struct aco_compiler_options ac_opts;
+       radv_aco_fill_compiler_options(&ac_opts, compiler_info, &pl_stage->key, gfx_state, wgp_mode, dump_shader);
++#if defined(__PROSPERO__)
++      ac_opts.record_asm |= pl_stage->ps5_file_dump;
++      ac_opts.record_ir |= pl_stage->ps5_file_dump;
++#endif
+       radv_aco_convert_shader_info(&ac_info, info, args, compiler_info);
+       aco_compile_shader(&ac_opts, &ac_info, shader_count, shaders, &args->ac, &radv_aco_build_shader_binary,
+                          (void **)&binary);
+@@ -3502,6 +3506,103 @@ radv_shader_dump_asm(const struct radv_compiler_info *compiler_info, struct radv
+       fprintf(stderr, "\ndisasm:\n%s\n", debug->disasm_string);
+    }
+ }
++
++#if defined(__PROSPERO__)
++static void
++radv_ps5_write_shader_section(FILE *file, const char *name, const char *text,
++                              size_t *remaining)
++{
++   fprintf(file, "\n=== %s ===\n", name);
++   if (!text) {
++      fprintf(file, "(unavailable)\n");
++      return;
++   }
++   const size_t length = strlen(text);
++   const size_t written = MIN2(length, *remaining);
++   fwrite(text, 1, written, file);
++   *remaining -= written;
++   if (written != length)
++      fprintf(file, "\n[truncated at diagnostic bound]\n");
++}
++
++bool
++radv_ps5_dump_shader_artifacts(const struct radv_compiler_info *compiler_info,
++                               const struct radv_shader_binary *binary,
++                               struct nir_shader *const *shaders, int shader_count,
++                               unsigned sequence)
++{
++   if (!binary || shader_count <= 0)
++      return false;
++   char text_path[96], binary_path[96];
++   if (snprintf(text_path, sizeof(text_path), "/app0/wine/radv-shader-%u.txt", sequence) >=
++          (int)sizeof(text_path) ||
++       snprintf(binary_path, sizeof(binary_path), "/app0/wine/radv-shader-%u.bin", sequence) >=
++          (int)sizeof(binary_path))
++      return false;
++
++   char *nir_string = radv_dump_nir_shaders(compiler_info, shaders, shader_count);
++   struct radv_shader_debug_info debug = {0};
++   radv_parse_binary_debug_info(compiler_info, binary, &debug);
++
++   unsigned fp_math_ctrl = 0;
++   nir_shader *shader = shaders[shader_count - 1];
++   nir_foreach_function_impl (impl, shader) {
++      nir_foreach_block (block, impl) {
++         nir_foreach_instr (instr, block) {
++            if (instr->type == nir_instr_type_alu)
++               fp_math_ctrl |= nir_instr_as_alu(instr)->fp_math_ctrl;
++         }
++      }
++   }
++
++   FILE *file = fopen(text_path, "wb");
++   bool written = false;
++   if (file) {
++      const unsigned execution_mode = shader->info.float_controls_execution_mode;
++      fprintf(file, "PS5 RADV fragment shader diagnostic %u\n", sequence);
++      fprintf(file, "float_controls_execution_mode=0x%x\n", execution_mode);
++      fprintf(file, "denorm_flush_to_zero_fp32=%u\n",
++              !!(execution_mode & FLOAT_CONTROLS_DENORM_FLUSH_TO_ZERO_FP32));
++      fprintf(file, "nir_fp_math_ctrl_or=0x%x preserve_signed_zero=%u preserve_inf=%u"
++                    " preserve_nan=%u exact=%u\n",
++              fp_math_ctrl, !!(fp_math_ctrl & nir_fp_preserve_signed_zero),
++              !!(fp_math_ctrl & nir_fp_preserve_inf), !!(fp_math_ctrl & nir_fp_preserve_nan),
++              !!(fp_math_ctrl & nir_fp_exact));
++      fprintf(file, "stage=%u wave_size=%u ps_has_epilog=%u num_sgprs=%u num_vgprs=%u\n",
++              shader->info.stage, binary->info.wave_size, binary->info.ps.has_epilog,
++              binary->config.num_sgprs, binary->config.num_vgprs);
++      fprintf(file, "binary_float_mode=0x%x lower_fpow=%u has_fmulz_no_denorms=%u\n",
++              binary->config.float_mode, shader->options->lower_fpow,
++              shader->options->has_fmulz_no_denorms);
++      size_t remaining = 4 * 1024 * 1024;
++      radv_ps5_write_shader_section(file, "final NIR", nir_string, &remaining);
++      radv_ps5_write_shader_section(file, "ACO IR", debug.ir_string, &remaining);
++      radv_ps5_write_shader_section(file, "ACO disassembly", debug.disasm_string, &remaining);
++      written = fclose(file) == 0;
++   }
++
++   if (binary->type == RADV_BINARY_TYPE_LEGACY) {
++      struct radv_shader_binary_legacy *legacy = (struct radv_shader_binary_legacy *)binary;
++      const struct radv_shader_binary_layout layout = radv_shader_binary_get_layout(legacy);
++      FILE *raw = fopen(binary_path, "wb");
++      if (raw) {
++         const bool code_written = fwrite(layout.code, 1, legacy->exec_size, raw) == legacy->exec_size;
++         const int close_result = fclose(raw);
++         if (!code_written || close_result != 0)
++            remove(binary_path);
++      }
++   }
++
++   free(nir_string);
++   free(debug.disasm_string);
++   free(debug.ir_string);
++   free(debug.statistics);
++   free(debug.debug_info);
++   if (written)
++      fprintf(stderr, "[radv] shader dump n=%u path=%s\n", sequence, text_path);
++   return written;
++}
++#endif
+ 
+ struct radv_shader *
+ radv_create_trap_handler_shader(struct radv_device *device)
+--- a/src/amd/vulkan/radv_pipeline_graphics.c
++++ b/src/amd/vulkan/radv_pipeline_graphics.c
+@@ -8,6 +8,10 @@
+  * SPDX-License-Identifier: MIT
+  */
+ 
++#if defined(__PROSPERO__)
++#include <stdio.h>
++#endif
++
+ #include "meta/radv_meta.h"
+ #include "nir/nir.h"
+ #include "nir/nir_serialize.h"
+@@ -36,6 +40,41 @@
+ #include "ac_shader_util.h"
+ #include "aco_interface.h"
+ 
++#if defined(__PROSPERO__)
++#define RADV_PS5_SHADER_DUMP_REQUEST "/app0/wine/radv-shader-dump.req"
++static unsigned radv_ps5_shader_dump_state;
++
++static bool
++radv_ps5_claim_shader_dump(struct radv_shader_stage *stages)
++{
++   if (!stages || p_atomic_read(&radv_ps5_shader_dump_state) != 0)
++      return false;
++   struct radv_shader_stage *stage = &stages[MESA_SHADER_FRAGMENT];
++   if (stage->stage != MESA_SHADER_FRAGMENT || !stage->spirv.data ||
++       stage->spirv.size < sizeof(uint32_t))
++      return false;
++   bool target = false;
++   for (uint32_t at = 0; at + sizeof(uint32_t) <= stage->spirv.size; at += sizeof(uint32_t)) {
++      uint32_t word;
++      memcpy(&word, stage->spirv.data + at, sizeof(word));
++      if (word == UINT32_C(0x429db000)) {
++         target = true;
++         break;
++      }
++   }
++   if (!target)
++      return false;
++   FILE *request = fopen(RADV_PS5_SHADER_DUMP_REQUEST, "rb");
++   if (!request)
++      return false;
++   fclose(request);
++   if (p_atomic_cmpxchg(&radv_ps5_shader_dump_state, 0, 1) != 0)
++      return false;
++   stage->ps5_file_dump = true;
++   return true;
++}
++#endif
++
+ static bool
+ radv_is_static_vrs_enabled(const struct vk_graphics_pipeline_state *state)
+ {
+@@ -2194,6 +2235,13 @@ radv_graphics_shaders_nir_to_asm(const struct radv_compiler_info *compiler_info,
+       }
+ 
+       binaries[s] = radv_shader_nir_to_asm(compiler_info, &stages[s], nir_shaders, shader_count, gfx_state);
++#if defined(__PROSPERO__)
++      if (stages[s].ps5_file_dump) {
++         const bool dumped =
++            radv_ps5_dump_shader_artifacts(compiler_info, binaries[s], nir_shaders, shader_count, 1);
++         p_atomic_set(&radv_ps5_shader_dump_state, dumped ? 2 : 0);
++      }
++#endif
+ 
+       /* Dump NIR after nir_to_asm, because ACO modifies it. */
+       char *nir_string = NULL;
+@@ -3020,6 +3069,10 @@ radv_graphics_pipeline_compile(struct radv_graphics_pipeline *pipeline, const VkG
+    struct radv_shader_binary *gs_copy_binary = NULL;
+    bool skip_shaders_cache = radv_pipeline_skip_shaders_cache(device, &pipeline->base);
+    struct radv_shader_stage *stages = gfx_state->stages;
++#if defined(__PROSPERO__)
++   if (radv_ps5_claim_shader_dump(stages))
++      skip_shaders_cache = true;
++#endif
+    const VkPipelineCreationFeedbackCreateInfo *creation_feedback =
+       vk_find_struct_const(pCreateInfo->pNext, PIPELINE_CREATION_FEEDBACK_CREATE_INFO);
+    VkPipelineCreationFeedback pipeline_feedback = {

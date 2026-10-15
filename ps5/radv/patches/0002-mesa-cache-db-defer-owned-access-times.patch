@@ -1,0 +1,53 @@
+From: PS5 WoW port
+Subject: [PATCH] util/mesa_cache_db: defer owned access-time writes to close
+
+On the PS5 the shader cache database is owned by one process, and every
+256th read hit wrote the batched access times while holding the lock that
+all readers share. In WoW this stalled pipeline creation on about ten
+threads at once for ~185 ms (vkd3d PSO diagnostic, run 180b: cache hits
+with FAIL_ON_PIPELINE_COMPILE_REQUIRED, no compile time). Keep the times
+in memory until close or compaction, which already write them. Also
+initialise time_dirty for new hash entries; ralloc does not zero.
+---
+diff --git a/src/util/mesa_cache_db.c b/src/util/mesa_cache_db.c
+index ae12f11..7eee8e1 100644
+--- a/src/util/mesa_cache_db.c
++++ b/src/util/mesa_cache_db.c
+@@ -327,6 +327,7 @@ mesa_db_update_index(struct mesa_cache_db *db)
+       hash_entry->index_db_file_offset = db->index.offset;
+       hash_entry->last_access_time = index_entry->last_access_time;
+       hash_entry->size = index_entry->size;
++      hash_entry->time_dirty = false;
+ 
+       _mesa_hash_table_u64_insert(db->index_db, index_entry->hash, hash_entry);
+ 
+@@ -934,16 +935,16 @@ mesa_cache_db_read_entry(struct mesa_cache_db *db,
+       goto fail_fatal;
+ 
+    if (db->owned) {
+-      /* The index file's copy of the access time is written in batches: a
+-       * write at every hit, under the lock, made readers on other threads
+-       * wait for it. */
++      /* The index file's copy of the access time is written when the cache
++       * is closed and before compaction. Writing batches from a read hit,
++       * under the lock shared by every reader, stalled pipeline creation on
++       * all threads for ~185 ms at a time (PS5 RADV, WoW). Nothing else
++       * reads the owned index meanwhile; the in-memory times drive LRU. */
+       hash_entry->last_access_time = os_time_get_nano();
+       if (!hash_entry->time_dirty) {
+          hash_entry->time_dirty = true;
+          db->dirty_times++;
+       }
+-      if (db->dirty_times >= 256 && !mesa_db_write_times(db))
+-         goto fail_fatal;
+    } else {
+       if (!mesa_db_seek(db->index.file, hash_entry->index_db_file_offset) ||
+           !mesa_db_read(db->index.file, &index_entry) ||
+@@ -1049,6 +1050,7 @@ mesa_cache_db_entry_write(struct mesa_cache_db *db,
+    hash_entry->index_db_file_offset = ftell(db->index.file);
+    hash_entry->last_access_time = index_entry.last_access_time;
+    hash_entry->size = index_entry.size;
++   hash_entry->time_dirty = false;
+ 
+    if (!mesa_db_write(db->cache.file, &cache_entry) ||
+        !mesa_db_write_data(db->cache.file, blob, blob_size) ||

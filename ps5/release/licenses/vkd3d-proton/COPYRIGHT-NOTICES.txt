@@ -1,0 +1,907 @@
+vkd3d-proton: verbatim source copyright and licence comment excerpts.
+Repeated identical notices are grouped by source path. Licence scope is per source file,
+not a claim that every source listed is linked into this title.
+
+Sources:
+libs/d3d12/main.c
+libs/d3d12core/main.c
+/*
+ * Copyright 2018 Józef Kucia for CodeWeavers
+ * Copyright 2020 Joshua Ashton for Valve Software
+ * Copyright 2023 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ */
+
+Sources:
+libs/d3d12core/debug.c
+libs/d3d12core/debug.h
+/*
+ * Copyright 2024 Philip Rebohle for Valve Software
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/debug.c
+libs/vkd3d/device.c
+libs/vkd3d/utils.c
+libs/vkd3d/vkd3d_private.h
+libs/vkd3d/vulkan_procs.h
+/*
+ * Copyright 2016 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/file_utils.c
+libs/vkd3d/breadcrumbs.c
+libs/vkd3d/swapchain.c
+/*
+ * Copyright 2022 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/memory.c
+/*
+ * Copyright 2016 Henri Verbeet for CodeWeavers
+ * Copyright 2017 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/platform.c
+/*
+ * Copyright 2020 Joshua Ashton for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/profiling.c
+libs/vkd3d-shader/dxil.c
+libs/vkd3d/command_list_profiled.h
+libs/vkd3d/debug_ring.c
+libs/vkd3d/descriptor_debug.c
+libs/vkd3d/device_profiled.h
+libs/vkd3d/renderdoc.c
+libs/vkd3d/vkd3d_descriptor_debug.h
+libs/vkd3d/vkd3d_renderdoc.h
+/*
+ * Copyright 2020 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/string.c
+libs/vkd3d/acceleration_structure.c
+libs/vkd3d/raytracing_pipeline.c
+/*
+ * Copyright 2021 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-common/utf8.c
+/*
+ * Copyright 2000 Alexandre Julliard
+ * Copyright 2019 Zhiyi Zhang for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-shader/3rdparty/md5/md5.c
+/*
+ * This is an OpenSSL-compatible implementation of the RSA Data Security, Inc.
+ * MD5 Message-Digest Algorithm (RFC 1321).
+ *
+ * Homepage:
+ * http://openwall.info/wiki/people/solar/software/public-domain-source-code/md5
+ *
+ * Author:
+ * Alexander Peslyak, better known as Solar Designer <solar at openwall.com>
+ *
+ * This software was written by Alexander Peslyak in 2001.  No copyright is
+ * claimed, and the software is hereby placed in the public domain.
+ * In case this attempt to disclaim copyright and place the software in the
+ * public domain is deemed null and void, then the software is
+ * Copyright (c) 2001 Alexander Peslyak and it is hereby released to the
+ * general public under the following terms:
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted.
+ *
+ * There's ABSOLUTELY NO WARRANTY, express or implied.
+ *
+ * (This is a heavily cut-down "BSD license".)
+ *
+ * This differs from Colin Plumb's older public domain implementation in that
+ * no exactly 32-bit integer data type is required (any 32-bit or wider
+ * unsigned integer data type will do), there's no compile-time endianness
+ * configuration, and the function prototypes match OpenSSL's.  No code from
+ * Colin Plumb's implementation has been reused; this comment merely compares
+ * the properties of the two independent implementations.
+ *
+ * The primary goals of this implementation are portability and ease of use.
+ * It is meant to be fast, but not as fast as possible.  Some known
+ * optimizations are not included to reduce source code size and avoid
+ * compile-time configuration.
+ */
+
+Sources:
+libs/vkd3d-shader/3rdparty/md5/md5.h
+/*
+ * This is an OpenSSL-compatible implementation of the RSA Data Security, Inc.
+ * MD5 Message-Digest Algorithm (RFC 1321).
+ *
+ * Homepage:
+ * http://openwall.info/wiki/people/solar/software/public-domain-source-code/md5
+ *
+ * Author:
+ * Alexander Peslyak, better known as Solar Designer <solar at openwall.com>
+ *
+ * This software was written by Alexander Peslyak in 2001.  No copyright is
+ * claimed, and the software is hereby placed in the public domain.
+ * In case this attempt to disclaim copyright and place the software in the
+ * public domain is deemed null and void, then the software is
+ * Copyright (c) 2001 Alexander Peslyak and it is hereby released to the
+ * general public under the following terms:
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted.
+ *
+ * There's ABSOLUTELY NO WARRANTY, express or implied.
+ *
+ * See md5.c for more information.
+ */
+
+Sources:
+libs/vkd3d-shader/checksum.c
+/*
+ * Copyright (c) 2022 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+Sources:
+libs/vkd3d-shader/checksum.c
+/******************************************************************************
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2019-2022 Baldur Karlsson
+ * Copyright (c) 2014 Crytek
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ ******************************************************************************/
+
+Sources:
+libs/vkd3d-shader/dxbc.c
+/*
+ * Copyright 2008-2009 Henri Verbeet for CodeWeavers
+ * Copyright 2017 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-shader/vkd3d_shader_main.c
+/*
+ * Copyright 2017 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d-shader/vkd3d_shader_private.h
+/*
+ * Copyright 2017 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ *
+ * This file incorporates work covered by the following copyright and
+ * permission notice:
+ *
+ * Copyright 2002-2003 The wine-d3d team
+ * Copyright 2002-2003 2004 Jason Edmeades
+ * Copyright 2002-2003 Raphael Junqueira
+ * Copyright 2005 Oliver Stieber
+ * Copyright 2006 Stefan Dösinger
+ * Copyright 2006-2011, 2013 Stefan Dösinger for CodeWeavers
+ * Copyright 2007 Henri Verbeet
+ * Copyright 2008-2009 Henri Verbeet for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/address_binding_tracker.c
+libs/vkd3d/debug_common.c
+libs/vkd3d/state_object_common.c
+libs/vkd3d/workgraphs.c
+/*
+ * Copyright 2024 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/bundle.c
+libs/vkd3d/memory.c
+/*
+ * Copyright 2021 Philip Rebohle for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/cache.c
+/*
+ * Copyright 2020 Philip Rebohle for Valve Corporation
+ * Copyright 2022 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/command.c
+libs/vkd3d/state.c
+/*
+ * Copyright 2016 Józef Kucia for CodeWeavers
+ * Copyright 2016 Henri Verbeet for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/command_list_vkd3d_ext.c
+libs/vkd3d/device_vkd3d_ext.c
+/*
+ * * Copyright 2021 NVIDIA Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/command_queue_vkd3d_ext.c
+/*
+ * * Copyright 2023 NVIDIA Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/d3dkmt.c
+/*
+ * Copyright 2025 Rémi Bernon for Codeweavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/heap.c
+/*
+ * Copyright 2016 Józef Kucia for CodeWeavers
+ * Copyright 2019 Conor McCarthy for CodeWeavers
+ * Copyright 2021 Philip Rebohle for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/meta.c
+libs/vkd3d/vkd3d_shaders.h
+/*
+ * Copyright 2019 Philip Rebohle
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/meta_commands.c
+/*
+ * Copyright 2023 Philip Rebohle for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/opacity_micromap.c
+/*
+ * Copyright 2025 Krzysztof Bogacki
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/queue_timeline.c
+/*
+ * Copyright 2023 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/resource.c
+/*
+ * Copyright 2016 Józef Kucia for CodeWeavers
+ * Copyright 2019 Conor McCarthy for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/shared_metadata.c
+/*
+ * Copyright 2021 Derek Lesho for Codeweavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/timestamp_profiler.c
+libs/vkd3d/vkd3d_timestamp_profiler.h
+/*
+ * Copyright 2025 Hans-Kristian Arntzen for Valve Corporation
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/va_map.c
+/*
+ * Copyright 2021 Philip Rebohle for Valve Software
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/vkd3d_main.c
+/*
+ * Copyright 2016-2017 Józef Kucia for CodeWeavers
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
+ */
+
+Sources:
+libs/vkd3d/wineps5_fg.c
+/* SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+ * SPDX-FileCopyrightText: Copyright 2025 lsfg-vk
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Eden 67bada77 mapping (all source files under src/video_core):
+ * frame_gen/lossless_dll.cpp ReadShaderResources -> fg_load_modules
+ * frame_gen/lsfg_translate.cpp AdoptSpirvModule -> wineps5_fg_adopt (fg.h)
+ * renderer_vulkan/present/lsfg_common.cpp LsfgImage/Pass/Resources/Barriers
+ *   -> wineps5_fg_image_create / fg_pipeline / fg_constants / fg_dispatch
+ * present/lsfg_{mipmaps,alpha,beta,gamma,delta,generate}.cpp constructors
+ *   -> fg_build_chain; Dispatch methods -> record_shared/record_generation
+ * present/lsfg_chain.cpp -> wineps5_fg_engine (same seven-level stage graph)
+ * present/frame_gen.cpp -> present-worker glue in wineps5_fg_present.h
+ * present/frame_gen_pacer.cpp -> wineps5_fg_plan (fixed-multiplier mode).
+ * ProsperoEden tools/prepare-vulkan-port.py:915-1000 -> feature/storage gates
+ * and explicit status markers. No proprietary DLL/shader bytes are embedded.
+ * FSR3 backend: swordpdf/ps5-framegen
+ * 64362101757cdd6f7df9eeb984cb53f03f1fbfca, as vendored by
+ * PSSwanStation ps5-port f05cd30550ab. GPL-3.0-or-later host; MIT AMD
+ * FidelityFX SDK 2.3.0 shaders, with notices/rebuild sources in wineps5_fsr3fg.
+ */
+
+Sources:
+libs/vkd3d/wineps5_fg.h
+/* SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+ * SPDX-FileCopyrightText: Copyright 2025 lsfg-vk
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Ported from Eden 67bada77: frame_gen/{lossless_dll,lsfg_translate}.cpp,
+ * renderer_vulkan/present/{lsfg_common.h,frame_gen_pacer.cpp}.
+ * Pure helpers: no Vulkan, Windows, allocation or proprietary shader bytes. */
+
+Sources:
+libs/vkd3d/wineps5_fg_present.h
+/* SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+ * SPDX-FileCopyrightText: Copyright 2025 lsfg-vk
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Eden 67bada77 present/{frame_gen,frame_gen_pacer}.cpp C/WSI port.
+ * Included after the existing present_iteration, which remains the sole WSI
+ * implementation. The queue callback captures and signals game latency;
+ * this worker alone performs generation, output pacing, HDR/HUD and presents. */
+
+Sources:
+libs/vkd3d/wineps5_fg_vk.h
+/* SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+ * SPDX-FileCopyrightText: Copyright 2025 lsfg-vk
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Eden 67bada77 renderer_vulkan/present/lsfg_{common,chain}.h C port. */
+
+Sources:
+libs/vkd3d/wineps5_fsr3fg/bridge.cpp
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Thin adapter; shader bytes are unchanged. Host changes are documented in F1.
+ * Each call binds this engine's dispatch table, never another VkDevice/queue. */
+
+Sources:
+libs/vkd3d/wineps5_fsr3fg/bridge.h
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * ps5-framegen 64362101757cdd6f7df9eeb984cb53f03f1fbfca C adapter. */
+
+Sources:
+libs/vkd3d/wineps5_fsr3fg/ps5_framegen.cpp
+// ps5-framegen: the host side of FSR3's optical flow and frame interpolation (ps5_framegen.h).
+//
+// The order of the passes, their sizes, the resources each binds and the constants are those of the FidelityFX SDK 2.3.0's
+// ffx_opticalflow.cpp (dispatch()) and ffx_frameinterpolation.cpp (ffxFrameInterpolationDispatch()), MIT, Advanced Micro Devices.
+//
+// Copyright (C) 2026 swordpdf
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+
+Sources:
+libs/vkd3d/wineps5_fsr3fg/ps5_framegen.h
+// ps5-framegen: frame generation. AMD FSR3's frame interpolation (FidelityFX SDK 2.3.0, MIT) on plain Vulkan: from two frames
+// of the game, the frame halfway between them, shown before the second one (a game held at 30 fps is shown at 60).
+//
+// A PS3 game gives no motion vectors or depth, so this is FSR3's optical flow path alone (FFX_FG_OF_ONLY in the shaders):
+//   optical flow    the luma of each frame and its pyramid (7 levels), a block search from the coarsest level down with a filter
+//                   and an upscale at each level (FSR3's "v5" optical flow), scene change detection from luma histograms
+//   interpolation   the flow's vectors halved and pushed to where each block is halfway (the vector field); then (m73b) each
+//                   pixel tries no motion, the field, its 4 nearest cells, its block's flow and (m73f) the 4 blocks' around it,
+//                   (m74) its quad's motion in the last generated frame and the best of them refined to a fraction of a pixel,
+//                   and keeps the motion under which the previous frame half a vector back and the current one half a vector
+//                   ahead agree, a motion that is not the flow's own where it samples counting less (m73g); where none agrees
+//                   (the edge of something in front), the sample another motion explains is dropped; a pixel unchanged for 8
+//                   frames (HUD, text) does not move (docs/algorithm.md has the details)
+// FSR3's passes for the game's motion vectors, the disocclusion mask and the inpainting are not run. The shaders are FSR3's HLSL
+// compiled to SPIR-V (tools/build-shaders.sh, sources in shaders/); this file and its .cpp are
+// the host side (the SDK's ffx_opticalflow.cpp and ffx_frameinterpolation.cpp redone on Vulkan, without the SDK's backend).
+//
+// No dependency on an emulator, the console's SDK or AMD's SDK backend: the host tool tools/fg-test.cpp runs the same code on a
+// software Vulkan device. It came from RPCS3-PS5 (m74) and runs in PS5SX2 too, on both PS5 Vulkan drivers (RADV and ps5vk).
+//
+// Copyright (C) 2026 swordpdf
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+
+Sources:
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_common_types.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core_cpu.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core_gpu_common.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core_gpu_common_half.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core_hlsl.h
+libs/vkd3d/wineps5_fsr3fg/shaders/api/internal/gpu/ffx_core_portability.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_callbacks_hlsl.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_common.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_compute_game_vector_field_inpainting_pyramid.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_compute_inpainting_pyramid.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_debug_view.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_disocclusion_mask.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_game_motion_vector_field.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_inpainting.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_optical_flow_vector_field.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_reconstruct_dilated_velocity_and_previous_depth.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_reconstruct_previous_depth.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_resources.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/frameinterpolation/ffx_frameinterpolation_setup.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_callbacks_hlsl.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_common.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_compute_luminance_pyramid.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_compute_optical_flow_v5.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_compute_scd_divergence.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_filter_optical_flow_v5.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_generate_scd_histogram.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_prepare_luma.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_resources.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/opticalflow/ffx_opticalflow_scale_optical_flow_advanced_v5.h
+libs/vkd3d/wineps5_fsr3fg/shaders/framegeneration/fsr3/include/gpu/spd/ffx_spd.h
+// This file is part of the FidelityFX SDK.
+//
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
+// 
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files(the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and /or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions :
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+
+Sources:
+libs/vkd3d/wineps5_hud.h
+/* PS5 HUD pure helpers. Original 5x7 bitmap artwork below is CC0/public domain. */
+

@@ -1,0 +1,13 @@
+/* libvulkan.so exports what win32u and a Vulkan loader look up; the rest of
+ * RADV, its runtime and the platform layer bind inside the library, so none
+ * of it is resolved against (or shadows) Wine's own symbols. */
+{
+  global:
+    vkGetInstanceProcAddr;
+    vkGetDeviceProcAddr;
+    vk_icdGetInstanceProcAddr;
+    vk_icdGetPhysicalDeviceProcAddr;
+    vk_icdNegotiateLoaderICDInterfaceVersion;
+  local:
+    *;
+};

@@ -1,0 +1,14 @@
+{
+  "argv": ["C:\\windows\\system32\\explorer.exe", "/desktop", "C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe", "--exec=launch_uid wow_classic_beta"],
+  "prefix": "/data/forever/prefix",
+  "home": "/data/forever/home",
+  "cwd": "/data/forever/prefix/drive_c/Program Files (x86)/Battle.net",
+  "debug": "err+all,err-seh",
+  "dll_overrides": "winemenubuilder.exe=d;mscoree=d;mshtml=d;winedbg.exe=d;msv1_0=d;kerberos=d;tabtip.exe=d;vulkan-1=n,b;d3d8,d3d9,d3d10core,d3d11,dxgi=b",
+  "payload_programs": [],
+  "prefetch_hosts": ["distribution.version.battle.net", "us.version.battle.net", "telemetry-in.battle.net", "breaking-news.support.blizzard.com", "us.actual.battle.net", "us.cdn.blizzard.com", "us.account.battle.net", "level3.blizzard.com", "level3.ssl.blizzard.com", "oauth.battle.net", "api.blizzard.com"],
+  "dns_upstreams": ["1.1.1.1", "8.8.8.8"],
+  "browser_switches": {
+    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1"]
+  }
+}

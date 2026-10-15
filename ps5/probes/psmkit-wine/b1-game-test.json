@@ -1,0 +1,11 @@
+{
+  "gpu": true,
+  "headless": true,
+  "argv": ["W:\\tests\\aio\\AIO-Graphics-Test-64bit.exe", "--cube", "dx12", "--bench", "20", "--autoclose", "2", "--vsync"],
+  "prefix": "/app0/wine/prefix",
+  "home": "/app0/wine/home",
+  "cwd": "/app0/wine/tests/aio",
+  "debug": "err+all",
+  "dll_overrides": "winemenubuilder.exe=d;mscoree=d;mshtml=d;winedbg.exe=d;msv1_0=d;kerberos=d;tabtip.exe=d;d3d12,d3d12core,dxgi=n",
+  "payload_programs": []
+}

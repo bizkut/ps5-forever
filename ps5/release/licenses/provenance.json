@@ -1,0 +1,756 @@
+{
+  "schema": 1,
+  "description": "Authentic release licence inputs. Source paths are repository- or archive-relative. Copies do not replace upstream licences. COPYRIGHT-NOTICES assets are verbatim source comment excerpts, not a component linkage claim.",
+  "files": {
+    "fonts/Bitstream-Vera-LICENSE.txt": {
+      "component": "Bitstream Vera (Wine Tahoma base)",
+      "path": "ttf-bitstream-vera-1.10/COPYRIGHT.TXT",
+      "url": "https://download.gnome.org/sources/ttf-bitstream-vera/1.10/ttf-bitstream-vera-1.10.tar.gz",
+      "archive_sha256": "3a84126ce11ef404d1453438e35450b9e0838220d262059e56cd8496ac6f5d15",
+      "sha256": "3361d054759a2fc686a2c058be82deaf9c2e6fe549be9004d7935a6c1736315d"
+    },
+    "fonts/Wine-FONT-NOTICES.txt": {
+      "component": "Wine built-in fonts",
+      "paths": [
+        "fonts/courier.sfd",
+        "fonts/fixedsys.sfd",
+        "fonts/fixedsys_jp.sfd",
+        "fonts/marlett.sfd",
+        "fonts/ms_sans_serif.sfd",
+        "fonts/small_fonts.sfd",
+        "fonts/small_fonts_jp.sfd",
+        "fonts/symbol.sfd",
+        "fonts/system.sfd",
+        "fonts/tahoma.sfd",
+        "fonts/tahomabd.sfd",
+        "fonts/webdings.sfd",
+        "fonts/wingding.sfd"
+      ],
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "40fd1976ea82f088e53dc627c8b3cd46a3ca3b7c60cd0aa0b2c6284ff30b3208"
+    },
+    "AMD-FidelityFX/LICENSE.txt": {
+      "component": "vkd3d-proton",
+      "path": "libs/vkd3d/wineps5_fsr3fg/shaders/LICENSE.txt",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "c0d87ce4a223a05c4565c95d565fe8f979f9ac57a93e358f7eb54484d6d839ba"
+    },
+    "DXVK/COPYRIGHT-NOTICES.txt": {
+      "component": "dxvk",
+      "path": "src",
+      "revision": "9f8db7dae7e9218eb6f0197ac7b3a61367e3044d",
+      "url": "https://github.com/bizkut/ps5-forever-dxvk.git",
+      "selection": "verbatim leading legal comments in C/C++/assembly/Rust source and headers; identical comments grouped",
+      "sha256": "cb34b16a928e4026cdf62a2be1de26d37da811e420d3f2b4eddb48dfd3adf6e5"
+    },
+    "DXVK/LICENSE": {
+      "component": "dxvk",
+      "path": "LICENSE",
+      "revision": "9f8db7dae7e9218eb6f0197ac7b3a61367e3044d",
+      "url": "https://github.com/bizkut/ps5-forever-dxvk.git",
+      "sha256": "a5cb1a6ded7d2d7e92d550ba28edd21be2d1d4044662b399887351023e30ce64"
+    },
+    "FreeType/BDF-NOTICE.txt": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/src/bdf/README",
+      "lines": [
+        99,
+        144
+      ],
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "d97ce69c9dff1f885ad6341b58bdfeecf241337597f78ecc9544776b8f1d7416"
+    },
+    "FreeType/HarfBuzz-NOTICE.txt": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/src/autofit/ft-hb-ft.c",
+      "lines": [
+        1,
+        25
+      ],
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "9eb9395c70e884f61081775892fae5949ad7762461bea5753dc5478b0c080302"
+    },
+    "FreeType/LICENSE.TXT": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/LICENSE.TXT",
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "bd36c8b474855fa294c2ec5c184544478ef3720aad37d65a6296a4f264fd2d3b"
+    },
+    "FreeType/PCF-NOTICE.txt": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/src/pcf/README",
+      "lines": [
+        66,
+        88
+      ],
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "acb4adde9db25f992623adb83a3c95db21fb157aae02a19b56aad9194fe8cc64"
+    },
+    "FreeType/docs/FTL.TXT": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/docs/FTL.TXT",
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "5a5ee54c5001bbad1cdc1a57cc3dd4c42199b2da09d39c7ee41fab002d02967f"
+    },
+    "FreeType/docs/GPLv2.TXT": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/docs/GPLv2.TXT",
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "c4120c6752c910c299e3bd9cb3a46ff262c268303ca2069b61f92f10a5656c18"
+    },
+    "FreeType/zlib-NOTICE.txt": {
+      "component": "FreeType",
+      "path": "freetype-2.14.3/src/gzip/zlib.h",
+      "lines": [
+        1,
+        29
+      ],
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "archive_sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f",
+      "sha256": "02421fcfbfb1d656ef0b6ff4cd3c39f2946f08c3219fa42db482add7ce1f53ea"
+    },
+    "GPL-3.0.txt": {
+      "component": "vkd3d-proton",
+      "path": "libs/vkd3d/wineps5_fsr3fg/COPYING",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "GnuTLS/AUTHORS": {
+      "component": "GnuTLS",
+      "path": "gnutls-3.8.13/AUTHORS",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "archive_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "sha256": "79bca1136dc515b930f2f85975c0c4c687e7d430be27a9b59113637c33b8e7a3"
+    },
+    "GnuTLS/COPYING": {
+      "component": "GnuTLS",
+      "path": "gnutls-3.8.13/COPYING",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "archive_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "GnuTLS/COPYING.LESSERv2": {
+      "component": "GnuTLS",
+      "path": "gnutls-3.8.13/COPYING.LESSERv2",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "archive_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    "GnuTLS/lib/crau/LICENSE": {
+      "component": "GnuTLS",
+      "path": "gnutls-3.8.13/lib/crau/LICENSE",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "archive_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "sha256": "b3c9aed2f5750f6bf698c74916d675d1734e12455b96bfdf6f90e23ab01595cd"
+    },
+    "GnuTLS/lib/inih/LICENSE.txt": {
+      "component": "GnuTLS",
+      "path": "gnutls-3.8.13/lib/inih/LICENSE.txt",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "archive_sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "sha256": "9ae3b39e83e9158e44b67733baa3bb2d84e80efdcfb14a5820210a42c7abdf7f"
+    },
+    "LLVM/libcxx-LICENSE.TXT": {
+      "component": "libcxx",
+      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-18.1.8/libcxx/LICENSE.TXT",
+      "revision": "llvmorg-18.1.8",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
+    },
+    "LLVM/libcxxabi-LICENSE.TXT": {
+      "component": "libcxxabi",
+      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-18.1.8/libcxxabi/LICENSE.TXT",
+      "revision": "llvmorg-18.1.8",
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c"
+    },
+    "LLVM/libunwind-LICENSE.TXT": {
+      "component": "libunwind",
+      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-18.1.8/libunwind/LICENSE.TXT",
+      "revision": "llvmorg-18.1.8",
+      "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+    },
+    "LLVM/llvm-LICENSE.TXT": {
+      "component": "llvm",
+      "url": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-18.1.8/llvm/LICENSE.TXT",
+      "revision": "llvmorg-18.1.8",
+      "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+    },
+    "Mesa/Apache-2.0": {
+      "component": "PS5_Mesa",
+      "path": "licenses/Apache-2.0",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "7e4d3fba250d15e9e0afa380d4b611828fa2560cc8fdebe95bcf2f01a487de12"
+    },
+    "Mesa/BSL-1.0": {
+      "component": "PS5_Mesa",
+      "path": "licenses/BSL-1.0",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "9b9fea7520a816107fcac2598b7c0155222f16bc430e989706b22f4367f1df7d"
+    },
+    "Mesa/COPYRIGHT-NOTICES.txt": {
+      "component": "PS5_Mesa",
+      "path": "src/amd, src/compiler, src/vulkan, src/util, src/c11, include",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "selection": "verbatim leading legal comments in C/C++/assembly/Rust source and headers; identical comments grouped",
+      "sha256": "fca2edee54cd0070cdddeb43c38fb9b2a4d7370d7e59f02685ff1b7ace4397b4"
+    },
+    "Mesa/GPL-1.0-or-later": {
+      "component": "PS5_Mesa",
+      "path": "licenses/GPL-1.0-or-later",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "8ff76f1528e6e4e9400c0f6b1f2d19d4979aaac3bcc44bb707a55389132825c4"
+    },
+    "Mesa/GPL-2.0-only": {
+      "component": "PS5_Mesa",
+      "path": "licenses/GPL-2.0-only",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "6667ad4063569cd53b13500550d93fcd3dc11bcf82c5514296af013a0b720ba5"
+    },
+    "Mesa/MIT": {
+      "component": "PS5_Mesa",
+      "path": "licenses/MIT",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "323c587d0ccf10e376f8bf9a7f31fb4ca6078105194b42e0b1e0ee2bc9bde71f"
+    },
+    "Mesa/SGI-B-2.0": {
+      "component": "PS5_Mesa",
+      "path": "licenses/SGI-B-2.0",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "686bf035a1fd22076416fd3b90370ac67771e884bf57f55693d51f8ce7c710a7"
+    },
+    "Mesa/exceptions/Linux-Syscall-Note": {
+      "component": "PS5_Mesa",
+      "path": "licenses/exceptions/Linux-Syscall-Note",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "9b4084655174654608fd037e9ddb4feeadfada01cd042e9c17b05aa7105b2b9f"
+    },
+    "Mesa/license.rst": {
+      "component": "PS5_Mesa",
+      "path": "docs/license.rst",
+      "revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "sha256": "0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615"
+    },
+    "Mozilla/CA-NOTICE.txt": {
+      "component": "Mozilla root certificates",
+      "path": "cacert-2026-09-25.pem",
+      "url": "https://curl.se/ca/cacert-2026-09-25.pem",
+      "lines": [
+        1,
+        20
+      ],
+      "sha256": "82e6295ab4c3b059137d8ba52b8f9b0dfda6952255a333d11b84c6d8a2dee566"
+    },
+    "Mozilla/MPL-2.0.txt": {
+      "component": "Mozilla root certificates",
+      "url": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04"
+    },
+    "Nettle/AUTHORS": {
+      "component": "Nettle",
+      "path": "nettle-3.10.2/AUTHORS",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "archive_sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5",
+      "sha256": "6fd91e60caa0c33dd22888b710fcfa36532bbbef00d85c78de385dcd97f7b9ee"
+    },
+    "Nettle/COPYING.LESSERv3": {
+      "component": "Nettle",
+      "path": "nettle-3.10.2/COPYING.LESSERv3",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "archive_sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5",
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+    },
+    "Nettle/COPYINGv2": {
+      "component": "Nettle",
+      "path": "nettle-3.10.2/COPYINGv2",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "archive_sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5",
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+    },
+    "Nettle/COPYINGv3": {
+      "component": "Nettle",
+      "path": "nettle-3.10.2/COPYINGv3",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "archive_sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5",
+      "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195"
+    },
+    "PS5_PayloadSDK/COPYRIGHT-NOTICES.txt": {
+      "component": "PS5_PayloadSDK",
+      "path": "libc, platform/src, include, crt",
+      "revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+      "url": "https://github.com/bizkut/ps5-forever-sdk.git",
+      "selection": "verbatim leading legal comments in C/C++/assembly/Rust source and headers; identical comments grouped",
+      "sha256": "2ab399e74644fa3a16b08bd1dcb191bbe03bc282ae21981db27c19a8193ebecd"
+    },
+    "PS5_PayloadSDK/LICENSE": {
+      "component": "PS5_PayloadSDK",
+      "path": "LICENSE",
+      "revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+      "url": "https://github.com/bizkut/ps5-forever-sdk.git",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "PS5_PayloadSDK/dlmalloc-LICENSE.txt": {
+      "component": "dlmalloc 2.8.6",
+      "path": "platform/src/dlmalloc/malloc.c",
+      "revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+      "url": "https://github.com/bizkut/ps5-forever-sdk.git",
+      "lines": [
+        1,
+        21
+      ],
+      "sha256": "343900799ea06c66b596ec610054c8ac45c00fe8c635ef39c26ed72b73a9497c"
+    },
+    "PS5_PayloadSDK/musl-COPYRIGHT.txt": {
+      "component": "PS5_PayloadSDK",
+      "path": "platform/src/regex/COPYRIGHT.musl",
+      "revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+      "url": "https://github.com/bizkut/ps5-forever-sdk.git",
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af"
+    },
+    "PS5_Vulkan/LICENSE": {
+      "component": "PS5_Vulkan",
+      "path": "LICENSE",
+      "revision": "2cf759774168c9f99e9af1b1d87934fb98d8229e",
+      "url": "https://github.com/bizkut/ps5-forever-vulkan.git",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "PS5_Vulkan/NOTICE.txt": {
+      "component": "PS5_Vulkan",
+      "path": "NOTICE.md",
+      "revision": "2cf759774168c9f99e9af1b1d87934fb98d8229e",
+      "url": "https://github.com/bizkut/ps5-forever-vulkan.git",
+      "sha256": "cca7ed970afd379d99ce995756c1908ca38406ee087b541e2a53af91828a91c0"
+    },
+    "Proton/LICENSE": {
+      "component": "ps5-wow",
+      "path": "LICENSE",
+      "revision": "01.000.000",
+      "url": "https://github.com/bizkut/ps5-forever.git",
+      "sha256": "216d230e098800b1e8f8814f20d4057f4a7a0b484a9132809f2c9a1eb921cac7"
+    },
+    "Proton/LICENSE.proton": {
+      "component": "ps5-wow",
+      "path": "LICENSE.proton",
+      "revision": "01.000.000",
+      "url": "https://github.com/bizkut/ps5-forever.git",
+      "sha256": "eb61fb9ebaf41402d2d1a21fde9eae0c87e164daa20e388eac7c1a8099401a7a"
+    },
+    "Wine/AUTHORS": {
+      "component": "ps5-wine",
+      "path": "AUTHORS",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "4e2f062fd9c658b60ba7c0000f88f08d2b8f1333fa7b1c37ec27859ecb2de59d"
+    },
+    "Wine/COPYING.LIB": {
+      "component": "ps5-wine",
+      "path": "COPYING.LIB",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "e237fa56668030e928551ddd60f05df5fe957f75eab874bbd017e085ed722e7c"
+    },
+    "Wine/LICENSE": {
+      "component": "ps5-wine",
+      "path": "LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "ae025f125a5d639f0f7abe5146efa1e3d7453cc10b744b2910806fa3f46626ef"
+    },
+    "Wine/bundled/COPYRIGHT-NOTICES.txt": {
+      "component": "ps5-wine",
+      "path": "libs, fonts",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "selection": "verbatim leading legal comments in C/C++/assembly/Rust source and headers; identical comments grouped",
+      "sha256": "cf8b0d44baba5a23b252adf1c16c7de43a7ac308e92ccdc36816093bfeb0e8b5"
+    },
+    "Wine/bundled/capstone/LICENSE.TXT": {
+      "component": "ps5-wine",
+      "path": "libs/capstone/LICENSE.TXT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "65e9ed46a59976eda8f5bd1ea79a680dea38dd299c760bc9a8d87a764ef5029b"
+    },
+    "Wine/bundled/capstone/LICENSE_LLVM.TXT": {
+      "component": "ps5-wine",
+      "path": "libs/capstone/LICENSE_LLVM.TXT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "dfdca2d7fdbabfd937f9dc41b7f61647b0e6cb1f9ee767ecb4520f979ebe91da"
+    },
+    "Wine/bundled/compiler-rt/LICENSE.TXT": {
+      "component": "ps5-wine",
+      "path": "libs/compiler-rt/LICENSE.TXT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "09e65c6534e75ec49cdc74fa894bfe4287bfbb1002be41fcad90110e9acd0984"
+    },
+    "Wine/bundled/faudio/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/faudio/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "18325126e220d6898c4a8d1e3896a7b8c0e10e15b9d08bc6630f403bf4981215"
+    },
+    "Wine/bundled/fluidsynth/COPYING.txt": {
+      "component": "ps5-wine",
+      "path": "libs/fluidsynth/COPYING.md",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "db7d88e8584f98b5d393cc4ab60290c3d06cd3947d104b1c91ec95c140df89c6"
+    },
+    "Wine/bundled/gsm/COPYRIGHT": {
+      "component": "ps5-wine",
+      "path": "libs/gsm/COPYRIGHT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "81c68a3374937ed9b5e4929c709e81a2c4b35b5d1f450ecf8c473e2daea46ff6"
+    },
+    "Wine/bundled/jpeg/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/jpeg/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "1cb448f5e2e6d3aca60943f4eee1a04675628dc0266a074a42bc1560ebc28d61"
+    },
+    "Wine/bundled/jxr/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/jxr/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "a645aa6019f2a0300dd5108b6679afb9fca0620ed06b8efe4bc1eb3d36799ada"
+    },
+    "Wine/bundled/lcms2/COPYING": {
+      "component": "ps5-wine",
+      "path": "libs/lcms2/COPYING",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "46d4e05af3bce75332a12d01f19bcce7e32b6bac544be28a64043d0231291e31"
+    },
+    "Wine/bundled/ldap/COPYRIGHT": {
+      "component": "ps5-wine",
+      "path": "libs/ldap/COPYRIGHT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "0d60f0cfcce7c4d08ac12e677ed1223319cba6409682ba62a944f2cd37fb836a"
+    },
+    "Wine/bundled/ldap/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/ldap/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "310fe25c858a9515fc8c8d7d1f24a67c9496f84a91e0a0e41ea9975b1371e569"
+    },
+    "Wine/bundled/mpg123/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/mpg123/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "88cfbfd10c2b05905b84819502d8f494c925497507b13b60acd4e99fa85586dc"
+    },
+    "Wine/bundled/musl/COPYRIGHT": {
+      "component": "ps5-wine",
+      "path": "libs/musl/COPYRIGHT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af"
+    },
+    "Wine/bundled/png/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/png/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "16d9daaafbf63a31a5bdc91d4600972548fef5aaa1244202393288dbd079c49a"
+    },
+    "Wine/bundled/tiff/COPYRIGHT": {
+      "component": "ps5-wine",
+      "path": "libs/tiff/COPYRIGHT",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "fbd6fed7938541d2c809c0826225fc85e551fdbfa8732b10f0c87e0847acafd7"
+    },
+    "Wine/bundled/tomcrypt/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/tomcrypt/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "1ba8f8006c93ac386e117f5721080192b2b29c1e3e8f75dfe577ff4e2c3459a8"
+    },
+    "Wine/bundled/vkd3d/COPYING": {
+      "component": "ps5-wine",
+      "path": "libs/vkd3d/COPYING",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "ba2942ea4fef8b3f674577cf100a2d44c44f237a6d9514067a776f6979dad1c5"
+    },
+    "Wine/bundled/xml2/COPYING": {
+      "component": "ps5-wine",
+      "path": "libs/xml2/COPYING",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "c5c63674f8a83c4d2e385d96d1c670a03cb871ba2927755467017317878574bd"
+    },
+    "Wine/bundled/xslt/COPYING": {
+      "component": "ps5-wine",
+      "path": "libs/xslt/COPYING",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "7e48e290b6bfccc2ec1b297023a1d77f2fd87417f71fbb9f50aabef40a851819"
+    },
+    "Wine/bundled/zlib/LICENSE": {
+      "component": "ps5-wine",
+      "path": "libs/zlib/LICENSE",
+      "revision": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243"
+    },
+    "DXVK/bundled/include/spirv/LICENSE": {
+      "component": "dxvk/include/spirv",
+      "path": "LICENSE",
+      "revision": "04f10f650d514df88b76d25e83db360142c7b174",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "sha256": "ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
+    },
+    "DXVK/bundled/include/spirv/LICENSES/CC-BY-4.0.txt": {
+      "component": "dxvk/include/spirv",
+      "path": "LICENSES/CC-BY-4.0.txt",
+      "revision": "04f10f650d514df88b76d25e83db360142c7b174",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744"
+    },
+    "DXVK/bundled/include/spirv/LICENSES/MIT.txt": {
+      "component": "dxvk/include/spirv",
+      "path": "LICENSES/MIT.txt",
+      "revision": "04f10f650d514df88b76d25e83db360142c7b174",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "sha256": "6d7c9e9d7d12c8d3753bdb24417b84819ba4d6c2f025c37948113d86dc81eef9"
+    },
+    "DXVK/bundled/include/vulkan/LICENSE.txt": {
+      "component": "dxvk/include/vulkan",
+      "path": "LICENSE.md",
+      "revision": "5d94bb4dcc968cccce1f601324fcaf3eda92a52b",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "ac24e5ea920e4318e4d02c4086ae51f53cfb03feed06c18df1019e7ada1ec7bc"
+    },
+    "DXVK/bundled/include/vulkan/LICENSES/Apache-2.0.txt": {
+      "component": "dxvk/include/vulkan",
+      "path": "LICENSES/Apache-2.0.txt",
+      "revision": "5d94bb4dcc968cccce1f601324fcaf3eda92a52b",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "DXVK/bundled/include/vulkan/LICENSES/MIT.txt": {
+      "component": "dxvk/include/vulkan",
+      "path": "LICENSES/MIT.txt",
+      "revision": "5d94bb4dcc968cccce1f601324fcaf3eda92a52b",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    },
+    "DXVK/bundled/subprojects/dxbc-spirv/LICENSE": {
+      "component": "dxvk",
+      "path": "subprojects/dxbc-spirv/LICENSE",
+      "revision": "9f8db7dae7e9218eb6f0197ac7b3a61367e3044d",
+      "url": "https://github.com/bizkut/ps5-forever-dxvk.git",
+      "sha256": "0f8a5e687bea942a30a8e39b9915294fbe44eca866e71307a9b7083ee0e69ad8"
+    },
+    "DXVK/bundled/subprojects/libdisplay-info/LICENSE": {
+      "component": "dxvk",
+      "path": "subprojects/libdisplay-info/LICENSE",
+      "revision": "9f8db7dae7e9218eb6f0197ac7b3a61367e3044d",
+      "url": "https://github.com/bizkut/ps5-forever-dxvk.git",
+      "sha256": "15b396244e58830c5614b9394f4deccfe684970cd507f299383ab57ad339eedd"
+    },
+    "fonts/DroidSansFallback-NOTICE": {
+      "component": "DroidSansFallback-NOTICE",
+      "path": "DroidSansFallback-NOTICE",
+      "url": "https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-4.4.4_r2/data/fonts/NOTICE",
+      "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+    },
+    "fonts/NotoSans-LICENSE": {
+      "component": "NotoSans-LICENSE",
+      "path": "NotoSans-LICENSE",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/LICENSE",
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    },
+    "libtasn1/AUTHORS": {
+      "component": "libtasn1",
+      "path": "libtasn1-4.21.0/AUTHORS",
+      "url": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz",
+      "archive_sha256": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87",
+      "sha256": "34384e8860c713e31e9339a5d4eb0727a9a93d2a5bb74b36053d9a66920bff9e"
+    },
+    "libtasn1/COPYING": {
+      "component": "libtasn1",
+      "path": "libtasn1-4.21.0/COPYING",
+      "url": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz",
+      "archive_sha256": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "libtasn1/COPYING.LESSERv2": {
+      "component": "libtasn1",
+      "path": "libtasn1-4.21.0/COPYING.LESSERv2",
+      "url": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz",
+      "archive_sha256": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87",
+      "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+    },
+    "stb/stb_image-LICENSE.txt": {
+      "component": "stb_image v2.30",
+      "path": "ps5/probes/psmkit-wine/third_party/stb/stb_image.h",
+      "url": "https://github.com/nothings/stb",
+      "lines": [
+        7948,
+        7988
+      ],
+      "sha256": "7587efcca32db8f95bf5860dea6dfa4be410ee723e1964db3689c8ddf2a2e4a9"
+    },
+    "title-adaptations/MIT.txt": {
+      "component": "ps5-forever",
+      "path": "ps5-forever/LICENSE.md",
+      "revision": "6cf23f2df87af3db94cf188d8e3aec65cbcf59e5",
+      "sha256": "d8db1712b2a1383b27cebeab2ddb8840a6e31ea820b0d56552a0f1c65f920983"
+    },
+    "title-adaptations/NOTICE.txt": {
+      "component": "ps5-forever adaptations",
+      "adapted_from_revision": "6cf23f2df87af3db94cf188d8e3aec65cbcf59e5",
+      "excerpts": [
+        {
+          "path": "ps5/probes/psmkit-wine/title-icon.h",
+          "lines": [
+            1,
+            11
+          ]
+        },
+        {
+          "path": "ps5/title/compositor.c",
+          "lines": [
+            67,
+            68
+          ]
+        },
+        {
+          "path": "ps5/title/tools/make-title-art.py",
+          "lines": [
+            8,
+            11
+          ]
+        },
+        {
+          "path": "ps5/title/tools/make-title-background.py",
+          "lines": [
+            6,
+            10
+          ]
+        }
+      ],
+      "sha256": "06d27fd91b30a5480c392cb2a58c85d9574273e2af227d2605da4d3ab450737c"
+    },
+    "vkd3d-proton/COPYING": {
+      "component": "vkd3d-proton",
+      "path": "COPYING",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "f51ad4bf5a3bd2b5f383fe28150b23d01e6f5d7b620b194150e7c6a620c43c1f"
+    },
+    "vkd3d-proton/COPYRIGHT-NOTICES.txt": {
+      "component": "vkd3d-proton",
+      "path": "libs",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "selection": "verbatim leading legal comments in C/C++/assembly/Rust source and headers; identical comments grouped",
+      "sha256": "21dad1a49446ee429b6b57cdd29c79a85cf4faf5536e8c7d335528d70b542758"
+    },
+    "vkd3d-proton/LICENSE": {
+      "component": "vkd3d-proton",
+      "path": "LICENSE",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    "vkd3d-proton/bundled/khronos/SPIRV-Headers/LICENSE": {
+      "component": "vkd3d-proton/khronos/SPIRV-Headers",
+      "path": "LICENSE",
+      "revision": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers",
+      "sha256": "ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
+    },
+    "vkd3d-proton/bundled/khronos/SPIRV-Headers/LICENSES/CC-BY-4.0.txt": {
+      "component": "vkd3d-proton/khronos/SPIRV-Headers",
+      "path": "LICENSES/CC-BY-4.0.txt",
+      "revision": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers",
+      "sha256": "d557539df68e771cc1eedcc91d13f70fca930e508d11eedcafa4b15db49e3744"
+    },
+    "vkd3d-proton/bundled/khronos/SPIRV-Headers/LICENSES/MIT.txt": {
+      "component": "vkd3d-proton/khronos/SPIRV-Headers",
+      "path": "LICENSES/MIT.txt",
+      "revision": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers",
+      "sha256": "6d7c9e9d7d12c8d3753bdb24417b84819ba4d6c2f025c37948113d86dc81eef9"
+    },
+    "vkd3d-proton/bundled/khronos/Vulkan-Headers/LICENSE.txt": {
+      "component": "vkd3d-proton/khronos/Vulkan-Headers",
+      "path": "LICENSE.md",
+      "revision": "ad9ce1235e88dc09287e19171dfac384db8ec32c",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "ac24e5ea920e4318e4d02c4086ae51f53cfb03feed06c18df1019e7ada1ec7bc"
+    },
+    "vkd3d-proton/bundled/khronos/Vulkan-Headers/LICENSES/Apache-2.0.txt": {
+      "component": "vkd3d-proton/khronos/Vulkan-Headers",
+      "path": "LICENSES/Apache-2.0.txt",
+      "revision": "ad9ce1235e88dc09287e19171dfac384db8ec32c",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "vkd3d-proton/bundled/khronos/Vulkan-Headers/LICENSES/MIT.txt": {
+      "component": "vkd3d-proton/khronos/Vulkan-Headers",
+      "path": "LICENSES/MIT.txt",
+      "revision": "ad9ce1235e88dc09287e19171dfac384db8ec32c",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "sha256": "1ca3502222d967f3be5751c55f6b7ee735b5383909c3b501495f54b216dbf227"
+    },
+    "vkd3d-proton/bundled/subprojects/dxil-spirv/LICENSE.MIT": {
+      "component": "vkd3d-proton",
+      "path": "subprojects/dxil-spirv/LICENSE.MIT",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "b3ec61378a66f09835a73f53926d9b5cf79a09c9e2fe8bdd0e39aa5403325e1e"
+    },
+    "vkd3d-proton/bundled/subprojects/dxil-spirv/subprojects/dxbc-spirv/LICENSE": {
+      "component": "vkd3d-proton",
+      "path": "subprojects/dxil-spirv/subprojects/dxbc-spirv/LICENSE",
+      "revision": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "sha256": "0f8a5e687bea942a30a8e39b9915294fbe44eca866e71307a9b7083ee0e69ad8"
+    },
+    "zlib/RADV-LICENSE": {
+      "component": "PS5_Mesa",
+      "path": "zlib-1.3.1/LICENSE",
+      "sha256": "845efc77857d485d91fb3e0b884aaa929368c717ae8186b66fe1ed2495753243",
+      "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+      "archive_sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+    },
+    "zlib/native-LICENSE": {
+      "component": "PS5_Vulkan",
+      "path": "zlib-1.3.2/LICENSE",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+      "url": "https://zlib.net/fossils/zlib-1.3.2.tar.gz",
+      "archive_sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+    }
+  }
+}

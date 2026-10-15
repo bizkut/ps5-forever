@@ -1,0 +1,230 @@
+{
+  "schema": 1,
+  "project": {
+    "name": "ps5-forever",
+    "url": "https://github.com/bizkut/ps5-forever.git",
+    "path": "ps5-proton/ps5-wow"
+  },
+  "sources": [
+    {
+      "name": "ps5-wine",
+      "url": "https://github.com/bizkut/ps5-forever-wine.git",
+      "commit": "b48aeb9d5eb6c6e7bf700c8d77e04e36ceef6328",
+      "original_commit": "42e5ed135c28f09b79b5f500e93969ac88a709fb",
+      "content_sha256": "8c354cd1d44bad70284b07deff8a7f21df808079b60b683cd0aeea3ca1dcbc26",
+      "describe": "wine-8.0-21023-g42e5ed135c2",
+      "path": "ps5-proton/ps5-wine"
+    },
+    {
+      "name": "PS5_Vulkan",
+      "url": "https://github.com/bizkut/ps5-forever-vulkan.git",
+      "commit": "2cf759774168c9f99e9af1b1d87934fb98d8229e",
+      "content_sha256": "e0827f679156cb1692dd0bc1a9a2a4ddfbdad42fe32e93708659c0c006a9b306",
+      "path": "PS5_Vulkan",
+      "original_commit": "37c16a073619d4f3fe804a6159c3fbb3402a4b98"
+    },
+    {
+      "name": "PS5_Mesa",
+      "url": "https://github.com/bizkut/ps5-forever-mesa.git",
+      "commit": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+      "content_sha256": "e2a58a53a1ae9155449e689e2254c035aadfa25d92b0ad0aaf71abe0c23f198b",
+      "path": "PS5_Mesa",
+      "original_commit": "15a5e9933e14f6493a7853e8cf1df973dd093eeb"
+    },
+    {
+      "name": "PS5_PayloadSDK",
+      "url": "https://github.com/bizkut/ps5-forever-sdk.git",
+      "commit": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+      "content_sha256": "ab1a054673c6a9d11a373075982f77f13a6360c8ef386a29278f1c269cfc6e85",
+      "path": "PS5_PayloadSDK",
+      "original_commit": "ce068b1857ed9203ace0b65a285821e0c254a47c"
+    },
+    {
+      "name": "pacbrew-repo",
+      "url": "https://github.com/bizkut/ps5-forever-pacbrew.git",
+      "commit": "2e3eaf9c5fda03535d0b5e5c3f807a38acdac452",
+      "content_sha256": "2399ff9d321f2276b789e913f2a0a811c44c67a733a18a9f76794690db8336ff",
+      "path": "pacbrew-repo",
+      "original_commit": "e1df9ec51de964d04b27ac7c90c405afaac79240"
+    },
+    {
+      "name": "vkd3d-proton",
+      "url": "https://github.com/bizkut/ps5-forever-vkd3d-proton.git",
+      "commit": "db62a5510f5cbd1d53976755109630c473dcaa0d",
+      "original_commit": "c4d7a9d63027f253e42de553bc0377ecf2c5120b",
+      "content_sha256": "c617001535465390beabf2e080cdc8dc79ad7eab591b9e1d4a8b81a6be39a31b",
+      "describe": "v3.0a-277-gc4d7a9d6",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton"
+    },
+    {
+      "name": "vkd3d-proton/khronos/SPIRV-Headers",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers",
+      "commit": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "content_sha256": "35cc49354d9c1cc9d487da7dea6f40f3800d23875c6bfb707de95422d75eab51",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/khronos/SPIRV-Headers"
+    },
+    {
+      "name": "vkd3d-proton/khronos/Vulkan-Headers",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "commit": "ad9ce1235e88dc09287e19171dfac384db8ec32c",
+      "content_sha256": "04336a2a509f9f66ba6082ba850611147313e7b563dada0aae495a8a3a1c9925",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/khronos/Vulkan-Headers"
+    },
+    {
+      "name": "vkd3d-proton/subprojects/dxil-spirv",
+      "url": "https://github.com/HansKristian-Work/dxil-spirv",
+      "commit": "219d770799606f15abb3c57a8a9b9d19c2ae94ca",
+      "content_sha256": "678f1e5aedea98192422524283f7377a54962b024f13613be8df5e2bbb958923",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/subprojects/dxil-spirv"
+    },
+    {
+      "name": "vkd3d-proton/subprojects/dxil-spirv/subprojects/dxbc-spirv",
+      "url": "https://github.com/doitsujin/dxbc-spirv",
+      "commit": "29c93aeecd55533a357fdd7c95be5587d1c1f506",
+      "content_sha256": "cb37bb3c8ead473511dd359e9f3c7f27898d63b4b61c94fe5b8887ded2124171",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/subprojects/dxil-spirv/subprojects/dxbc-spirv"
+    },
+    {
+      "name": "vkd3d-proton/subprojects/dxil-spirv/subprojects/dxbc-spirv/submodules/spirv_headers",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "commit": "c8ad050fcb29e42a2f57d9f59e97488f465c436d",
+      "content_sha256": "249abd073ab74b17ffa5ed7042361750da5ff4c5617188adb6ef581912953bb7",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/subprojects/dxil-spirv/subprojects/dxbc-spirv/submodules/spirv_headers"
+    },
+    {
+      "name": "vkd3d-proton/subprojects/dxil-spirv/third_party/spirv-headers",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers",
+      "commit": "f88a2d766840fc825af1fc065977953ba1fa4a91",
+      "content_sha256": "35cc49354d9c1cc9d487da7dea6f40f3800d23875c6bfb707de95422d75eab51",
+      "path": "ps5-proton/ps5-wow/vkd3d-proton/subprojects/dxil-spirv/third_party/spirv-headers"
+    },
+    {
+      "name": "dxvk",
+      "url": "https://github.com/bizkut/ps5-forever-dxvk.git",
+      "commit": "9f8db7dae7e9218eb6f0197ac7b3a61367e3044d",
+      "original_commit": "cee66a77f7a69f8ecb4de6696a7f9f4a4c1ac208",
+      "content_sha256": "3745377e9c6f18223285e79073d42a7d69a7a07cb78771ef89850fbf0723ce41",
+      "describe": "v2.7.1-499-gcee66a77",
+      "path": "ps5-proton/ps5-wow/dxvk"
+    },
+    {
+      "name": "dxvk/include/spirv",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "commit": "04f10f650d514df88b76d25e83db360142c7b174",
+      "content_sha256": "5c5bb1fc1754b5a6c0e18851c5b35ebecac76a080b90db8e32110ed6245d151a",
+      "path": "ps5-proton/ps5-wow/dxvk/include/spirv"
+    },
+    {
+      "name": "dxvk/include/vulkan",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers",
+      "commit": "5d94bb4dcc968cccce1f601324fcaf3eda92a52b",
+      "content_sha256": "295d37e88206049363ea35f53c49608ed6d2b743eb63d83ab1ba36b11fb5e99d",
+      "path": "ps5-proton/ps5-wow/dxvk/include/vulkan"
+    },
+    {
+      "name": "dxvk/subprojects/dxbc-spirv",
+      "url": "https://github.com/doitsujin/dxbc-spirv.git",
+      "commit": "fe5a4ef1e99357c8b9f57e4cfb1195c3dae9707f",
+      "content_sha256": "916f23483be96c54daec83b9e14ee7895122897fc370054edfcce79960145a88",
+      "path": "ps5-proton/ps5-wow/dxvk/subprojects/dxbc-spirv"
+    },
+    {
+      "name": "dxvk/subprojects/dxbc-spirv/submodules/spirv_headers",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "commit": "c8ad050fcb29e42a2f57d9f59e97488f465c436d",
+      "content_sha256": "249abd073ab74b17ffa5ed7042361750da5ff4c5617188adb6ef581912953bb7",
+      "path": "ps5-proton/ps5-wow/dxvk/subprojects/dxbc-spirv/submodules/spirv_headers"
+    },
+    {
+      "name": "dxvk/subprojects/libdisplay-info",
+      "url": "https://github.com/doitsujin/libdisplay-info.git",
+      "commit": "275e6459c7ab1ddd4b125f28d0440716e4888078",
+      "content_sha256": "949db2bde0489281cc2b596fe4d25511006a42d929985f525209a44cc45c2322",
+      "path": "ps5-proton/ps5-wow/dxvk/subprojects/libdisplay-info"
+    }
+  ],
+  "sdk_revision": "a2dad143681dc4f31fd0b45d1f1f214a0667a23b",
+  "radv_revision": "f10c4bac9b71c45a4c794ecc3c227eb6f6a56361",
+  "downloads": [
+    {
+      "name": "llvm-mingw",
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz",
+      "sha256": "bb7bb7654b33d5aa8712acb837c963b2e0c56352560c76105270a3268c665c21"
+    },
+    {
+      "name": "payload-sdk-v0.42",
+      "url": "https://github.com/ps5-payload-dev/sdk/releases/download/v0.42/ps5-payload-sdk.zip",
+      "sha256": "8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
+    },
+    {
+      "name": "freetype-2.14.3",
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
+      "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"
+    },
+    {
+      "name": "nettle-3.10.2",
+      "url": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5"
+    },
+    {
+      "name": "libtasn1-4.21.0",
+      "url": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz",
+      "sha256": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87"
+    },
+    {
+      "name": "gnutls-3.8.13",
+      "url": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e"
+    },
+    {
+      "name": "native-zlib-1.3.2",
+      "url": "https://zlib.net/fossils/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+    },
+    {
+      "name": "radv-zlib-1.3.1",
+      "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+      "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+    },
+    {
+      "name": "radv-zlib-meson-patch",
+      "url": "https://wrapdb.mesonbuild.com/v2/zlib_1.3.1-1/get_patch",
+      "sha256": "e79b98eb24a75392009cec6f99ca5cdca9881ff20bfa174e8b8926d5c7a47095"
+    },
+    {
+      "name": "mozilla-roots-2026-09-25",
+      "url": "https://curl.se/ca/cacert-2026-09-25.pem",
+      "sha256": "a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505"
+    },
+    {
+      "name": "DroidSansFallbackLegacy.ttf",
+      "url": "https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-4.4.4_r2/data/fonts/DroidSansFallbackLegacy.ttf",
+      "sha256": "82a74d0ef369ec7979172023cfff87f04f0a617a2871c39ef6aeb0f399c5cdaf"
+    },
+    {
+      "name": "DroidSansFallback-NOTICE",
+      "url": "https://raw.githubusercontent.com/aosp-mirror/platform_frameworks_base/android-4.4.4_r2/data/fonts/NOTICE",
+      "sha256": "38751245389e1e23f73e6f5384b5cbe7fa972cc4410c5adc9c04b082a0b9561a"
+    },
+    {
+      "name": "NotoSansThai-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSansThai/NotoSansThai-Regular.ttf",
+      "sha256": "404ddfb5ed0aaa6b6ec8a85700d682978992062d67da93903967b56cbd9a4acc"
+    },
+    {
+      "name": "NotoSansArabic-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf",
+      "sha256": "ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b"
+    },
+    {
+      "name": "NotoSansHebrew-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf",
+      "sha256": "a7fa16fffb27bedb060a0866267c29e9859aeb9c21cc33f5b3aaf6eb062eca85"
+    },
+    {
+      "name": "NotoSans-LICENSE",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/LICENSE",
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    }
+  ]
+}
