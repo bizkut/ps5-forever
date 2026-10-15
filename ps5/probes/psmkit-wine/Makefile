@@ -18,6 +18,7 @@ LLVM_MINGW ?= $(HOME)/llvm-mingw
 MINGW_CC ?= $(LLVM_MINGW)/bin/x86_64-w64-mingw32-clang
 MINGW32_CC ?= $(LLVM_MINGW)/bin/i686-w64-mingw32-clang
 WINE_BUILD ?= ../../build/wine-ps5-build
+WINEBUILD ?= ../../build/wine-ps5-tools/tools/winebuild/winebuild
 WRITEBROKER_ELF := ../../build/writebroker/writebroker.elf
 WRITEBROKER_DIR := ../../writebroker
 RUNTIME_OUT := ../../build/title-psmkit-wine-runtime
@@ -88,6 +89,11 @@ runtime-b1-dual:
 .PHONY: radv-release-patched
 radv-release-patched:
 	python3 ../../radv/build-radv.py
+
+# Requires the configured Wine host tools; deliberately separate from test.
+.PHONY: test-winebuild-delayload
+test-winebuild-delayload: test-winebuild-delayload.py $(WINEBUILD)
+	python3 test-winebuild-delayload.py --winebuild "$(WINEBUILD)" --llvm-mingw "$(LLVM_MINGW)"
 
 test-runtime-profile: test-runtime-profile.py runtime_profiles.py runtime_imports.py \
 		runtime-import-policy-b1.json ../../deploy-wine.py

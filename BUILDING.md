@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.002
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.003
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -84,8 +84,17 @@ assemble-only compiler invocations (`-x assembler -c`). The pinned upstream
 entrypoints alias the generic Clang wrapper, which otherwise attempts an
 executable link when Wine assembles individual import-library members. That
 incorrectly pulls in MinGW startup code and reports missing `WinMain` and
-`__wine_import_*_name` symbols. Wine sources, import policy, PE linker flags,
-and workstation toolchains are unchanged.
+`__wine_import_*_name` symbols. This adapter does not choose PE section permissions.
+
+Wine's i386/x86_64 delay-import emitter explicitly declares its `.text$1`
+thunks as COFF code with read/execute (`"xr"`) attributes. LLVM's assembler
+otherwise treats this bare subsection as writable, non-executable data; LLD
+then preserves it as a second non-executable `.text` in the consumer PE. This
+caused the Linux `.002` explorer startup fault at the first delayed
+`SHGetDesktopFolder` call. The fix is in `tools/winebuild/import.c`, not the
+loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchanged.
+Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
+`*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
 `deps.json` inventories SHA-256-pinned downloads. The established recipes also
 verify those digests: FreeType; pacbrew Nettle/mini-gmp, libtasn1 and GnuTLS;
@@ -143,4 +152,21 @@ docker run --rm --pull=never --user "$(id -u):$(id -g)" \
   forever-launcher-linux:ubuntu-24.04 \
   bash -c 'mkdir -p "$HOME"; make -s -C ps5/probes/psmkit-wine test MINGW_CC=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang MINGW32_CC=/opt/llvm-mingw/bin/i686-w64-mingw32-clang'
 ```
+
+After building Wine's host tools, run the focused assembler/linker regression
+inside the same image (paths below are relative to `ps5-wow`):
+
+```sh
+make -s -C ps5/probes/psmkit-wine test-winebuild-delayload \
+  LLVM_MINGW=/opt/llvm-mingw \
+  WINEBUILD=../../build/wine-ps5-tools/tools/winebuild/winebuild
+```
+
+This separate gate uses the actual Wine-generated import archives and MinGW
+delay-load helper, links i386 and x86_64 PE consumers, and follows each initialized
+IAT pointer to its first-call thunk. Both the archive thunk and linked target
+must be readable/executable code without write permission; the IAT must remain
+writable data without execute permission. It fails against the old Wine host
+tool even when ordinary `.text` and the delay helper are executable. No Wine
+runtime, full title build or console execution is needed for this regression.
 

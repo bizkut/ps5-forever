@@ -189,6 +189,9 @@ stage radv python3 ps5/radv/build-radv.py
 stage freetype bash ps5/build-freetype.sh
 stage gnutls bash ps5/build-gnutls.sh
 stage wine build_wine
+stage winebuild-delayload make -s -C ps5/probes/psmkit-wine test-winebuild-delayload \
+    WINEBUILD="$wow/ps5/build/wine-ps5-tools/tools/winebuild/winebuild" \
+    LLVM_MINGW="$LLVM_MINGW"
 stage vkd3d-proton bash ps5/build-vkd3d-proton.sh
 stage dxvk bash ps5/build-dxvk.sh
 stage runtime-b1-dual make -s -C ps5/probes/psmkit-wine runtime-b1-dual
