@@ -9,7 +9,7 @@ on:
       version:
         description: 'Build contentVersion (NN.NNN.NNN); manual runs do not publish'
         required: true
-        default: '01.000.000'
+        default: '01.000.001'
         type: string
 
 permissions:
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 360
     env:
       SOURCE_ROOT: ${{ github.workspace }}/sources
@@ -32,17 +32,15 @@ jobs:
         with:
           path: sources/ps5-proton/ps5-wow
           persist-credentials: false
-      - name: Reserve disk for the SDK and Wine build
+      - name: Check build disk
         run: |
-          # This is a disposable hosted runner. None of these preinstalled
-          # toolchains are used; every build dependency lives in Docker.
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          # Never remove preinstalled tools from a persistent self-hosted machine.
           python3 -c 'import os, shutil; free = shutil.disk_usage(os.environ["GITHUB_WORKSPACE"]).free; print(f"Build disk available: {free // (1 << 30)} GiB"); assert free >= 30 << 30, "release build requires at least 30 GiB free"'
       - name: Check out pinned public sources
         run: python3 "$PRODUCT/ps5/release/fetch-sources.py" "$SOURCE_ROOT"
       - name: Build and qualify both title roles in the pinned container
         env:
-          JOBS: '2'
+          JOBS: ${{ vars.FOREVER_JOBS || '8' }}
         run: bash "$PRODUCT/ps5/release/build-linux.sh" "$SOURCE_ROOT" "$RELEASE_TAG"
       - name: Verify archive and write its catalog digest
         working-directory: sources/ps5-proton/ps5-wow/ps5/build/release

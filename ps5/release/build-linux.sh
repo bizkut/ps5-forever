@@ -12,6 +12,8 @@ if [[ ${1:-} != --container ]]; then
     docker build --platform linux/amd64 --tag "$image" "$here"
     printf 'BUILD_STAGE image seconds=%s\n' "$((SECONDS - start))"
     exec docker run --rm --platform linux/amd64 \
+        --user "$(id -u):$(id -g)" \
+        --env HOME=/tmp/forever-builder \
         --mount "type=bind,source=$sources,target=/sources" \
         --env "JOBS=${JOBS:-8}" \
         --env "PS5_MESA_REVISION=${PS5_MESA_REVISION:-}" "$image" \
@@ -35,6 +37,7 @@ export WINE_SRC=$root/ps5-proton/ps5-wine
 export PS5_PAYLOAD_SDK=$PS5_VULKAN/.deps/native/ps5-payload-sdk
 export PATH=$LLVM_MINGW/bin:$PATH
 export PS5_RADV_REVISION=${PS5_MESA_REVISION:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["radv_revision"])' "$here/deps.json")}
+mkdir -p "$HOME"
 # The writebroker's existing Makefile uses this historic path.
 ln -s "$PS5_PAYLOAD_SDK" "$HOME/ps5-payload-sdk-platform"
 # Never import optional, untracked desktop artwork from a workstation.

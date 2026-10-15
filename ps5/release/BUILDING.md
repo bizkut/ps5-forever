@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.000
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.001
 ```
 
 The tag must equal the source `sce_sys/param.json` content version. This builds
@@ -100,8 +100,11 @@ The published dependency snapshots have fresh histories. Their content
 fingerprints and original build-version provenance are recorded separately;
 no private GitHub repository or development history is needed.
 Keep at least **30 GiB free** for sources, build output and Docker. The measured
-cold workspace used 13 GiB before Docker overhead. Hosted CI uses `JOBS=2`,
-including RADV Ninja and Wine's `install-lib`; local builds may raise it.
+cold workspace used 13 GiB before Docker overhead. CI targets a self-hosted
+Linux x86-64 runner and defaults to `JOBS=8` (override with the `FOREVER_JOBS`
+repository variable). RADV Ninja and Wine's `install-lib` honor the same cap.
+The container runs with the invoking user's UID/GID, writes only its temporary
+home and the supplied source/build tree, and never removes host toolchains.
 
 For the macOS compatibility checks (not a full title rebuild):
 
