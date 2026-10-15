@@ -40,8 +40,10 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.001
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.002
 ```
+
+Source validation and the full host suite run before the SDK and runtime builds.
 
 The tag must equal the source `sce_sys/param.json` content version. This builds
 the Docker image, then builds the SDK, native title tooling/clean-room libc,
@@ -72,8 +74,18 @@ is unpacked only to bootstrap HTTPS trust; no packages or dependencies are
 installed from the live Ubuntu archive before switching to the snapshot.
 The release container sets `SOURCE_DATE_EPOCH=0` and passes
 `PS5_PE_LDFLAGS=-Wl,--no-insert-timestamp` to Wine and both graphics builders.
-This removes wall-clock PE/export/debug-directory timestamps; ordinary Mac
-builds keep their existing flags unless that variable is explicitly set.
+This requests zero timestamps from the PE linker; Wine-generated export and
+data-only headers instead retain deterministic filename/CPU hashes. Ordinary
+Mac builds keep their existing flags unless that variable is explicitly set.
+These settings alone do not prove byte-for-byte release reproducibility.
+
+The Linux image replaces only llvm-mingw's i686/x86_64 `as` entrypoints with
+assemble-only compiler invocations (`-x assembler -c`). The pinned upstream
+entrypoints alias the generic Clang wrapper, which otherwise attempts an
+executable link when Wine assembles individual import-library members. That
+incorrectly pulls in MinGW startup code and reports missing `WinMain` and
+`__wine_import_*_name` symbols. Wine sources, import policy, PE linker flags,
+and workstation toolchains are unchanged.
 
 `deps.json` inventories SHA-256-pinned downloads. The established recipes also
 verify those digests: FreeType; pacbrew Nettle/mini-gmp, libtasn1 and GnuTLS;

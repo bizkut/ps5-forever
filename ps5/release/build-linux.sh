@@ -180,6 +180,9 @@ cleanup() {
 }
 trap cleanup EXIT
 stage inputs validate_sources
+stage host-tests make -s -C ps5/probes/psmkit-wine test \
+    MINGW_CC="$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" \
+    MINGW32_CC="$LLVM_MINGW/bin/i686-w64-mingw32-clang"
 stage sdk build_sdk
 stage host-tools build_host_tools
 stage radv python3 ps5/radv/build-radv.py

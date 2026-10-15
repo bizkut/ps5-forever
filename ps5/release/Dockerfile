@@ -36,6 +36,14 @@ RUN curl --fail --location \
     && mkdir /opt/llvm-mingw \
     && tar -xJf /tmp/llvm-mingw.tar.xz --strip-components=1 -C /opt/llvm-mingw \
     && rm /tmp/llvm-mingw.tar.xz
+# llvm-mingw's as aliases use its generic compiler wrapper without -c.
+# Wine invokes them as standalone assemblers when creating import libraries.
+RUN set -eu; for arch in i686 x86_64; do \
+      assembler="/opt/llvm-mingw/bin/$arch-w64-mingw32-as"; \
+      rm "$assembler"; \
+      printf '#!/bin/sh\nexec /opt/llvm-mingw/bin/%s-w64-mingw32-clang -x assembler -c "$@"\n' "$arch" > "$assembler"; \
+      chmod 755 "$assembler"; \
+    done
 ENV PATH=/opt/venv/bin:/usr/lib/llvm-19/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LLVM_MINGW=/opt/llvm-mingw \
     LLVM_CONFIG=/usr/bin/llvm-config-19 \
