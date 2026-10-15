@@ -115,3 +115,20 @@ bash -n ps5/release/build-linux.sh # repeat for edited build/staging scripts
 
 The portable scripts retain the existing Mac SDK, Homebrew and llvm-mingw
 defaults; Linux selects its tool paths through the container environment.
+
+## Linux development checks
+
+After the pinned build image exists, run the host suite from a source tree
+with dependencies fetched. It keeps compiler warnings as errors and does not
+contact the console. These checks are not native PS5 execution.
+
+```sh
+SOURCE_ROOT=/absolute/SOURCE_ROOT
+docker run --rm --pull=never --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp/forever-host-tests \
+  --mount "type=bind,source=$SOURCE_ROOT,target=/sources" \
+  --workdir /sources/ps5-proton/ps5-wow \
+  forever-launcher-linux:ubuntu-24.04 \
+  bash -c 'mkdir -p "$HOME"; make -s -C ps5/probes/psmkit-wine test MINGW_CC=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang MINGW32_CC=/opt/llvm-mingw/bin/i686-w64-mingw32-clang'
+```
+

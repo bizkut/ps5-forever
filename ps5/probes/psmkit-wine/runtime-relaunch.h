@@ -79,7 +79,8 @@ static inline int pw_game_wire_decode(int argc, char **argv, const char *prefix,
     memcpy(loader + cwd_len + 1, base, base_len - 4);
     memcpy(loader + cwd_len + 1 + base_len - 4, "_loader.dll", sizeof("_loader.dll"));
     if (!exists(loader, context)) return -ENOENT;
-    if (separator_out) *separator_out = separator; return 0;
+    if (separator_out) *separator_out = separator;
+    return 0;
 }
 static inline int pw_game_request_pack(struct pw_game_request *request,
                                        const struct pw_game_wire *wire)

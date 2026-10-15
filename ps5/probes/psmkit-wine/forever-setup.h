@@ -301,13 +301,18 @@ fail:
 static inline int forever_install_wow_config(const char *share, const char *prefix)
 {
     char game[1100], wtf[1100], config[1100], source[1100];
-    snprintf(game, sizeof(game), "%s" FOREVER_WOW_DIR, prefix);
+    int length, error;
+    if ((length = snprintf(game, sizeof(game), "%s" FOREVER_WOW_DIR, prefix)) < 0 ||
+        length >= (int)sizeof(game)) return -ENAMETOOLONG;
     if (!forever_is_dir(game)) return 0;
-    snprintf(wtf, sizeof(wtf), "%s/WTF", game);
-    snprintf(config, sizeof(config), "%s/Config.wtf", wtf);
+    if ((length = snprintf(wtf, sizeof(wtf), "%s/WTF", game)) < 0 ||
+        length >= (int)sizeof(wtf)) return -ENAMETOOLONG;
+    if ((length = snprintf(config, sizeof(config), "%s/Config.wtf", wtf)) < 0 ||
+        length >= (int)sizeof(config)) return -ENAMETOOLONG;
     if (forever_exists(config)) return 0;
-    int error = forever_mkdirs(wtf);
-    snprintf(source, sizeof(source), "%s/Config.wtf", share);
+    if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
+        length >= (int)sizeof(source)) return -ENAMETOOLONG;
+    error = forever_mkdirs(wtf);
     if (!error) error = forever_copy_file(source, config);
     return error ? error : 1;
 }

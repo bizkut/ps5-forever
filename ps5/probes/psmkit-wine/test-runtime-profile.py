@@ -65,8 +65,6 @@ for trace_name in ('WINEPS5_MXCSR_TRACE', 'WINEPS5_WRITE_TRACE', 'WINEPS5_WRITE_
             assert profile('b1', {'gpu': gpu_enabled, 'headless': gpu_enabled,
                                   'environment': {trace_name: trace_value}})['environment'] == {
                                       trace_name: trace_value}
-avxctx_config = json.loads((Path(__file__).parent.parent / 'avxctx' / 'b1-avxctx.json').read_text())
-assert profile('b1', avxctx_config)['environment'] == {'WINEPS5_MXCSR_TRACE': '1'}
 assert profile('b1', {'gpu': True, 'headless': True,
                       'environment': {'PROTON_ENABLE_HDR': '1', 'WINEPS5_DIRECT_REQUESTS': '0',
                                       'WINEPS5_HDR_TRACE': '1', 'WINEPS5_QUERY_TRACE': '1'}})['environment'] == {

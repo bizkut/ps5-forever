@@ -415,7 +415,7 @@ static int hud_toggle_file(const char *path, const char *temporary, int *enabled
         }
         close(fd);
         /* Never truncate user content, including an unexpectedly large file. */
-        if (size == sizeof(text) || memchr(text, 0, size)) return -1;
+        if (size >= sizeof(text) || memchr(text, 0, size)) return -1;
     }
     for (size_t i = 0; i < size;)
     {
