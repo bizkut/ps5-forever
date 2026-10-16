@@ -13,13 +13,13 @@
 #define MAX_WINDOWS 128u
 #define MAX_DAMAGE 32u
 #define MAX_SURFACE_BYTES (64u * 1024u * 1024u)
-#define MAX_MAPPED_BYTES (128u * 1024u * 1024u)
+#define MAX_MAPPED_BYTES (256u * 1024u * 1024u)
 #define CURSOR_WIDTH PS5_CURSOR_WIDTH
 #define CURSOR_HEIGHT PS5_CURSOR_HEIGHT
-#define BACKGROUND 0xff008080u
+#define BACKGROUND 0xff120a1eu  /* the picture's dark violet */
 /* The launcher's desktop picture at the display's size, 0xAARRGGBB words
- * (ps5/title/build.sh decodes it from PS5_WineLauncher's desktop.dds); the
- * plain colour above stands in when the file is missing. */
+ * (ps5/title/build.sh decodes it from sce_sys/pic0.dds, the drawn home-screen
+ * background); the plain colour above stands in when the file is missing. */
 #define BACKGROUND_PATH "/app0/assets/desktop.bgra"
 
 static uint32_t background[DISPLAY_WIDTH * DISPLAY_HEIGHT];
@@ -44,6 +44,7 @@ static void load_background(void)
 struct window
 {
     struct ps5_desktop_window state;
+    const uint8_t *mapping;
     const uint8_t *pixels;
     size_t mapped_bytes;
     int used;
@@ -307,9 +308,10 @@ static void damage_window(const struct window *window)
 static void unmap_window(struct window *window)
 {
     if (!window->pixels) return;
-    munmap((void *)window->pixels, window->mapped_bytes);
+    munmap((void *)window->mapping, window->mapped_bytes);
     mapped_bytes -= window->mapped_bytes;
     window->pixels = NULL;
+    window->mapping = NULL;
     window->mapped_bytes = 0;
 }
 
@@ -320,7 +322,7 @@ static size_t surface_bytes(const struct ps5_desktop_window *state)
     if (!state->shm[0] || !state->width || !state->height ||
         (state->stride & 3) || state->stride < (uint64_t)state->width * 4 ||
         bytes > MAX_SURFACE_BYTES) return 0;
-    return (size_t)bytes;
+    return 2 * (size_t)bytes;
 }
 
 static void map_window(struct window *window, size_t bytes)
@@ -340,7 +342,10 @@ static void map_window(struct window *window, size_t bytes)
     pixels = mmap(NULL, bytes, PROT_READ, MAP_SHARED, fd, 0);
     close(fd);
     if (pixels == MAP_FAILED) return;
-    window->pixels = pixels;
+    window->mapping = pixels;
+    /* The first stride*height bytes are the live draw plane. Only flushes
+     * update the second plane; window moves and cursor redraws read it too. */
+    window->pixels = (const uint8_t *)pixels + bytes / 2;
     window->mapped_bytes = bytes;
     mapped_bytes += bytes;
 }

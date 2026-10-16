@@ -144,6 +144,12 @@ delete `/data/forever` to remove Battle.net, WoW and your settings.
 - **"Forever Launcher cannot use /data"**: update ShadowMountPlus to a version that lets apps use `/data`.
 - **Battle.net sign-in fails**: use the email code and make sure an authenticator is
   enabled on your account. Third-party sign-in is not supported.
+- **Battle.net reports only about 17 GB free**: Windows disk-space queries use the
+  write broker's real storage counters for `/data/forever`. If the broker is
+  unavailable or is from an older app version, they fall back to the title's
+  synthetic 16 GiB free-space answer. The kernel log identifies the source with
+  `wine: title disk space source=broker` or `source=synthetic`; restart the updated
+  app so it can replace an older broker.
 - **Frame generation does nothing**: check that `wineps5-fg.txt` says `fg=on`. The on-screen
   display (hold L3 + R3) shows `FG LOSSLESS` or `FG FSR3`; for Lossless Scaling, the file must be
   exactly `/data/forever/prefix/drive_c/Lossless.dll`.

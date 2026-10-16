@@ -125,11 +125,12 @@ enum pw_native_op {
 };
 #define PW_NATIVE_BYTES 256
 #define PW_DESKTOP_NAME_BYTES 64
-#define PW_DESKTOP_SURFACE_MAX (64u * 1024u * 1024u)
+/* Both planes, preserving the compositor's 64 MiB per-plane limit. */
+#define PW_DESKTOP_SURFACE_MAX (128u * 1024u * 1024u)
 struct pw_native_request { uint32_t op; int32_t arg[6]; char text[PW_NATIVE_BYTES]; };
 struct pw_native_reply { int32_t result, net_errno; uint8_t data[PW_NATIVE_BYTES]; };
 struct pw_surface_request {
-    uint64_t size;
+    uint64_t size; /* total shared object bytes: draw plane + published plane */
     int32_t op;
     uint32_t reserved;
     char name[PW_DESKTOP_NAME_BYTES];

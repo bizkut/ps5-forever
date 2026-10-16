@@ -40,8 +40,9 @@ export PS5_RADV_REVISION=${PS5_MESA_REVISION:-$(python3 -c 'import json,sys; pri
 mkdir -p "$HOME"
 # The writebroker's existing Makefile uses this historic path.
 ln -s "$PS5_PAYLOAD_SDK" "$HOME/ps5-payload-sdk-platform"
-# Never import optional, untracked desktop artwork from a workstation.
-export DESKTOP_DDS=/nonexistent/forever-desktop.dds
+# The desktop picture is the committed, drawn sce_sys/pic0.dds; never import
+# optional, untracked artwork from a workstation.
+unset DESKTOP_DDS
 mkdir -p ps5/build/release/logs
 logs=$wow/ps5/build/release/logs
 export FOREVER_SOURCE_ROOT=$root

@@ -1,6 +1,7 @@
 # Exact publication allowlist for the qualified maintenance/game dual runtime.
 # Qualification receipts are intentionally private; byte identities come from the qualifier.
 # Runtime changes require a deliberate publication inventory update.
+assets/desktop.bgra
 eboot.bin
 game-child.bin
 game.bin

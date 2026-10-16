@@ -111,8 +111,9 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch \
 		$(HOST_OUT)/test-battlenet-restart $(HOST_OUT)/test-audio-mixer \
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
-		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-title-log \
+		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-title-icon \
+		$(HOST_OUT)/test-desktop-surface \
 		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile \
 		../../tools/test-ps5-capture.py
 	$(HOST_OUT)/test-protocol
@@ -129,9 +130,11 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-audio-selection
 	$(HOST_OUT)/test-fd-parking
 	$(HOST_OUT)/test-writebroker-autostart
+	$(HOST_OUT)/test-writebroker-space
 	$(HOST_OUT)/test-title-log
 	$(HOST_OUT)/test-forever-setup
 	$(HOST_OUT)/test-title-icon
+	$(HOST_OUT)/test-desktop-surface
 	python3 ../../tools/test-ps5-capture.py
 
 $(HOST_OUT)/test-fd-parking: test-fd-parking.c build-fd-parking-test.py $(WINE_SRC)/server/fd.c
@@ -155,9 +158,25 @@ $(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
+.PHONY: test-desktop-surface
+test-desktop-surface: $(HOST_OUT)/test-desktop-surface
+	$(HOST_OUT)/test-desktop-surface
+
+$(HOST_OUT)/test-desktop-surface: test-desktop-surface.c build-desktop-surface-test.py \
+		../../title/compositor.c ../../title/compositor.h ../../title/display.h \
+		$(WINE_SRC)/dlls/wineps5.drv/window.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
+		$(WINE_SRC)/include/wine/ps5_desktop.h $(WINE_SRC)/include/wine/ps5_title.h \
+		runtime-parent.c protocol.h
+	python3 build-desktop-surface-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
 $(HOST_OUT)/test-writebroker-autostart: test-writebroker-autostart.c writebroker-autostart.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+$(HOST_OUT)/test-writebroker-space: test-writebroker-space.c build-writebroker-space-test.py \
+		$(WRITEBROKER_DIR)/writebroker.c $(WINE_SRC)/dlls/ntdll/unix/file.c \
+		$(WINE_SRC)/include/wine/ps5_writebroker.h
+	python3 build-writebroker-space-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 
 $(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h
 	mkdir -p $(HOST_OUT)

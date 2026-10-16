@@ -157,10 +157,12 @@ if [[ -f $here/sce_sys/pic0.dds ]]; then
     cp "$here/sce_sys/pic0.dds" "$out/sce_sys/pic1.dds"
 fi
 cp "$vulkan/runtime/libc.prx" "$out/sce_module/libc.prx"
-# The desktop picture: PS5_WineLauncher's built desktop.dds (BC7, 3840x2160,
-# possibly Blizzard's artwork, so it is never committed), decoded and scaled
-# to the display as 0xAARRGGBB words. Without it the title draws a plain colour.
-desktop=${DESKTOP_DDS:-$here/../../../../PS5_WineLauncher/dist/$TITLE_ID/assets/desktop.dds}
+# The desktop picture behind Wine's windows: the drawn home-screen background
+# above (tools/make-title-background.py), decoded and scaled to the display as
+# 0xAARRGGBB words. DESKTOP_DDS may name another 3840x2160 DDS for a local
+# build; that file is never committed. Without a picture the title draws a
+# plain colour.
+desktop=${DESKTOP_DDS:-$here/sce_sys/pic0.dds}
 if [[ -f $desktop ]]; then
     mkdir -p "$out/assets"
     python3 - "$desktop" "$out/assets/desktop.bgra" <<'EOF'

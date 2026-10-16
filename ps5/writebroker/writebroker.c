@@ -19,6 +19,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#ifdef __linux__
+#include <sys/vfs.h>
+#else
+#include <sys/mount.h>
+#endif
 #include <sys/time.h>
 #include <unistd.h>
 #include <ps5/klog.h>
@@ -121,6 +126,30 @@ static int serve_write(int client, const struct wb_write *request, unsigned char
     return transfer(client, &reply, sizeof(reply), 1);
 }
 
+static int serve_statfs(int client, const struct wb_write *request)
+{
+    char path[WB_MAX_PATH + 1];
+    struct wb_statfs_reply reply = {.magic = WB_MAGIC};
+    struct statfs info;
+
+    if (!request->path_length || request->path_length > WB_MAX_PATH ||
+        request->offset || request->length || request->reserved)
+        return -1;
+    if (transfer(client, path, request->path_length, 0)) return -1;
+    path[request->path_length] = 0;
+    if (memchr(path, 0, request->path_length)) return -1;
+    if (!wb_path_root(path)) reply.result = -EACCES;
+    else if (statfs(path, &info)) reply.result = -errno;
+    else
+    {
+        reply.bsize = info.f_bsize;
+        reply.blocks = info.f_blocks;
+        reply.bfree = info.f_bfree;
+        reply.bavail = info.f_bavail > 0 ? (uint64_t)info.f_bavail : 0;
+    }
+    return transfer(client, &reply, sizeof(reply), 1);
+}
+
 /* A regular file of at most limit bytes into buffer: its size, or -errno */
 static ssize_t read_whole(const char *path, unsigned char *buffer, size_t limit)
 {
@@ -215,6 +244,11 @@ static void *serve(void *arg)
             else if (other) answer.result = install_icon(buffer, other);
             free(other);
             if (transfer(client, &answer, sizeof(answer), 1)) break;
+            continue;
+        }
+        if (!reply.result && request.magic == WB_STATFS_MAGIC)
+        {
+            if (serve_statfs(client, &request)) break;
             continue;
         }
         if (reply.result || request.magic != WB_MAGIC || serve_write(client, &request, buffer)) break;
