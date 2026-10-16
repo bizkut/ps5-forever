@@ -16,6 +16,10 @@ Wine, using DirectX 12 on the PS5's own GPU. The tested game build is
 > supported by Blizzard Entertainment, Sony Interactive Entertainment or Valve.
 > Using unofficial software with an online game is at your own risk.
 
+## Video
+
+[![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
+
 ## Changes in 01.000.006
 
 - Fixes endless loading on Battle.net's password sign-in page.
