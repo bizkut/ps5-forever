@@ -672,13 +672,8 @@ static void route_ime(const struct ime_edit *edit)
     if (edit->enter) tap_key(0x28);
 }
 
-static void log_keyboard_raw_diagnostics(void)
+static void log_keyboard_open_diagnostics(void)
 {
-    static const char digits[] = "0123456789abcdef";
-    static const char *const sources[] = {"state", "read"};
-    uint8_t state[INPUT_KEYBOARD_STATE_BYTES];
-    char hex[INPUT_KEYBOARD_STATE_BYTES * 2 + 1];
-
     for (unsigned slot = 0; slot < input_keyboard_diagnostic_count(); slot++)
     {
         struct input_keyboard_open_diagnostic opened;
@@ -687,24 +682,6 @@ static void log_keyboard_raw_diagnostics(void)
                    " rc=%#x handle=%#x",
                    slot, opened.user, opened.device_index, opened.param_null ? "null" : "zero",
                    (unsigned)opened.open_rc, (unsigned)opened.handle);
-        for (unsigned source = 0; source < INPUT_KEYBOARD_DIAGNOSTIC_SOURCE_COUNT; source++)
-        {
-            unsigned ordinal;
-            int handle;
-            while (input_take_keyboard_raw_diagnostic(slot, source, &ordinal, &handle, state))
-            {
-                for (unsigned i = 0; i < INPUT_KEYBOARD_STATE_BYTES; i++)
-                {
-                    hex[i * 2] = digits[state[i] >> 4];
-                    hex[i * 2 + 1] = digits[state[i] & 0xf];
-                }
-                hex[sizeof(hex) - 1] = 0;
-                io_log("title keyboard diagnostic=raw96 source=%s slot=%u handle=%#x"
-                       " distinct=%u/%u tester=press_only_A_Shift_Return bytes=%s",
-                       sources[source], slot, handle, ordinal,
-                       INPUT_KEYBOARD_DIAGNOSTIC_STATES, hex);
-            }
-        }
     }
 }
 
@@ -728,7 +705,7 @@ static void *poll_devices(void *unused)
         }
         clock_gettime(CLOCK_MONOTONIC, &now);
         input_poll(on_input, NULL);
-        log_keyboard_raw_diagnostics();
+        log_keyboard_open_diagnostics();
         {
             unsigned index, length;
             if (input_take_keyboard_activity(&index, &length))

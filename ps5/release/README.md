@@ -77,8 +77,8 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 - Your account needs an **authenticator** enabled.
 - Signing in with **Google, Apple, Facebook, Xbox, PlayStation or any other
   third-party account is not supported.**
-- Forever Launcher does **not save or log your Battle.net password**. Like on a PC,
-  Battle.net keeps its own sign-in token in your user data folder so you stay signed in.
+- Forever Launcher does not implement credential capture. Battle.net keeps its
+  own sign-in token in your user data folder so you stay signed in.
 
 ## Controls
 
@@ -158,6 +158,14 @@ The first start after an update copies the app's new Windows files into
 
 Delete the app from the home screen (or delete `/data/homebrew/PPSA99030`), then
 delete `/data/forever` to remove Battle.net, WoW and your settings.
+
+## Privacy and support data
+
+- Release logs retain aggregate input-health counters, not raw keyboard records,
+  key usages or modifiers.
+- Treat `/data/forever` as sensitive shared Wine-prefix storage. Never include
+  registry hives, browser profiles, session/account files or saved credentials in
+  support bundles, and review Wine/application logs and screenshots before sharing.
 
 ## Troubleshooting
 

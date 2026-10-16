@@ -4,13 +4,38 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <setjmp.h>
+#include <time.h>
+#include <unistd.h>
+static int test_clock_gettime(clockid_t clock, struct timespec *now);
+static int test_usleep(useconds_t usecs);
+#define clock_gettime test_clock_gettime
+#define usleep test_usleep
 #include "runtime-input.c"
+#undef clock_gettime
+#undef usleep
 
 static int osk_calls, osk_open, vibration_calls, vibration_result;
-static int open_diagnostic_pending, raw_diagnostic_pending;
+static int open_diagnostic_pending, raw_diagnostic_pending, raw_diagnostic_calls;
+static int aggregate_diagnostic_pending, testing_poll, poll_clock_calls;
+static jmp_buf poll_done;
 static int privilege_calls, phase_switch_calls;
 static uint8_t motors[2];
 static char logged_line[512];
+static char logged_output[8192];
+static int test_clock_gettime(clockid_t clock, struct timespec *now)
+{
+    if (!testing_poll) return clock_gettime(clock, now);
+    assert(clock == CLOCK_MONOTONIC);
+    *now = (struct timespec){.tv_sec = poll_clock_calls++ ? 10 : 0};
+    return 0;
+}
+static int test_usleep(useconds_t usecs)
+{
+    if (!testing_poll) return usleep(usecs);
+    assert(usecs == 4000);
+    longjmp(poll_done, 1);
+}
 int input_open(int *status) { *status = 0; return 1; }
 const char *input_describe(void) { return "host test"; }
 int input_pad_handle(void) { return 7; }
@@ -25,13 +50,26 @@ int input_take_keyboard_open_diagnostic(unsigned slot, struct input_keyboard_ope
     return 1;
 }
 int input_take_keyboard_diagnostics(unsigned index, struct input_keyboard_diagnostics *out)
-{ (void)index; (void)out; return 0; }
+{
+    assert(!index);
+    if (!aggregate_diagnostic_pending) return 0;
+    aggregate_diagnostic_pending = 0;
+    *out = (struct input_keyboard_diagnostics){
+        .handle = 100, .user = 77, .device_index = 1, .param_null = 1,
+        .reads = 10, .rc_nonzero = 2, .last_rc = -3, .connected = 8,
+        .byte8_nonzero = 1, .last_byte8 = 0xa5, .length_nonzero = 4, .max_length = 2,
+        .usage_nonzero = 11, .queue_reads = 12, .queue_errors = 3, .last_queue_rc = -4,
+        .queue_records = 9, .queue_connected = 7, .queue_usage_nonzero = 6,
+    };
+    return 1;
+}
 int input_take_keyboard_activity(unsigned *index, unsigned *length)
 { (void)index; (void)length; return 0; }
 int input_take_keyboard_raw_diagnostic(unsigned slot, unsigned source, unsigned *ordinal,
                                        int *handle, uint8_t state[INPUT_KEYBOARD_STATE_BYTES])
 {
     assert(!slot);
+    raw_diagnostic_calls++;
     if (source != INPUT_KEYBOARD_DIAGNOSTIC_STATE || !raw_diagnostic_pending) return 0;
     raw_diagnostic_pending = 0;
     *ordinal = 1;
@@ -60,6 +98,13 @@ void io_log(const char *format, ...)
     va_start(args, format);
     vsnprintf(logged_line, sizeof(logged_line), format, args);
     va_end(args);
+    if (testing_poll)
+    {
+        size_t length = strlen(logged_output);
+        int written = snprintf(logged_output + length, sizeof(logged_output) - length,
+                               "%s\n", logged_line);
+        assert(written >= 0 && (size_t)written < sizeof(logged_output) - length);
+    }
 }
 static int text_events;
 static void count_text(const struct pointer_event *pointer_event, void *context)
@@ -85,6 +130,38 @@ int wsi_videoout_cursor_disable(void)
     if (!cursor_open) return 1;
     cursor_shown = 0;
     return 0;
+}
+
+static void test_keyboard_logging(void)
+{
+    pad_sample = (struct input_event){.kind = INPUT_PAD,
+        .lx = 128, .ly = 128, .rx = 128, .ry = 128};
+    open_diagnostic_pending = raw_diagnostic_pending = aggregate_diagnostic_pending = 1;
+    atomic_store(&stat_queued, 7);
+    atomic_store(&stat_read, 5);
+    atomic_store(&stat_resets, 2);
+    testing_poll = 1;
+    if (!setjmp(poll_done)) poll_devices(NULL);
+    testing_poll = 0;
+    assert(!open_diagnostic_pending && !aggregate_diagnostic_pending);
+    assert(raw_diagnostic_pending && !raw_diagnostic_calls);
+    assert(strstr(logged_output, "title keyboard diagnostic=open slot=0 user=77 index=1"));
+    assert(strstr(logged_output, "param=null rc=0x64 handle=0x64"));
+    assert(strstr(logged_output, "title input window_s=10 queued=7 read=5 resets=2"));
+    assert(strstr(logged_output, "privilege=pre calls=10 rc_nonzero=2"));
+    assert(strstr(logged_output, "connected=8 byte8_nonzero=1 last_byte8=0xa5"));
+    assert(strstr(logged_output, "length_nonzero=4 max_length=2 usage_nonzero=11"));
+    assert(strstr(logged_output, "privilege=pre calls=12 errors=3"));
+    assert(strstr(logged_output, "records=9 connected=7 usage_nonzero=6"));
+    assert(strstr(logged_output, "diagnostic=privilege"));
+    assert(!strstr(logged_output, "raw96"));
+    assert(!strstr(logged_output, "bytes="));
+    assert(!strstr(logged_output, "00010203"));
+    assert(!strstr(logged_output, "5e5f"));
+    assert(!strstr(logged_output, "usage="));
+    assert(!strstr(logged_output, "modifiers="));
+    atomic_store(&stat_queued, 0);
+    atomic_store(&stat_read, 0);
 }
 
 int main(void)
@@ -165,21 +242,7 @@ int main(void)
         assert(!rmdir(directory));
     }
     pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
-    open_diagnostic_pending = 1;
-    log_keyboard_raw_diagnostics();
-    assert(strstr(logged_line, "title keyboard diagnostic=open slot=0 user=77 index=1"));
-    assert(strstr(logged_line, "param=null rc=0x64 handle=0x64"));
-    raw_diagnostic_pending = 1;
-    log_keyboard_raw_diagnostics();
-    {
-        const char *bytes = strstr(logged_line, " bytes=");
-        assert(strstr(logged_line,
-                      "title keyboard diagnostic=raw96 source=state slot=0 handle=0x64 distinct=1/4"));
-        assert(strstr(logged_line, "tester=press_only_A_Shift_Return"));
-        assert(bytes && strlen(bytes + 7) == INPUT_KEYBOARD_STATE_BYTES * 2);
-        assert(!memcmp(bytes + 7, "00010203", 8));
-        assert(!strcmp(bytes + 7 + INPUT_KEYBOARD_STATE_BYTES * 2 - 4, "5e5f"));
-    }
+    test_keyboard_logging();
     {
         uint32_t image[CURSOR_SLOT_BYTES / sizeof(uint32_t)];
         cursor_build_image(image);
