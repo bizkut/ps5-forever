@@ -57,6 +57,28 @@ static inline int forever_mkdirs(const char *path)
     return forever_is_dir(path) ? 0 : -ENOTDIR;
 }
 
+/* The Program Files folders wineboot makes in a new prefix. A prefix whose
+ * first wineboot did not finish lacks them, and installers then reject their
+ * default location. Only missing folders are made; an existing file of the
+ * same name is never replaced. Returns how many were made, or -errno. */
+static inline int forever_standard_folders(const char *prefix)
+{
+    static const char *const names[] = { "Program Files", "Program Files (x86)" };
+    char path[1024];
+    int made = 0;
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    {
+        if (snprintf(path, sizeof(path), "%s/drive_c/%s", prefix, names[i]) >= (int)sizeof(path))
+            return -ENAMETOOLONG;
+        if (forever_is_dir(path)) continue;
+        if (forever_exists(path)) return -ENOTDIR;
+        if (mkdir(path, 0777) && errno != EEXIST) return -errno;
+        if (!forever_is_dir(path)) return -ENOTDIR;
+        ++made;
+    }
+    return made;
+}
+
 /* Write all of data to path through a temporary name, so a reader never sees
  * a partial file. 0 or -errno. */
 static inline int forever_write_file(const char *path, const void *data, size_t size)

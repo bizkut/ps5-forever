@@ -181,6 +181,31 @@ static void test_wow_config(void)
                    "SET mine \"1\"\n"));
 }
 
+/* A prefix whose first wineboot never finished lacks the Program Files
+ * folders; the Battle.net installer rejects its default location then. */
+static void test_standard_folders(void)
+{
+    char prefix[1024], dir[1024];
+    path(prefix, "folders/prefix");
+    put("folders/prefix/drive_c/users/keep", "");
+    assert(forever_standard_folders(prefix) == 2);
+    path(dir, "folders/prefix/drive_c/Program Files");
+    assert(forever_is_dir(dir));
+    path(dir, "folders/prefix/drive_c/Program Files (x86)");
+    assert(forever_is_dir(dir));
+    assert(forever_standard_folders(prefix) == 0); /* nothing left to create */
+
+    path(prefix, "partial/prefix");
+    put("partial/prefix/drive_c/Program Files (x86)/Battle.net/Battle.net.exe", "MZ");
+    assert(forever_standard_folders(prefix) == 1);
+    assert(text_is("partial/prefix/drive_c/Program Files (x86)/Battle.net/Battle.net.exe", "MZ"));
+
+    path(prefix, "blocked/prefix");
+    put("blocked/prefix/drive_c/Program Files", "not a folder");
+    assert(forever_standard_folders(prefix) == -ENOTDIR); /* a user's file is never replaced */
+    assert(text_is("blocked/prefix/drive_c/Program Files", "not a folder"));
+}
+
 int main(void)
 {
     snprintf(root, sizeof(root), "/tmp/forever-setup-test-%ld", (long)getpid());
@@ -189,6 +214,7 @@ int main(void)
     test_migration();
     test_managed_sync();
     test_wow_config();
+    test_standard_folders();
     char command[300];
     snprintf(command, sizeof(command), "rm -rf %s", root);
     if (system(command)) return 1;

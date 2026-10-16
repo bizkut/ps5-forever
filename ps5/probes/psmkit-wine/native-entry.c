@@ -1701,6 +1701,15 @@ static int pw_forever_start(void)
         return 0;
 #endif
     }
+    result = forever_standard_folders(FOREVER_PREFIX);
+    io_log("forever: standard folders result=%d", result);
+    if (result < 0)
+    {
+        snprintf(message, sizeof(message), "Could not create the Program Files folders in " FOREVER_DRIVE_C
+                 " (error %d).", -result);
+        forever_say(message);
+        return -1;
+    }
     for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); ++i)
     {
         result = forever_write_if_absent(defaults[i][0], defaults[i][1]);
