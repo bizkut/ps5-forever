@@ -162,7 +162,9 @@ assert profile('b1', {'refused_programs': ['BlizzardError.exe']})['refused_progr
     'BlizzardError.exe']
 assert b1['installer_dos'] == r'C:\Battle.net-Setup.exe'
 assert b1['installer_url'] == 'https://downloader.battle.net//download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'
-for key in ('installer_url', 'installer_dos', 'launcher_unix', 'installer_unix', 'installer_cwd'):
+# A direct versioned download, tried only after the Live redirect fails.
+assert b1['installer_fallback_url'] == 'https://downloader.battle.net/download/installer/win/1.0.66/Battle.net-Setup.exe'
+for key in ('installer_url', 'installer_fallback_url', 'installer_dos', 'launcher_unix', 'installer_unix', 'installer_cwd'):
     assert key not in p1w
     try:
         profile('b1', {key: b1[key]})

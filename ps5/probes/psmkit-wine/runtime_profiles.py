@@ -132,6 +132,8 @@ def profile(name, overrides=None):
                           'msv1_0=d;kerberos=d;tabtip.exe=d') if b1 else None,
         **({'headless': False, 'gpu': False,
             'installer_url': 'https://downloader.battle.net//download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live',
+            # Direct versioned file, tried only when the Live redirect download fails.
+            'installer_fallback_url': 'https://downloader.battle.net/download/installer/win/1.0.66/Battle.net-Setup.exe',
             'installer_dos': r'C:\Battle.net-Setup.exe',
             'payload_programs': [],
             'refused_programs': [],

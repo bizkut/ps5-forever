@@ -1491,18 +1491,87 @@ static void b1_wait(void)
     for (;;) pthread_cond_wait(&condition, &mutex);
 }
 
-/* Native I/O stays off the desktop thread. Publish only a complete installer. */
-static int b1_download_installer(void)
+#define B1_DOWNLOAD_CALL(label, call) \
+    do { *step = label; if ((result = (call)) < 0) goto done; } while (0)
+
+/* One GET into the temporary file. Returns 0 only when it holds the whole
+ * announced length and an MZ image; otherwise the failing step's code. */
+static int b1_fetch_installer(int tmpl, const char *url, const char *part, const char **step,
+                              uint64_t *total, uint64_t *length)
 {
     static unsigned char buffer[65536];
-    const char *part = PW_RUNTIME_INSTALLER_CWD "/.Battle.net-Setup.exe.part";
     const uint64_t cap = 256u * 1024u * 1024u;
-    int pool = -1, ssl = -1, http = -1, tmpl = -1, req = -1, fd = -1;
-    int result = 0, status = 0, length_type = 0, complete = 0;
-    uint64_t total = 0, length = 0, progress = UINT64_MAX;
+    int req = -1, fd = -1, result = 0, status = 0, length_type = 0;
+    uint64_t progress = UINT64_MAX;
     unsigned char first[2] = {0};
-    const char *step = "creating prefix directory";
+    char message[160];
+
+    *total = *length = 0;
+    B1_DOWNLOAD_CALL("creating request", req = sceHttp2CreateRequestWithURL(tmpl, "GET", url, 0));
+    B1_DOWNLOAD_CALL("sending request", sceHttp2SendRequest(req, NULL, 0));
+    B1_DOWNLOAD_CALL("reading HTTP status", sceHttp2GetStatusCode(req, &status));
+    *step = "HTTP status is not 200";
+    if (status != 200) { result = status; goto done; }
+    B1_DOWNLOAD_CALL("reading content length", sceHttp2GetResponseContentLength(req, &length_type, length));
+    /* A length the server does not announce (chunked) is checked only by the cap. */
+    if (length_type != 0) *length = 0;
+    *step = "invalid announced installer length";
+    if (*length && (*length < 2 || *length > cap)) { result = EINVAL; goto done; }
+    B1_DOWNLOAD_CALL("opening temporary installer", fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, 0666));
+    for (;;)
+    {
+        B1_DOWNLOAD_CALL("reading installer", sceHttp2ReadData(req, buffer, sizeof(buffer)));
+        if (!result) break;
+        size_t count = (size_t)result, offset = 0;
+        *step = "installer exceeds announced length or 256 MiB";
+        if (count > cap - *total || (*length && count > *length - *total)) { result = EFBIG; goto done; }
+        for (size_t i = 0; *total + i < 2 && i < count; i++) first[*total + i] = buffer[i];
+        *step = "writing installer";
+        while (offset < count)
+        {
+            ssize_t written = write(fd, buffer + offset, count - offset);
+            if (written < 0 && errno == EINTR) continue;
+            if (written <= 0) { result = written < 0 ? errno : EIO; goto done; }
+            offset += (size_t)written;
+        }
+        *total += count;
+        if (*total / (1024u * 1024u) != progress || *total == *length)
+        {
+            progress = *total / (1024u * 1024u);
+            if (*length)
+                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f of %.1f MB",
+                         (double)*total / (1024 * 1024), (double)*length / (1024 * 1024));
+            else
+                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f MB",
+                         (double)*total / (1024 * 1024));
+            b1_message(message);
+        }
+    }
+    *step = "installer length or MZ signature mismatch";
+    if ((*length && *total != *length) || *total < 2 || first[0] != 'M' || first[1] != 'Z') { result = EINVAL; goto done; }
+    *step = "closing installer";
+    result = close(fd);
+    fd = -1;
+    if (result) result = errno;
+done:
+    if (fd >= 0) close(fd);
+    if (req >= 0) sceHttp2DeleteRequest(req);
+    return result;
+}
+
+/* Native I/O stays off the desktop thread. Publish only a complete installer.
+ * The Live URL redirects to the current versioned file; when that download
+ * fails (one console received the 200 and length but no body), the direct
+ * versioned file is tried once before giving up. */
+static int b1_download_installer(void)
+{
+    static const char *const urls[] = {PW_RUNTIME_INSTALLER_URL, PW_RUNTIME_INSTALLER_FALLBACK_URL};
+    const char *part = PW_RUNTIME_INSTALLER_CWD "/.Battle.net-Setup.exe.part";
+    int pool = -1, ssl = -1, http = -1, tmpl = -1, result = 0, complete = 0, logged = 0;
+    uint64_t total = 0, length = 0;
+    const char *what = "creating prefix directory", **step = &what;
     char message[640], directory[] = PW_RUNTIME_INSTALLER_CWD;
+    unsigned int i = 0;
 
     b1_message("Downloading the Battle.net installer...");
     for (char *p = directory + 1; ; p++)
@@ -1514,67 +1583,28 @@ static int b1_download_installer(void)
         *p = saved;
         if (!saved) break;
     }
-#define B1_DOWNLOAD_CALL(label, call) \
-    do { step = label; if ((result = (call)) < 0) goto done; } while (0)
     /* DT_NEEDED loads Net/SSL/HTTP2, as in the measured HTTPS title probe.
-     * SceHttp2's default redirect handling followed the installer URL's 302. */
+     * SceHttp2's default redirect handling follows the Live URL's 302. */
     B1_DOWNLOAD_CALL("initializing Net", sceNetInit());
     B1_DOWNLOAD_CALL("creating network pool", pool = sceNetPoolCreate("b1-installer", 64 * 1024, 0));
     B1_DOWNLOAD_CALL("initializing SSL", ssl = sceSslInit(256 * 1024));
     B1_DOWNLOAD_CALL("initializing HTTP2", http = sceHttp2Init(pool, ssl, 256 * 1024, 1));
     B1_DOWNLOAD_CALL("creating HTTP2 template", tmpl = sceHttp2CreateTemplate(http, "Mozilla/5.0", 3, 1));
-    B1_DOWNLOAD_CALL("creating request", req = sceHttp2CreateRequestWithURL(tmpl, "GET", PW_RUNTIME_INSTALLER_URL, 0));
-    B1_DOWNLOAD_CALL("sending request", sceHttp2SendRequest(req, NULL, 0));
-    B1_DOWNLOAD_CALL("reading HTTP status", sceHttp2GetStatusCode(req, &status));
-    step = "HTTP status is not 200";
-    if (status != 200) { result = status; goto done; }
-    B1_DOWNLOAD_CALL("reading content length", sceHttp2GetResponseContentLength(req, &length_type, &length));
-    /* A length the server does not announce (chunked) is checked only by the cap. */
-    if (length_type != 0) length = 0;
-    step = "invalid announced installer length";
-    if (length && (length < 2 || length > cap)) { result = EINVAL; goto done; }
-    B1_DOWNLOAD_CALL("opening temporary installer", fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, 0666));
-    for (;;)
+    for (i = 0; i < sizeof(urls) / sizeof(urls[0]); i++)
     {
-        B1_DOWNLOAD_CALL("reading installer", sceHttp2ReadData(req, buffer, sizeof(buffer)));
+        if (i) b1_message("Retrying the Battle.net installer download from its direct link...");
+        result = b1_fetch_installer(tmpl, urls[i], part, step, &total, &length);
         if (!result) break;
-        size_t count = (size_t)result, offset = 0;
-        step = "installer exceeds announced length or 256 MiB";
-        if (count > cap - total || (length && count > length - total)) { result = EFBIG; goto done; }
-        for (size_t i = 0; total + i < 2 && i < count; i++) first[total + i] = buffer[i];
-        step = "writing installer";
-        while (offset < count)
-        {
-            ssize_t written = write(fd, buffer + offset, count - offset);
-            if (written < 0 && errno == EINTR) continue;
-            if (written <= 0) { result = written < 0 ? errno : EIO; goto done; }
-            offset += (size_t)written;
-        }
-        total += count;
-        if (total / (1024u * 1024u) != progress || total == length)
-        {
-            progress = total / (1024u * 1024u);
-            if (length)
-                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f of %.1f MB",
-                         (double)total / (1024 * 1024), (double)length / (1024 * 1024));
-            else
-                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f MB",
-                         (double)total / (1024 * 1024));
-            b1_message(message);
-        }
+        io_log("b1 parent installer download failed: %s result=%#x bytes=%llu length=%llu url=%u",
+               *step, result, (unsigned long long)total, (unsigned long long)length, i);
+        logged = 1;
     }
-    step = "installer length or MZ signature mismatch";
-    if ((length && total != length) || total < 2 || first[0] != 'M' || first[1] != 'Z') { result = EINVAL; goto done; }
-    step = "closing installer";
-    result = close(fd);
-    fd = -1;
-    if (result) { result = errno; goto done; }
-    step = "publishing installer";
+    if (result) goto done;
+    logged = 0;
+    *step = "publishing installer";
     if (rename(part, PW_RUNTIME_INSTALLER_UNIX)) { result = errno; goto done; }
     complete = 1;
 done:
-    if (fd >= 0) close(fd);
-    if (req >= 0) sceHttp2DeleteRequest(req);
     if (tmpl >= 0) sceHttp2DeleteTemplate(tmpl);
     if (http >= 0) sceHttp2Term(http);
     if (ssl >= 0) sceSslTerm(ssl);
@@ -1582,17 +1612,18 @@ done:
     if (!complete)
     {
         unlink(part);
-        io_log("b1 parent installer download failed: %s result=%#x bytes=%llu length=%llu",
-               step, result, (unsigned long long)total, (unsigned long long)length);
+        if (!logged)
+            io_log("b1 parent installer download failed: %s result=%#x bytes=%llu length=%llu",
+                   *step, result, (unsigned long long)total, (unsigned long long)length);
         snprintf(message, sizeof(message), "Battle.net installer download failed: %s (%#x).\nClose the title and try again.",
-                 step, result);
+                 *step, result);
         b1_message(message);
         return -1;
     }
-    io_log("b1 parent installer downloaded bytes=%llu", (unsigned long long)total);
+    io_log("b1 parent installer downloaded bytes=%llu url=%u", (unsigned long long)total, i);
     return 0;
-#undef B1_DOWNLOAD_CALL
 }
+#undef B1_DOWNLOAD_CALL
 #endif
 #endif
 
