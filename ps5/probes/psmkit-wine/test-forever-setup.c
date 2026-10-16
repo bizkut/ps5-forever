@@ -166,7 +166,7 @@ static void test_managed_sync(void)
 static void test_wow_config(void)
 {
     static const char *const channels[] = {"_forever_", "_classic_beta_"};
-    static const char *const executables[] = {"WoW.exe", "WowB.exe"};
+    static const char *const executables[] = {"Wow.exe", "WowB.exe"};
     static const char preset[] = "SET GamePadEnable \"1\"\n";
     static const char mine[] = "SET mine \"1\"\n";
     char share[1024], prefix[1024], relative[512], config[1024];

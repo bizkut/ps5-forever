@@ -327,7 +327,7 @@ static inline int forever_install_wow_config(const char *share, const char *pref
         const char *directory;
         const char *executable;
     } channels[] = {
-        {"_forever_", "WoW.exe"},
+        {"_forever_", "Wow.exe"},
         {"_classic_beta_", "WowB.exe"}
     };
     char game[1100], executable[1100], wtf[1100], config[1100], source[1100];

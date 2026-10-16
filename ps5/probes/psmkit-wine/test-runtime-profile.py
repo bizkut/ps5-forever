@@ -30,7 +30,7 @@ assert maintenance['refused_programs'] == []
 assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-forever.json' in (
     Path(__file__).with_name('Makefile').read_text())
 for config, channel, executable, uid in (
-        (game_config, '_forever_', 'WoW.exe', 'wowf'),
+        (game_config, '_forever_', 'Wow.exe', 'wowf'),
         (beta_config, '_classic_beta_', 'WowB.exe', 'wow_classic_beta')):
     game = profile('b1', config)
     windows_cwd = rf'C:\Program Files (x86)\World of Warcraft\{channel}'

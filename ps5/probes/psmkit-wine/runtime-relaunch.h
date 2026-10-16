@@ -27,11 +27,11 @@ static inline const struct pw_game_direct_profile *pw_game_direct_profile(pw_gam
      * Prefer final, fall back to beta, and never stage an incomplete install. */
     static const struct pw_game_direct_profile profiles[] = {
         {
-            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\WoW.exe",
+            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe",
              "-launcherlogin", "-uid", "wowf", NULL},
             "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
             FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/WoW.exe",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
             FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"
         },
         {

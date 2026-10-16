@@ -21,7 +21,7 @@ enum
 static int installed_exists(const char *path, void *context)
 {
     static const char *const files[] = {
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/WoW.exe",
+        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
         FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll",
         FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe",
         FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"
@@ -37,14 +37,14 @@ static void test_direct_profiles(void)
     unsigned installed = FINAL_INSTALLED | BETA_INSTALLED;
     const struct pw_game_direct_profile *final = pw_game_direct_profile(installed_exists, &installed);
     assert(final);
-    assert(!strcmp(final->argv[0], "C:\\Program Files (x86)\\World of Warcraft\\_forever_\\WoW.exe"));
+    assert(!strcmp(final->argv[0], "C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe"));
     assert(!strcmp(final->argv[1], "-launcherlogin"));
     assert(!strcmp(final->argv[2], "-uid"));
     assert(!strcmp(final->argv[3], "wowf"));
     assert(!final->argv[4]);
     assert(!strcmp(final->windows_cwd, "C:\\Program Files (x86)\\World of Warcraft\\_forever_"));
     assert(!strcmp(final->unix_cwd, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_"));
-    assert(!strcmp(final->unix_exe, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/WoW.exe"));
+    assert(!strcmp(final->unix_exe, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe"));
     assert(!strcmp(final->unix_loader, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"));
     installed = FINAL_INSTALLED;
     assert(pw_game_direct_profile(installed_exists, &installed) == final);

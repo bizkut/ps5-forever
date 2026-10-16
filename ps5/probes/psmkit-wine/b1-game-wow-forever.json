@@ -1,7 +1,7 @@
 {
   "gpu": true,
   "headless": true,
-  "argv": ["C:\\Program Files (x86)\\World of Warcraft\\_forever_\\WoW.exe", "-launcherlogin", "-uid", "wowf"],
+  "argv": ["C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe", "-launcherlogin", "-uid", "wowf"],
   "prefix": "/data/forever/prefix",
   "home": "/data/forever/home",
   "cwd": "/data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft/_forever_",

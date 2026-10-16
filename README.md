@@ -4,7 +4,7 @@ Run **Battle.net** on a jailbroken **PlayStation 5**.
 
 Forever Launcher (`PPSA99030`) runs Battle.net and World of Warcraft through
 Wine, using DirectX 12 on the PS5's own GPU. The default game is
-**World of Warcraft: Forever** final (`WoW.exe` in `_forever_`).
+**World of Warcraft: Forever** final (`Wow.exe` in `_forever_`).
 **World of Warcraft Classic beta** (`WowB.exe` in `_classic_beta_`) remains
 supported when selected in Battle.net. The supplied settings use 4K output
 with HDR and frame generation.
@@ -29,7 +29,7 @@ with HDR and frame generation.
   4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.
   Real Battle.net download/update speedups have not yet been measured.
 - Supports the final World of Warcraft: Forever channel (`wowf`,
-  `_forever_/WoW.exe`) by default while retaining Classic beta support.
+  `_forever_/Wow.exe`) by default while retaining Classic beta support.
 - Installs recommended `Config.wtf` independently for final and beta without
   replacing user settings.
 - Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
@@ -85,7 +85,7 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 2. Forever Launcher downloads Blizzard's Battle.net installer. Follow its
    on-screen prompts to install Battle.net.
 3. Sign in to Battle.net (see below).
-4. Battle.net opens on **World of Warcraft: Forever** final (`WoW.exe` in
+4. Battle.net opens on **World of Warcraft: Forever** final (`Wow.exe` in
    `_forever_`) by default. Press **Install**, wait for the download (about 50 GB),
    then press **Play**. Classic beta remains supported if you select it in Battle.net.
 
