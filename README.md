@@ -16,6 +16,21 @@ Wine, using DirectX 12 on the PS5's own GPU. The tested game build is
 > supported by Blizzard Entertainment, Sony Interactive Entertainment or Valve.
 > Using unofficial software with an online game is at your own risk.
 
+## Changes in 01.000.005
+
+- If the Battle.net installer's Live download fails, the launcher tries the
+  direct versioned download link.
+- Startup creates missing `Program Files` and `Program Files (x86)` folders
+  without replacing existing user files.
+- Window surfaces are published only when drawing is flushed, fixing the
+  installer's crawling flicker.
+- Windows sees the real free disk space through the write broker. An older or
+  unavailable broker falls back to the previous fixed 16 GiB answer.
+- The drawn purple desktop background is restored.
+
+Native PS5 acceptance of this release is **pending**. Drive support remains
+limited to `C:` and `W:`; `Z:` and UNC/network-share paths are not supported.
+
 ## What you need
 
 - A **jailbroken PS5** that can run homebrew apps. Tested on firmware 5.50.

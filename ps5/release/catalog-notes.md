@@ -6,7 +6,16 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher
+### Forever Launcher 01.000.005
+
+- If the Battle.net installer download fails, the launcher retries from Blizzard's direct download link.
+- Missing `Program Files` and `Program Files (x86)` folders are created at start, so the installer accepts its default location.
+- The installer no longer flickers.
+- Windows programs see the console's real free disk space.
+- The purple desktop background is back.
+- Drives: `C:` and `W:` only; `Z:` and network paths are not supported.
+
+### About Forever Launcher
 
 - This Battle.net launcher is designed for World of Warcraft: Forever.
 - It might be used to install other games, but keyboard support is in development.

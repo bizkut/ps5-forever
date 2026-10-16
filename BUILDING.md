@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.004
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.005
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -61,6 +61,24 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 `RUNTIME_TITLE_DUAL_QUALIFIED`. The qualifier's deliberate unknown-import and
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
+
+## 01.000.005 source changes
+
+- The Battle.net installer downloader tries the direct versioned
+  `win/1.0.66/Battle.net-Setup.exe` link once if the Live download fails.
+- Startup creates missing `Program Files` and `Program Files (x86)` folders in
+  the prefix; existing folders and user files are not replaced.
+- Wine window surfaces publish completed drawing only at flush, rather than
+  exposing drawing in progress to the compositor, fixing the installer's
+  crawling flicker.
+- Windows disk-space queries use the write broker's real storage counters for
+  `/data/forever`. An older or unavailable broker retains the previous synthetic
+  16 GiB free-space answer.
+- The desktop background uses the drawn purple picture again.
+
+Native acceptance of the final `.005` archive is **pending**. These source
+changes do not record a native pass; the C:/W:-only scope and release gates below
+remain in force.
 
 ## Pinned inputs and limits
 
@@ -96,12 +114,12 @@ loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchange
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
-The corrected `.004` sources address two independent drive-reporting causes:
+The `.005` sources retain the two independent drive-reporting fixes:
 
 - Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
   `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
   `\Device\HarddiskVolume2` devices. `C:` maps to the prefix's `drive_c`; `W:`
-  maps to its parent (`/data/forever` for the default prefix). Ordinary file
+  maps to the prefix's parent (`/data/forever` by default). Ordinary file
   access alone did not populate the object namespace used for drive enumeration.
 - The SDK's `platform/src/libc.c` sets `MNT_LOCAL` in its FreeBSD
   `statfs`/`fstatfs` responses. Without this flag Wine classified the console's
