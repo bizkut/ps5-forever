@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile complete write-broker and ntdll disk-space functions on the host."""
+"""Compile complete write-broker, ntdll pool/write and disk-space functions on the host."""
 import argparse
 from pathlib import Path
 import re
@@ -51,17 +51,20 @@ broker = Path(__file__).resolve().parents[2] / 'writebroker/writebroker.c'
 client = args.wine / 'dlls/ntdll/unix/file.c'
 server_names = ('transfer', 'discard', 'serve_write', 'read_whole', 'install_icon',
                 'serve_statfs', 'serve')
-client_names = ('broker_transfer', 'broker_connect', 'broker_get_connection',
-                'broker_query_fs', 'get_full_size_info', 'get_full_size_info_ex')
+client_names = ('bounce_acquire', 'bounce_release', 'broker_transfer', 'broker_connect',
+                'broker_get_connection', 'broker_query_fs', 'broker_request', 'broker_pwrite',
+                'get_full_size_info', 'get_full_size_info_ex')
 args.output.parent.mkdir(parents=True, exist_ok=True)
 for filename, path, names in (('writebroker-server.inc', broker, server_names),
                               ('writebroker-client.inc', client, client_names)):
     functions = '\n\n'.join(definition(path, name) for name in names) + '\n'
     if path == client:
         source = path.read_text()
+        bounce_start = source.index('#define BOUNCE_SIZE')
+        bounce_end = source.index('/* a free bounce buffer', bounce_start)
         start = source.index('#define BROKER_CONNECTIONS')
         end = source.index('#define TITLE_WRITE_ROUTE_LOG_LIMIT', start)
-        functions = source[start:end] + functions
+        functions = source[bounce_start:bounce_end] + source[start:end] + functions
     (args.output.parent / filename).write_text(functions)
 command = shlex.split(args.cc) + [
     '-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Werror', '-pthread',

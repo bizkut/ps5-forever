@@ -11,10 +11,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
 #include <sys/vfs.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "wine/ps5_writebroker.h"
@@ -25,9 +27,15 @@ static unsigned long long served_writes, served_bytes;
 static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
 static char directory[] = "/tmp/writebroker-space-XXXXXX";
 static char token_path[1024];
+static char writes_path[1024];
 static unsigned int statfs_calls, source_broker_logs, source_fallback_logs;
 static pthread_t threads[64];
 static unsigned int thread_count;
+static pthread_mutex_t server_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t request_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t request_cond = PTHREAD_COND_INITIALIZER;
+static unsigned int waiting_requests, peak_requests, lock_attempt_mask;
+static int hold_requests, track_lock_attempts;
 static int failures;
 static int negative_available;
 
@@ -58,7 +66,7 @@ static int test_statfs(const char *path, struct test_statfs *info)
     struct statfs native;
     int result;
 
-    statfs_calls++;
+    __atomic_fetch_add(&statfs_calls, 1, __ATOMIC_SEQ_CST);
     assert(!strcmp(path, WB_USER_ROOT "space"));
     if ((result = statfs(directory, &native))) return result;
     info->f_bsize = native.f_bsize;
@@ -68,14 +76,42 @@ static int test_statfs(const char *path, struct test_statfs *info)
     return 0;
 }
 
+/* Only translate host filesystem access; path validation, framing, writes and
+ * replies below are the extracted production broker implementation. */
+static const char *server_path(const char *path)
+{
+    return !strcmp(path, WB_USER_ROOT "writes") ? writes_path : path;
+}
+
+static ssize_t server_pwrite(int fd, const void *buffer, size_t length, off_t offset)
+{
+    assert(!pthread_mutex_lock(&request_lock));
+    if (hold_requests)
+    {
+        waiting_requests++;
+        if (waiting_requests > peak_requests) peak_requests = waiting_requests;
+        assert(!pthread_cond_broadcast(&request_cond));
+        while (hold_requests) assert(!pthread_cond_wait(&request_cond, &request_lock));
+        waiting_requests--;
+    }
+    assert(!pthread_mutex_unlock(&request_lock));
+    return pwrite(fd, buffer, length, offset);
+}
+
 #define statfs test_statfs
+#define open(path, ...) open(server_path(path), __VA_ARGS__)
+#define pwrite(fd, buffer, length, offset) server_pwrite(fd, buffer, length, offset)
 #include "writebroker-server.inc"
 #undef statfs
+#undef pwrite
+#undef open
 
 static int start_server(void *(*entry)(void *), int fd)
 {
+    assert(!pthread_mutex_lock(&server_lock));
     assert(thread_count < sizeof(threads) / sizeof(threads[0]));
     assert(!pthread_create(&threads[thread_count++], NULL, entry, (void *)(intptr_t)fd));
+    assert(!pthread_mutex_unlock(&server_lock));
     return 0;
 }
 
@@ -183,26 +219,32 @@ typedef struct {
 #define TRUE 1
 #define FALSE 0
 #define InterlockedExchange(pointer, value) __atomic_exchange_n(pointer, value, __ATOMIC_SEQ_CST)
+#define InterlockedCompareExchange(pointer, value, expected) \
+    __sync_val_compare_and_swap(pointer, expected, value)
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 static LONG64 clock_us = 1000000;
+static _Thread_local unsigned int current_thread_id;
+static _Thread_local int observed_slot = -1;
 static int broker_mode, title_enabled = 1, connected, old_queries;
 static const char *handle_path = WB_USER_ROOT "space";
 static unsigned int errno_to_status(int error) { return (unsigned int)error; }
 static LONG64 title_io_now_us(void) { return clock_us; }
 static int ps5_direct_enabled(void) { return title_enabled; }
-static unsigned int GetCurrentThreadId(void) { return 0; }
+static unsigned int GetCurrentThreadId(void) { return current_thread_id; }
 static unsigned int server_get_unix_name(HANDLE handle, char **path)
 {
-    (void)handle;
-    *path = strdup(handle_path);
+    *path = strdup(handle == 2 ? WB_USER_ROOT "writes" : handle_path);
     assert(*path);
     return 0;
 }
 static void sceKernelDebugOutText(int channel, const char *line)
 {
     (void)channel;
-    if (strstr(line, "disk space source=broker")) source_broker_logs++;
-    if (strstr(line, "disk space source=synthetic")) source_fallback_logs++;
+    if (strstr(line, "disk space source=broker"))
+        __atomic_fetch_add(&source_broker_logs, 1, __ATOMIC_SEQ_CST);
+    if (strstr(line, "disk space source=synthetic"))
+        __atomic_fetch_add(&source_fallback_logs, 1, __ATOMIC_SEQ_CST);
 }
 static int client_open(const char *path, int flags)
 {
@@ -227,7 +269,7 @@ static int client_connect(int fd, const struct sockaddr *address, socklen_t leng
     int pair[2];
     (void)address;
     (void)length;
-    connected++;
+    __atomic_fetch_add(&connected, 1, __ATOMIC_SEQ_CST);
     if (!broker_mode) { errno = ECONNREFUSED; return -1; }
     assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
     assert(dup2(pair[0], fd) == fd);
@@ -244,19 +286,55 @@ static int synthetic_fstatvfs(int fd, struct statvfs *info)
     return 0;
 }
 
+/* Windows virtual-memory checks become ordinary host-memory access. The
+ * actual bounce pool and complete client request/write code are extracted. */
+static int virtual_check_buffer_for_read(const void *buffer, size_t length)
+{
+    return buffer || !length;
+}
+
+static size_t virtual_uninterrupted_read_memory(const void *source, void *destination, size_t length)
+{
+    memcpy(destination, source, length);
+    return length;
+}
+
+static int client_mutex_lock(pthread_mutex_t *mutex);
+
 /* Exercise the title's statvfs branch, including the existing shim fallback. */
 #undef linux
 #define __PROSPERO__ 1
 #define open(path, flags) client_open(path, flags)
 #define connect(fd, address, length) client_connect(fd, address, length)
 #define fstatvfs(fd, info) synthetic_fstatvfs(fd, info)
+#define pthread_mutex_lock(mutex) client_mutex_lock(mutex)
 #include "writebroker-client.inc"
+#undef pthread_mutex_lock
 #undef fstatvfs
 #undef connect
 #undef open
 
+static int client_mutex_lock(pthread_mutex_t *mutex)
+{
+    for (unsigned int i = 0; i < BROKER_CONNECTIONS; i++)
+    {
+        if (mutex != &broker[i].lock) continue;
+        assert(!pthread_mutex_lock(&request_lock));
+        if (track_lock_attempts)
+        {
+            lock_attempt_mask |= 1u << i;
+            assert(!pthread_cond_broadcast(&request_cond));
+        }
+        assert(!pthread_mutex_unlock(&request_lock));
+        observed_slot = i;
+        break;
+    }
+    return pthread_mutex_lock(mutex);
+}
+
 static void close_connections(void)
 {
+    pthread_once(&broker_once, broker_init);
     for (unsigned int i = 0; i < BROKER_CONNECTIONS; i++)
         if (broker[i].fd >= 0) { close(broker[i].fd); broker[i].fd = -1; }
     for (unsigned int i = 0; i < thread_count; i++) assert(!pthread_join(threads[i], NULL));
@@ -325,21 +403,171 @@ static void client_tests(void)
     close(fd);
 }
 
+static void pool_index_tests(void)
+{
+    static const struct { unsigned int id, slot; } cases[] = {
+        {60, 15}, {64, 0}, {68, 1}, {124, 15}, {128, 0}, {132, 1},
+        {UINT32_MAX - 3, 15},
+    };
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        check(broker_windows_index(cases[i].id) == cases[i].slot,
+              "aligned Wine thread ID selects expected slot at wrap boundaries");
+    check(broker_windows_index(64) == broker_windows_index(128) &&
+          broker_windows_index(60) == broker_windows_index(124),
+          "Wine thread IDs one pool apart collide deterministically");
+}
+
+enum { POOL_WORKERS = 32, POOL_ROUNDS = 4, POOL_STRIDE = 128 };
+
+struct pool_worker
+{
+    unsigned int number;
+    unsigned char bytes[POOL_STRIDE];
+    size_t length;
+    ssize_t results[POOL_ROUNDS];
+    int query_ok, slot;
+};
+
+static void *pool_worker(void *arg)
+{
+    struct pool_worker *worker = arg;
+    struct wb_statfs_reply reply;
+
+    current_thread_id = 4 * (16 + worker->number);
+    /* Race the once initializer from early space queries and early writes. */
+    worker->query_ok = 1;
+    if (!(worker->number & 1))
+        worker->query_ok = broker_query_fs(1, &reply) && observed_slot == (int)(worker->number % 16);
+    for (unsigned int i = 0; i < POOL_ROUNDS; i++)
+        worker->results[i] = broker_pwrite(2, worker->bytes, worker->length,
+                                           worker->number * POOL_STRIDE, worker->number & 1, NULL);
+    worker->slot = observed_slot;
+    return NULL;
+}
+
+static int wait_for_pool(int contenders)
+{
+    struct timespec deadline;
+    int result = 0;
+
+    assert(!clock_gettime(CLOCK_REALTIME, &deadline));
+    deadline.tv_sec += 10;
+    while (contenders ? lock_attempt_mask != 0xffffu : waiting_requests != 16)
+    {
+        result = pthread_cond_timedwait(&request_cond, &request_lock, &deadline);
+        if (result == ETIMEDOUT) return 0;
+        assert(!result);
+    }
+    return 1;
+}
+
+static void pool_tests(void)
+{
+    _Static_assert(BROKER_CONNECTIONS == 16, "broker pool must provide sixteen slots");
+    struct pool_worker workers[POOL_WORKERS] = {0};
+    pthread_t clients[POOL_WORKERS];
+    unsigned char expected[POOL_WORKERS * POOL_STRIDE], actual[sizeof(expected)];
+    unsigned long long expected_bytes = 0;
+    struct stat info;
+    int fd = open(writes_path, O_CREAT | O_EXCL | O_RDWR, 0600), all_waiting;
+
+    assert(fd >= 0);
+    memset(expected, 0xcc, sizeof(expected));
+    assert(write(fd, expected, sizeof(expected)) == sizeof(expected));
+    broker_mode = 1;
+    hold_requests = 1;
+    for (unsigned int i = 0; i < POOL_WORKERS; i++)
+    {
+        workers[i].number = i;
+        workers[i].length = 32 + i;
+        for (size_t j = 0; j < workers[i].length; j++) workers[i].bytes[j] = i * 7 + j;
+        memcpy(expected + i * POOL_STRIDE, workers[i].bytes, workers[i].length);
+        expected_bytes += workers[i].length * POOL_ROUNDS;
+    }
+    /* Consecutive aligned Wine IDs cover every slot; the second wave wraps
+     * to those same slots and must wait for the locked request streams. */
+    for (unsigned int i = 0; i < 16; i++)
+        assert(!pthread_create(&clients[i], NULL, pool_worker, &workers[i]));
+    assert(!pthread_mutex_lock(&request_lock));
+    all_waiting = wait_for_pool(0);
+    check(all_waiting && peak_requests == 16, "sixteen broker writes concurrently reach real pwrite");
+    if (all_waiting)
+    {
+        for (unsigned int i = 0; i < BROKER_CONNECTIONS; i++)
+        {
+            int result = pthread_mutex_trylock(&broker[i].lock);
+            check(result == EBUSY, "each distinct broker slot stays locked until reply");
+            if (!result) assert(!pthread_mutex_unlock(&broker[i].lock));
+            check(broker[i].fd >= 0, "each of sixteen slots owns a live connection");
+        }
+    }
+    track_lock_attempts = 1;
+    assert(!pthread_mutex_unlock(&request_lock));
+    for (unsigned int i = 16; i < POOL_WORKERS; i++)
+        assert(!pthread_create(&clients[i], NULL, pool_worker, &workers[i]));
+    assert(!pthread_mutex_lock(&request_lock));
+    if (all_waiting) check(wait_for_pool(1), "second wave attempts every occupied slot");
+    track_lock_attempts = hold_requests = 0;
+    assert(!pthread_cond_broadcast(&request_cond));
+    assert(!pthread_mutex_unlock(&request_lock));
+    for (unsigned int i = 0; i < POOL_WORKERS; i++)
+    {
+        assert(!pthread_join(clients[i], NULL));
+        check(workers[i].query_ok, "concurrent space query completes on shared pool");
+        check(workers[i].slot == (int)(i % 16), "Windows thread IDs select all sixteen slots");
+        for (unsigned int j = 0; j < POOL_ROUNDS; j++)
+            check(workers[i].results[j] == (ssize_t)workers[i].length,
+                  "concurrent write receives its exact synchronous reply");
+    }
+    check(connected == 16, "busy client opens exactly sixteen pooled sockets");
+    check(served_writes == POOL_WORKERS * POOL_ROUNDS && served_bytes == expected_bytes,
+          "one broker write request per synchronous write, no coalescing");
+    check(!fstat(fd, &info) && info.st_size == sizeof(expected) &&
+          pread(fd, actual, sizeof(actual), 0) == sizeof(actual) &&
+          !memcmp(actual, expected, sizeof(actual)),
+          "all completed writes are immediately visible with exact size/bytes and untouched gaps");
+    {
+        unsigned int native_slot = (uintptr_t)pthread_self() % 16;
+        current_thread_id = 4 * (16 + (native_slot + 1) % 16);
+        check(broker_pwrite(2, workers[0].bytes, workers[0].length, 0, 1,
+                            WB_USER_ROOT "writes") == (ssize_t)workers[0].length &&
+              observed_slot == (int)native_slot,
+              "known-path writes use native thread ID with the sixteen-slot pool");
+    }
+    close(fd);
+    close_connections();
+    /* Closing a stream does not reinitialize its mutex or leave fd zero. */
+    current_thread_id = 4 * 31;
+    check(broker_pwrite(2, workers[31].bytes, workers[31].length, 31 * POOL_STRIDE, 1, NULL) ==
+          (ssize_t)workers[31].length && observed_slot == 15 && connected == 17,
+          "last slot reconnects safely after connection cleanup");
+    close_connections();
+    current_thread_id = 4 * 16;
+    broker_mode = connected = 0;
+    unlink(writes_path);
+}
+
 int main(void)
 {
     int fd;
     assert(WB_VERSION == 5);
     assert(mkdtemp(directory));
     snprintf(token_path, sizeof(token_path), "%s/token", directory);
+    snprintf(writes_path, sizeof(writes_path), "%s/writes", directory);
     fd = open(token_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
     assert(fd >= 0 && write(fd, token, sizeof(token)) == sizeof(token));
     close(fd);
+    pool_index_tests();
+    pool_tests();
     protocol_tests();
     close_connections();
     client_tests();
+    for (unsigned int i = 0; i < BOUNCE_SLOTS; i++)
+        if (bounce_buffer[i]) assert(!munmap(bounce_buffer[i], BOUNCE_SIZE));
     unlink(token_path);
     rmdir(directory);
     if (failures) return 1;
-    puts("write broker space: real statfs, root/malformed guards, absent/old fallback, Windows sizes PASS");
+    puts("write broker: sixteen-slot concurrent exact writes/locking, statfs guards/fallback, Windows sizes PASS");
     return 0;
 }
