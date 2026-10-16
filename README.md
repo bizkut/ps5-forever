@@ -22,8 +22,12 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.008
+## Changes in 01.000.009
 
+- Faster parallel file writes: write-broker requests now use 16 connections
+  instead of one shared by all Windows threads. PS5 benchmark: 32 KiB writes from
+  4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.
+  Real Battle.net download/update speedups have not yet been measured.
 - Supports the final World of Warcraft: Forever channel (`wowf`,
   `_forever_/WoW.exe`) by default while retaining Classic beta support.
 - Installs recommended `Config.wtf` independently for final and beta without
@@ -44,7 +48,7 @@ with HDR and frame generation.
 - The drawn purple desktop background is restored.
 
 The `01.000.007` workflow failed before publication because of stale import-policy
-entries. This release removes only the obsolete `wineps5` `strlen`/`strstr`
+entries. `01.000.008` removed only the obsolete `wineps5` `strlen`/`strstr`
 policy rows; the remaining import checks stay enabled.
 
 Native PS5 acceptance of this release is **pending**. Drive support remains

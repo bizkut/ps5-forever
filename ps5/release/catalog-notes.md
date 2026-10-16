@@ -6,8 +6,10 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.008
+### Forever Launcher 01.000.009
 
+- Faster parallel file writes: write-broker requests now use 16 connections instead of one shared by all Windows threads. PS5 benchmark: 32 KiB writes from 4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.
+  Real Battle.net download/update speedups have not yet been measured.
 - Supports the final World of Warcraft: Forever channel (`wowf`, `_forever_/WoW.exe`) by default while retaining Classic beta support.
 - Installs recommended `Config.wtf` independently for final and beta without replacing user settings.
 - Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
@@ -21,7 +23,7 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 - The purple desktop background is back.
 - Drives: `C:` and `W:` only; `Z:` and network paths are not supported.
 
-The `01.000.007` workflow failed before publication because of stale import-policy entries. This release removes only the obsolete `wineps5` `strlen`/`strstr` policy rows; the remaining import checks stay enabled.
+The `01.000.007` workflow failed before publication because of stale import-policy entries. `01.000.008` removed only the obsolete `wineps5` `strlen`/`strstr` policy rows; the remaining import checks stay enabled.
 
 ### About Forever Launcher
 

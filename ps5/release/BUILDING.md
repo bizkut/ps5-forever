@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.008
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.009
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -62,8 +62,14 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
-## 01.000.008 source changes
+## 01.000.009 source changes
 
+- The write-broker pool grows from 4 to 16 lazily opened connections per Wine
+  process. Routing drops the two fixed alignment bits from Windows thread IDs
+  before selecting a slot; previously every Windows thread selected the same slot.
+  Requests and replies remain synchronous and locked per connection, with no new
+  client worker. Each live connection uses one broker worker and a 1 MiB buffer
+  (at most 16 workers / 16 MiB for one fully used Wine process's pool).
 - Battle.net defaults to the final Forever channel (`wowf`, `_forever_/WoW.exe`);
   Classic beta (`wow_classic_beta`, `_classic_beta_/WowB.exe`) remains supported.
   Direct-game startup prefers a complete final install, then a complete beta install.
@@ -96,12 +102,18 @@ here is a host build/inspection gate, **not console execution**.
   16 GiB free-space answer.
 - The desktop background uses the drawn purple picture again.
 
+In the PS5 synthetic write benchmark, 32 KiB writes from 4–8 threads improved from
+approximately 16 to 30 MiB/s; single-thread writes are unchanged. Workspace
+evidence: `release-proof/broker-bench-20261016T163238Z`. This measures parallel
+file-write throughput, not real Battle.net download or update throughput; those
+speedups have not yet been measured.
+
 The `01.000.007` workflow failed before publication because of stale import-policy
 entries. The `.008` import-policy correction removes only the obsolete
 `wineps5.so` `strlen` and `strstr` rows from the B1 policy; all other policy entries
 and qualification requirements remain unchanged.
 
-Native acceptance of the exact final `.008` archive is **pending**. These source
+Native acceptance of the exact final `.009` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
@@ -139,7 +151,7 @@ loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchange
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
-The `.008` sources retain the two independent drive-reporting fixes:
+The `.009` sources retain the two independent drive-reporting fixes:
 
 - Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
   `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
