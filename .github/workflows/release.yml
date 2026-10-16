@@ -9,7 +9,7 @@ on:
       version:
         description: 'Build contentVersion (NN.NNN.NNN); manual runs do not publish'
         required: true
-        default: '01.000.007'
+        default: '01.000.008'
         type: string
 
 permissions:

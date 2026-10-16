@@ -6,9 +6,11 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.007
+### Forever Launcher 01.000.008
 
-- Fixes the black screen when World of Warcraft: Forever 1.60.1.70425 starts.
+- Supports the final World of Warcraft: Forever channel (`wowf`, `_forever_/WoW.exe`) by default while retaining Classic beta support.
+- Installs recommended `Config.wtf` independently for final and beta without replacing user settings.
+- Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
 - Reports a generic Wine/Linux system identity instead of Sony/PlayStation 5 branding while preserving real hardware capabilities.
 - Release logs no longer include raw keyboard records.
 - Fixes endless loading on Battle.net's password sign-in page.
@@ -18,6 +20,8 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 - Windows programs see the console's real free disk space.
 - The purple desktop background is back.
 - Drives: `C:` and `W:` only; `Z:` and network paths are not supported.
+
+The `01.000.007` workflow failed before publication because of stale import-policy entries. This release removes only the obsolete `wineps5` `strlen`/`strstr` policy rows; the remaining import checks stay enabled.
 
 ### About Forever Launcher
 

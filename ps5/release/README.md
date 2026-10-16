@@ -22,9 +22,13 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.007
+## Changes in 01.000.008
 
-- Fixes the black screen when World of Warcraft: Forever 1.60.1.70425 starts.
+- Supports the final World of Warcraft: Forever channel (`wowf`,
+  `_forever_/WoW.exe`) by default while retaining Classic beta support.
+- Installs recommended `Config.wtf` independently for final and beta without
+  replacing user settings.
+- Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
 - Reports a generic Wine/Linux system identity instead of Sony/PlayStation 5
   branding while preserving real hardware capabilities.
 - Release logs no longer include raw keyboard records.
@@ -38,6 +42,10 @@ with HDR and frame generation.
 - Windows sees the real free disk space through the write broker. An older or
   unavailable broker falls back to the previous fixed 16 GiB answer.
 - The drawn purple desktop background is restored.
+
+The `01.000.007` workflow failed before publication because of stale import-policy
+entries. This release removes only the obsolete `wineps5` `strlen`/`strstr`
+policy rows; the remaining import checks stay enabled.
 
 Native PS5 acceptance of this release is **pending**. Drive support remains
 limited to `C:` and `W:`; `Z:` and UNC/network-share paths are not supported.
