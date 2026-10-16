@@ -453,7 +453,14 @@ static int pw_maintenance_direct_game(void)
         return 0;
     }
     io_log("b1 maintenance direct game flag=consumed");
-    profile = pw_game_direct_profile();
+    profile = pw_game_direct_profile(pw_game_loader_exists, NULL);
+    if (!profile)
+    {
+        io_log("b1 maintenance direct game unavailable: no supported WoW executable and loader pair; continuing maintenance");
+        forever_say("Direct start unavailable: install World of Warcraft: Forever or Classic beta in Battle.net.\n"
+                    "No supported game executable and loader pair was found.");
+        return 0;
+    }
     error = pw_parent_stage_game_launch(profile->argv, profile->windows_cwd, profile->unix_cwd);
     if (error)
     {
@@ -1725,7 +1732,8 @@ static int pw_forever_start(void)
         return -1;
     }
     result = forever_install_wow_config(FOREVER_APP_SHARE, FOREVER_PREFIX);
-    io_log("forever: WoW preset Config.wtf result=%d", result);
+    io_log("forever: WoW preset Config.wtf %s=%d",
+           result < 0 ? "error" : "installed", result < 0 ? -result : result);
     return 0;
 }
 

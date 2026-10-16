@@ -24,7 +24,6 @@
 #define FOREVER_INIT_PENDING ".forever-init-pending"
 /* written by the title's wineboot -i as its last step (WINEPS5_PREFIX_INIT=1) */
 #define FOREVER_WINEBOOT_DONE ".wineboot-init-done"
-#define FOREVER_WOW_DIR "/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_"
 
 static inline int forever_exists(const char *path)
 {
@@ -318,25 +317,42 @@ fail:
     return error;
 }
 
-/* WoW's preset settings, installed once: only when WoW is installed and has
- * no Config.wtf of its own. 1 installed, 0 not needed, -errno failure. */
+/* Each supported WoW channel gets the preset only when its executable exists
+ * and its own Config.wtf is absent. Returns the number installed (0..2), or
+ * -errno on failure; earlier installations may already have succeeded. */
 static inline int forever_install_wow_config(const char *share, const char *prefix)
 {
-    char game[1100], wtf[1100], config[1100], source[1100];
-    int length, error;
-    if ((length = snprintf(game, sizeof(game), "%s" FOREVER_WOW_DIR, prefix)) < 0 ||
-        length >= (int)sizeof(game)) return -ENAMETOOLONG;
-    if (!forever_is_dir(game)) return 0;
-    if ((length = snprintf(wtf, sizeof(wtf), "%s/WTF", game)) < 0 ||
-        length >= (int)sizeof(wtf)) return -ENAMETOOLONG;
-    if ((length = snprintf(config, sizeof(config), "%s/Config.wtf", wtf)) < 0 ||
-        length >= (int)sizeof(config)) return -ENAMETOOLONG;
-    if (forever_exists(config)) return 0;
-    if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
-        length >= (int)sizeof(source)) return -ENAMETOOLONG;
-    error = forever_mkdirs(wtf);
-    if (!error) error = forever_copy_file(source, config);
-    return error ? error : 1;
+    static const struct
+    {
+        const char *directory;
+        const char *executable;
+    } channels[] = {
+        {"_forever_", "WoW.exe"},
+        {"_classic_beta_", "WowB.exe"}
+    };
+    char game[1100], executable[1100], wtf[1100], config[1100], source[1100];
+    int length, error, installed = 0;
+    for (size_t i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
+    {
+        if ((length = snprintf(game, sizeof(game), "%s/drive_c/Program Files (x86)/World of Warcraft/%s",
+                               prefix, channels[i].directory)) < 0 ||
+            length >= (int)sizeof(game)) return -ENAMETOOLONG;
+        if ((length = snprintf(executable, sizeof(executable), "%s/%s", game, channels[i].executable)) < 0 ||
+            length >= (int)sizeof(executable)) return -ENAMETOOLONG;
+        if (!forever_exists(executable)) continue;
+        if ((length = snprintf(wtf, sizeof(wtf), "%s/WTF", game)) < 0 ||
+            length >= (int)sizeof(wtf)) return -ENAMETOOLONG;
+        if ((length = snprintf(config, sizeof(config), "%s/Config.wtf", wtf)) < 0 ||
+            length >= (int)sizeof(config)) return -ENAMETOOLONG;
+        if (forever_exists(config)) continue;
+        if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
+            length >= (int)sizeof(source)) return -ENAMETOOLONG;
+        error = forever_mkdirs(wtf);
+        if (!error) error = forever_copy_file(source, config);
+        if (error) return error;
+        ++installed;
+    }
+    return installed;
 }
 
 #endif

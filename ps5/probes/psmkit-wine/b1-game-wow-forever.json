@@ -1,0 +1,21 @@
+{
+  "gpu": true,
+  "headless": true,
+  "argv": ["C:\\Program Files (x86)\\World of Warcraft\\_forever_\\WoW.exe", "-launcherlogin", "-uid", "wowf"],
+  "prefix": "/data/forever/prefix",
+  "home": "/data/forever/home",
+  "cwd": "/data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft/_forever_",
+  "debug": "err+all",
+  "dll_overrides": "winemenubuilder.exe=d;mscoree=d;mshtml=d;winedbg.exe=d;msv1_0=d;kerberos=d;tabtip.exe=d;d3d12,d3d12core,dxgi=n;wineps5audio.drv=b",
+  "child_dll_overrides": "winemenubuilder.exe=d;mscoree=d;mshtml=d;winedbg.exe=d;msv1_0=d;kerberos=d;tabtip.exe=d;vulkan-1=n,b;d3d8,d3d9,d3d10core,d3d11,dxgi=b;wineps5audio.drv=b",
+  "payload_programs": [],
+  "refused_programs": ["BlizzardError.exe"],
+  "prefetch_hosts": ["telemetry-in.battle.net", "level3.blizzard.com", "us.cdn.blizzard.com", "level3.ssl.blizzard.com", "breaking-news.support.blizzard.com", "test.actual.battle.net", "us.version.battle.net", "wow.ingest.gdp.blizzard.com"],
+  "dns_upstreams": ["1.1.1.1", "8.8.8.8"],
+  "browser_switches": {
+    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1"]
+  },
+  "environment": {
+    "PROTON_ENABLE_HDR": "1"
+  }
+}

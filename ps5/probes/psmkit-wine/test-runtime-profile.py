@@ -20,13 +20,31 @@ b1 = profile('b1')
 p1w = profile('p1w')
 product = json.loads(Path(__file__).with_name('b1-product.json').read_text())
 assert product['debug'] == 'err+all,err-seh'
-game_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
+assert product['argv'] == [
+    r'C:\windows\system32\explorer.exe', '/desktop',
+    r'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe', '--exec=launch_uid wowf']
+game_config = json.loads(Path(__file__).with_name('b1-game-wow-forever.json').read_text())
+beta_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
 maintenance = profile('b1', product)
-game = profile('b1', game_config)
 assert maintenance['refused_programs'] == []
-assert game['refused_programs'] == ['BlizzardError.exe']
-assert game['environment'] == {'PROTON_ENABLE_HDR': '1'}
-assert 'WINEPS5_SDR_WHITE_NITS' not in game['environment']
+assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-forever.json' in (
+    Path(__file__).with_name('Makefile').read_text())
+for config, channel, executable, uid in (
+        (game_config, '_forever_', 'WoW.exe', 'wowf'),
+        (beta_config, '_classic_beta_', 'WowB.exe', 'wow_classic_beta')):
+    game = profile('b1', config)
+    windows_cwd = rf'C:\Program Files (x86)\World of Warcraft\{channel}'
+    assert config['argv'] == [windows_cwd + '\\' + executable, '-launcherlogin', '-uid', uid]
+    assert game['argv'] == [game['loader'], *config['argv']]
+    assert game['cwd'] == f'/data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft/{channel}'
+    assert game['prefix'] == '/data/forever/prefix'
+    assert game['home'] == '/data/forever/home'
+    assert game['gpu'] is True and game['headless'] is True
+    assert game['refused_programs'] == ['BlizzardError.exe']
+    assert game['environment'] == {'PROTON_ENABLE_HDR': '1'}
+    assert 'WINEPS5_SDR_WHITE_NITS' not in game['environment']
+assert {key: value for key, value in game_config.items() if key not in ('argv', 'cwd')} == {
+    key: value for key, value in beta_config.items() if key not in ('argv', 'cwd')}
 assert set(b1['module_paths']) == {
     'ntdll.so', 'win32u.so', 'wineserver.so', 'ws2_32.so', 'crypt32.so', 'opengl32.so',
     'secur32.so', 'bcrypt.so', 'libgnutls.so', 'wineps5.so', 'dwrite.so', 'libfreetype.so',

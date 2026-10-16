@@ -3,9 +3,11 @@
 Run **Battle.net** on a jailbroken **PlayStation 5**.
 
 Forever Launcher (`PPSA99030`) runs Battle.net and World of Warcraft through
-Wine, using DirectX 12 on the PS5's own GPU. The tested game build is
-**World of Warcraft Classic beta** (`WowB.exe`). The supplied settings use
-4K output with HDR and frame generation.
+Wine, using DirectX 12 on the PS5's own GPU. The default game is
+**World of Warcraft: Forever** final (`WoW.exe` in `_forever_`).
+**World of Warcraft Classic beta** (`WowB.exe` in `_classic_beta_`) remains
+supported when selected in Battle.net. The supplied settings use 4K output
+with HDR and frame generation.
 
 > [!NOTE]
 > This Battle.net launcher is designed for **World of Warcraft: Forever**. It
@@ -71,8 +73,9 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 2. Forever Launcher downloads Blizzard's Battle.net installer. Follow its
    on-screen prompts to install Battle.net.
 3. Sign in to Battle.net (see below).
-4. Battle.net opens on the **World of Warcraft Classic beta** page. Press
-   **Install**, wait for the download (about 50 GB), then press **Play**.
+4. Battle.net opens on **World of Warcraft: Forever** final (`WoW.exe` in
+   `_forever_`) by default. Press **Install**, wait for the download (about 50 GB),
+   then press **Play**. Classic beta remains supported if you select it in Battle.net.
 
 ## Signing in to Battle.net
 
@@ -137,9 +140,11 @@ The on-screen display settings are in `/data/forever/prefix/drive_c/wineps5-hud.
 ## WoW settings
 
 WoW starts with settings tuned for the PS5: 4K output at half render scale,
-HDR on, and the controller enabled. They are installed only when WoW has
-no `Config.wtf` of its own yet.
-Change anything you like in WoW's options; your settings are kept.
+HDR on, and the controller enabled. The preset covers both Forever final
+(`_forever_`) and Classic beta (`_classic_beta_`) independently: it is installed
+only when that channel's executable is installed and its own `Config.wtf` is
+absent. Change anything you like in WoW's options; neither channel's existing
+settings are overwritten.
 
 ## Where your data is
 

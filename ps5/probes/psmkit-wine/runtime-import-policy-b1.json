@@ -4954,20 +4954,6 @@
       "binding": "strong",
       "module": "wineps5.so",
       "owner": "fself_public_or_platform",
-      "symbol": "strlen",
-      "target": "strlen"
-    },
-    {
-      "binding": "strong",
-      "module": "wineps5.so",
-      "owner": "fself_public_or_platform",
-      "symbol": "strstr",
-      "target": "strstr"
-    },
-    {
-      "binding": "strong",
-      "module": "wineps5.so",
-      "owner": "fself_public_or_platform",
       "symbol": "vsnprintf",
       "target": "vsnprintf"
     },

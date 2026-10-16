@@ -1,5 +1,5 @@
 {
-  "argv": ["C:\\windows\\system32\\explorer.exe", "/desktop", "C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe", "--exec=launch_uid wow_classic_beta"],
+  "argv": ["C:\\windows\\system32\\explorer.exe", "/desktop", "C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe", "--exec=launch_uid wowf"],
   "prefix": "/data/forever/prefix",
   "home": "/data/forever/home",
   "cwd": "/data/forever/prefix/drive_c/Program Files (x86)/Battle.net",

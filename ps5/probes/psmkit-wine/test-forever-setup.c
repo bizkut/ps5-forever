@@ -165,20 +165,56 @@ static void test_managed_sync(void)
 
 static void test_wow_config(void)
 {
-    char share[1024], prefix[1024];
+    static const char *const channels[] = {"_forever_", "_classic_beta_"};
+    static const char *const executables[] = {"WoW.exe", "WowB.exe"};
+    static const char preset[] = "SET GamePadEnable \"1\"\n";
+    static const char mine[] = "SET mine \"1\"\n";
+    char share[1024], prefix[1024], relative[512], config[1024];
     path(share, "app/share");
     path(prefix, "wow/prefix");
-    put("app/share/Config.wtf", "SET GamePadEnable \"1\"\n");
+    put("app/share/Config.wtf", preset);
     assert(!forever_mkdirs(prefix));
-    assert(forever_install_wow_config(share, prefix) == 0); /* WoW not installed yet */
-    put("wow/prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe", "MZ");
-    assert(forever_install_wow_config(share, prefix) == 1);
-    assert(text_is("wow/prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_/WTF/Config.wtf",
-                   "SET GamePadEnable \"1\"\n"));
-    put("wow/prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_/WTF/Config.wtf", "SET mine \"1\"\n");
-    assert(forever_install_wow_config(share, prefix) == 0); /* WoW's own settings are kept */
-    assert(text_is("wow/prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_/WTF/Config.wtf",
-                   "SET mine \"1\"\n"));
+    assert(forever_install_wow_config(share, prefix) == 0); /* neither installed */
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/keep",
+                 channels[i]);
+        put(relative, "");
+    }
+    assert(forever_install_wow_config(share, prefix) == 0); /* directories alone are not an installation */
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/%s",
+                 channels[i], executables[i]);
+        put(relative, "MZ");
+    }
+    assert(forever_install_wow_config(share, prefix) == 2);
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
+                 channels[i]);
+        assert(text_is(relative, preset));
+    }
+    assert(forever_install_wow_config(share, prefix) == 0);
+
+    /* Either channel's existing settings win independently of the other. */
+    for (unsigned existing = 0; existing < 2; ++existing)
+    {
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
+                 channels[existing]);
+        put(relative, mine);
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
+                 channels[1 - existing]);
+        path(config, relative);
+        assert(!unlink(config));
+        assert(forever_install_wow_config(share, prefix) == 1);
+        assert(text_is(relative, preset));
+        snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
+                 channels[existing]);
+        assert(text_is(relative, mine));
+        assert(forever_install_wow_config(share, prefix) == 0);
+        assert(text_is(relative, mine));
+    }
 }
 
 /* A prefix whose first wineboot never finished lacks the Program Files

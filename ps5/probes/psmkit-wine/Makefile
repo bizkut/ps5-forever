@@ -31,7 +31,7 @@ B1_QUARANTINE ?= $(B1_OUT)-quarantine
 B1_MAINTENANCE_OUT ?= $(B1_OUT)-maintenance
 B1_GAME_OUT ?= $(B1_OUT)-game
 B1_PROFILE_CONFIG ?=
-B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json
+B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-forever.json
 B1_CONFIG_ARG := $(if $(B1_PROFILE_CONFIG),--profile-config "$(B1_PROFILE_CONFIG)",)
 TITLE_DESKTOP := ../../title/main.c ../../title/hub.c ../../title/compositor.c \
 	../../title/display.c ../../title/input.c ../../title/pointer.c ../../title/ime.c
@@ -96,7 +96,8 @@ test-winebuild-delayload: test-winebuild-delayload.py $(WINEBUILD)
 	python3 test-winebuild-delayload.py --winebuild "$(WINEBUILD)" --llvm-mingw "$(LLVM_MINGW)"
 
 test-runtime-profile: test-runtime-profile.py runtime_profiles.py runtime_imports.py \
-		runtime-import-policy-b1.json ../../deploy-wine.py
+		runtime-import-policy-b1.json ../../deploy-wine.py Makefile b1-product.json \
+		b1-game-wow-forever.json b1-game-wow-classic-beta.json
 	python3 test-runtime-profile.py
 
 test-staged: runtime-qualification
@@ -154,7 +155,7 @@ $(HOST_OUT)/test-audio-mixer: test-audio-mixer.c \
 		-I "$(WINE_SRC)/dlls/wineps5audio.drv" \
 		test-audio-mixer.c $(WINE_SRC)/dlls/wineps5audio.drv/mixer.c -o $@
 
-$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h
+$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h forever-paths.h protocol.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 

@@ -16,18 +16,38 @@ struct pw_game_direct_profile
     char *argv[5];
     const char *windows_cwd;
     const char *unix_cwd;
+    const char *unix_exe;
+    const char *unix_loader;
 };
-static inline const struct pw_game_direct_profile *pw_game_direct_profile(void)
+static inline const struct pw_game_direct_profile *pw_game_direct_profile(pw_game_exists_fn exists,
+                                                                         void *context)
 {
-    /* Keep aligned with the product profile b1-game-wow-classic-beta.json.
-     * Maintenance builds do not contain the GPU profile's generated argv. */
-    static const struct pw_game_direct_profile profile = {
-        {"C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.exe",
-         "-launcherlogin", "-uid", "wow_classic_beta", NULL},
-        "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_",
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_"
+    /* Keep aligned with b1-game-wow-forever.json and b1-game-wow-classic-beta.json.
+     * Maintenance builds do not contain the GPU profile's generated argv.
+     * Prefer final, fall back to beta, and never stage an incomplete install. */
+    static const struct pw_game_direct_profile profiles[] = {
+        {
+            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\WoW.exe",
+             "-launcherlogin", "-uid", "wowf", NULL},
+            "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/WoW.exe",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"
+        },
+        {
+            {"C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.exe",
+             "-launcherlogin", "-uid", "wow_classic_beta", NULL},
+            "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"
+        }
     };
-    return &profile;
+    if (!exists) return NULL;
+    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i)
+        if (exists(profiles[i].unix_exe, context) && exists(profiles[i].unix_loader, context))
+            return &profiles[i];
+    return NULL;
 }
 static inline int pw_game_direct_flag_consumed(int present, int unlink_result)
 {
@@ -78,7 +98,13 @@ static inline int pw_game_wire_decode(int argc, char **argv, const char *prefix,
     memcpy(loader, argv[3], cwd_len); loader[cwd_len] = '/';
     memcpy(loader + cwd_len + 1, base, base_len - 4);
     memcpy(loader + cwd_len + 1 + base_len - 4, "_loader.dll", sizeof("_loader.dll"));
-    if (!exists(loader, context)) return -ENOENT;
+    if (!exists(loader, context))
+    {
+        /* Some channels ship a lowercase loader beside a mixed-case executable. */
+        for (size_t i = cwd_len + 1; i < cwd_len + 1 + base_len - 4; ++i)
+            if (loader[i] >= 'A' && loader[i] <= 'Z') loader[i] += 'a' - 'A';
+        if (!exists(loader, context)) return -ENOENT;
+    }
     if (separator_out) *separator_out = separator;
     return 0;
 }
