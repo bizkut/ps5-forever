@@ -20,8 +20,12 @@ Wine, using DirectX 12 on the PS5's own GPU. The tested game build is
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.006
+## Changes in 01.000.007
 
+- Fixes the black screen when World of Warcraft: Forever 1.60.1.70425 starts.
+- Reports a generic Wine/Linux system identity instead of Sony/PlayStation 5
+  branding while preserving real hardware capabilities.
+- Release logs no longer include raw keyboard records.
 - Fixes endless loading on Battle.net's password sign-in page.
 - If the Battle.net installer's Live download fails, the launcher tries the
   direct versioned download link.

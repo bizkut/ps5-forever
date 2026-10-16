@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.006
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.007
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -62,8 +62,18 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
-## 01.000.006 source changes
+## 01.000.007 source changes
 
+- SMBIOS uses generic `"The Wine project"` / `"Wine"` identity, serial `"0"`
+  and an all-zero UUID instead of Sony/PlayStation 5 branding.
+- The human-readable GPU name is `"AMD Radeon Graphics (RADV)"`; the synthetic
+  EDID identifies a `WIN` / `"Wine HDR TV"` display. Real CPUID results and PCI
+  identity `1002:13fb` are intentionally unchanged, preserving hardware capabilities.
+- The downstream `SfcIsFileProtected` compatibility stub stays leaf-only for
+  title-child pre-context calls: it returns `FALSE` without diagnostics or
+  last-error helper calls, avoiding the updated WoW startup fault.
+- Release logs omit raw keyboard records, key usages and modifiers; aggregate
+  input-health counters remain.
 - Wine's DirectWrite core-family aliases route Chromium's last-resort font
   requests to the bundled Tahoma / Droid Sans Fallback families.
 - The Battle.net installer downloader tries the direct versioned
@@ -78,7 +88,7 @@ here is a host build/inspection gate, **not console execution**.
   16 GiB free-space answer.
 - The desktop background uses the drawn purple picture again.
 
-Native acceptance of the final `.006` archive is **pending**. These source
+Native acceptance of the exact final `.007` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
@@ -116,7 +126,7 @@ loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchange
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
-The `.006` sources retain the two independent drive-reporting fixes:
+The `.007` sources retain the two independent drive-reporting fixes:
 
 - Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
   `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
