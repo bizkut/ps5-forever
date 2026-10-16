@@ -16,8 +16,9 @@ Wine, using DirectX 12 on the PS5's own GPU. The tested game build is
 > supported by Blizzard Entertainment, Sony Interactive Entertainment or Valve.
 > Using unofficial software with an online game is at your own risk.
 
-## Changes in 01.000.005
+## Changes in 01.000.006
 
+- Fixes endless loading on Battle.net's password sign-in page.
 - If the Battle.net installer's Live download fails, the launcher tries the
   direct versioned download link.
 - Startup creates missing `Program Files` and `Program Files (x86)` folders

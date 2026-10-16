@@ -6,8 +6,9 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.005
+### Forever Launcher 01.000.006
 
+- Fixes endless loading on Battle.net's password sign-in page.
 - If the Battle.net installer download fails, the launcher retries from Blizzard's direct download link.
 - Missing `Program Files` and `Program Files (x86)` folders are created at start, so the installer accepts its default location.
 - The installer no longer flickers.
