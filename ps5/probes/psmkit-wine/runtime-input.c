@@ -33,6 +33,51 @@ int wsi_videoout_cursor_position(int x, int y, int space_width, int space_height
 int wsi_videoout_cursor_disable(void);
 
 static uint32_t *cursor_image;
+/* Only the input worker accesses direct memory/WSI. Wine's GUI thread copies
+ * a complete pending frame under this lock; it never writes the live slot. */
+static pthread_mutex_t cursor_lock = PTHREAD_MUTEX_INITIALIZER;
+static union
+{
+    struct ps5_desktop_cursor_shape shape;
+    unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+} cursor_pending;
+static int cursor_pending_dirty, cursor_visible = 1, cursor_ready;
+static unsigned cursor_slot, cursor_next_slot;
+static int cursor_hotspot_x, cursor_hotspot_y;
+
+int pw_title_set_cursor(const void *message, unsigned size)
+{
+    if (!ps5_desktop_cursor_shape_valid(message, size)) return 0;
+    pthread_mutex_lock(&cursor_lock);
+    if (cursor_pending.shape.header.size != size || memcmp(&cursor_pending, message, size))
+    {
+        memcpy(&cursor_pending, message, size);
+        cursor_pending_dirty = 1;
+    }
+    pthread_mutex_unlock(&cursor_lock);
+    return 1;
+}
+
+/* RADV's VideoOut position function uses these fixed scanout dimensions too
+ * (0001-videoout-hdr10-and-immediate.patch), independently of render extent.
+ * Desktop shapes are 1080p; clamp a uniform integer enlargement to the plane. */
+#define CURSOR_SCANOUT_WIDTH 3840u
+#define CURSOR_SCANOUT_HEIGHT 2160u
+static void cursor_render_shape(uint32_t *image, const struct ps5_desktop_cursor_shape *shape)
+{
+    unsigned scale = CURSOR_SCANOUT_WIDTH / PS5_DESKTOP_WIDTH;
+    unsigned sy = CURSOR_SCANOUT_HEIGHT / PS5_DESKTOP_HEIGHT;
+    if (scale > sy) scale = sy;
+    if (!scale) scale = 1;
+    if (scale > CURSOR_IMAGE_SIDE / shape->width) scale = CURSOR_IMAGE_SIDE / shape->width;
+    if (scale > CURSOR_IMAGE_SIDE / shape->height) scale = CURSOR_IMAGE_SIDE / shape->height;
+    memset(image, 0, CURSOR_SLOT_BYTES);
+    for (unsigned y = 0; y < shape->height * scale; y++)
+        for (unsigned x = 0; x < shape->width * scale; x++)
+            image[y * CURSOR_IMAGE_SIDE + x] = shape->pixels[(y / scale) * shape->width + x / scale];
+    cursor_hotspot_x = shape->hotspot_x * (int)scale;
+    cursor_hotspot_y = shape->hotspot_y * (int)scale;
+}
 
 static void cursor_build_image(uint32_t *image)
 {
@@ -58,9 +103,9 @@ static int cursor_allocate(void)
 {
     int64_t physical = -1;
     int result = sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(),
-        CURSOR_SLOT_BYTES, CURSOR_SLOT_BYTES, PS5_KERNEL_DIRECT_TYPE_CPU, &physical);
+        2 * CURSOR_SLOT_BYTES, CURSOR_SLOT_BYTES, PS5_KERNEL_DIRECT_TYPE_CPU, &physical);
     if (!result)
-        result = sceKernelMapDirectMemory((void **)&cursor_image, CURSOR_SLOT_BYTES,
+        result = sceKernelMapDirectMemory((void **)&cursor_image, 2 * CURSOR_SLOT_BYTES,
             PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE |
             PS5_KERNEL_PROT_GPU_READ | PS5_KERNEL_PROT_GPU_WRITE,
             0, physical, CURSOR_SLOT_BYTES);
@@ -72,10 +117,11 @@ static int cursor_allocate(void)
     cursor_build_image(cursor_image);
     cursor_flush(cursor_image);
     io_log("title cursor image=%p bytes=%u format=linear-AARRGGBB", cursor_image,
-           CURSOR_SLOT_BYTES);
+           2 * CURSOR_SLOT_BYTES);
     return 0;
 }
 #else
+static void cursor_flush(void *memory) { (void)memory; }
 static int cursor_allocate(void)
 {
     return 0;
@@ -91,6 +137,7 @@ static void cursor_update(uint64_t now_us)
     static int last_x = -1, last_y = -1, hidden;
     static uint64_t moved_us;
     int x, y;
+    uint32_t *image;
     if (!cursor_image) return;
     pointer_position(&x, &y);
     if (x != last_x || y != last_y || !moved_us)
@@ -99,16 +146,39 @@ static void cursor_update(uint64_t now_us)
         last_y = y;
         moved_us = now_us;
     }
-    if (now_us - moved_us >= CURSOR_IDLE_US)
+    pthread_mutex_lock(&cursor_lock);
+    if (cursor_pending_dirty)
+    {
+        if (!cursor_visible && cursor_pending.shape.visible) moved_us = now_us;
+        cursor_visible = cursor_pending.shape.visible;
+        cursor_ready = 0;
+        if (cursor_visible)
+        {
+            cursor_next_slot = 1 - cursor_slot;
+            image = (uint32_t *)((uint8_t *)cursor_image + cursor_next_slot * CURSOR_SLOT_BYTES);
+            cursor_render_shape(image, &cursor_pending.shape);
+            cursor_flush(image);
+            cursor_ready = 1;
+        }
+        cursor_pending_dirty = 0;
+    }
+    if (!cursor_visible || now_us - moved_us >= CURSOR_IDLE_US)
     {
         if (!hidden && !wsi_videoout_cursor_disable()) hidden = 1;
-        return;
     }
-    if (wsi_videoout_cursor_set(cursor_image, 0, 0)) return;
-    hidden = 0;
-    /* The pointer works in the 1920x1080 desktop space Battle.net's compositor
-     * uses; the cursor plane takes scanout pixels (3840x2160 for WoW). */
-    wsi_videoout_cursor_position(x, y, PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+    else
+    {
+        unsigned slot = cursor_ready ? cursor_next_slot : cursor_slot;
+        image = (uint32_t *)((uint8_t *)cursor_image + slot * CURSOR_SLOT_BYTES);
+        if (!wsi_videoout_cursor_set(image, cursor_hotspot_x, cursor_hotspot_y))
+        {
+            cursor_slot = slot;
+            cursor_ready = hidden = 0;
+            /* Pointer position is the click hotspot, never the image origin. */
+            wsi_videoout_cursor_position(x, y, PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+        }
+    }
+    pthread_mutex_unlock(&cursor_lock);
 }
 static pthread_mutex_t input_lock = PTHREAD_MUTEX_INITIALIZER;
 static union ps5_title_input queue[INPUT_QUEUE_SIZE];

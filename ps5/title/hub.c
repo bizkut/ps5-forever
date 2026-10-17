@@ -13,7 +13,7 @@
 
 #ifdef PS5_TITLE_EMBEDDED
 
-#define MAX_MESSAGE_BYTES (sizeof(struct ps5_desktop_text) + PS5_DESKTOP_MAX_TEXT * sizeof(uint16_t))
+#define MAX_MESSAGE_BYTES PS5_DESKTOP_MAX_MESSAGE
 #define MESSAGES_PER_FRAME 128u
 
 int pw_desktop_title_receive(void *message, size_t capacity);
@@ -48,6 +48,9 @@ static int message_size(uint32_t type, uint32_t size)
     case PS5_DESKTOP_DESTROY:    return size == sizeof(struct ps5_desktop_id) ? 1 : -1;
     case PS5_DESKTOP_DAMAGE:     return size == sizeof(struct ps5_desktop_damage) ? 1 : -1;
     case PS5_DESKTOP_CURSOR_POS: return size == sizeof(struct ps5_desktop_point) ? 1 : -1;
+    case PS5_DESKTOP_CURSOR_SHAPE:
+        return size >= sizeof(struct ps5_desktop_cursor_shape) && size <= MAX_MESSAGE_BYTES &&
+               !((size - sizeof(struct ps5_desktop_cursor_shape)) % sizeof(uint32_t)) ? 1 : -1;
     default:                     return 0;
     }
 }
@@ -70,7 +73,9 @@ void hub_poll(uint64_t now_us)
         if (!size) break;
         if (size < (int)sizeof(message.header) || (uint32_t)size != message.header.size ||
             message.header.size > sizeof(message.bytes) ||
-            message_size(message.header.type, message.header.size) < 0)
+            message_size(message.header.type, message.header.size) < 0 ||
+            (message.header.type == PS5_DESKTOP_CURSOR_SHAPE &&
+             !ps5_desktop_cursor_shape_valid(message.bytes, (size_t)size)))
         {
             disconnect_hub();
             break;
@@ -98,12 +103,12 @@ int hub_send(const void *message, size_t size)
 
 
 #define RETRY_US 1000000u
-#define RECEIVE_BYTES 8192u
+#define RECEIVE_BYTES PS5_DESKTOP_MAX_MESSAGE
 #define SEND_BYTES 65536u
 #define IO_BYTES_PER_FRAME 65536u
 #define MESSAGES_PER_FRAME 128u
 #define CALLS_PER_FRAME 32u
-#define MAX_MESSAGE_BYTES (sizeof(struct ps5_desktop_text) + PS5_DESKTOP_MAX_TEXT * sizeof(uint16_t))
+#define MAX_MESSAGE_BYTES PS5_DESKTOP_MAX_MESSAGE
 
 static int socket_fd = -1, connecting, connected;
 static uint64_t retry_at, connect_until, last_poll;
@@ -196,6 +201,9 @@ static int message_size(uint32_t type, uint32_t size)
     case PS5_DESKTOP_DESTROY:    return size == sizeof(struct ps5_desktop_id) ? 1 : -1;
     case PS5_DESKTOP_DAMAGE:     return size == sizeof(struct ps5_desktop_damage) ? 1 : -1;
     case PS5_DESKTOP_CURSOR_POS: return size == sizeof(struct ps5_desktop_point) ? 1 : -1;
+    case PS5_DESKTOP_CURSOR_SHAPE:
+        return size >= sizeof(struct ps5_desktop_cursor_shape) && size <= MAX_MESSAGE_BYTES &&
+               !((size - sizeof(struct ps5_desktop_cursor_shape)) % sizeof(uint32_t)) ? 1 : -1;
     default:                    return 0;
     }
 }
@@ -223,6 +231,12 @@ static void receive_messages(void)
                 return;
             }
             if (received_size - consumed < header.size) break;
+            if (header.type == PS5_DESKTOP_CURSOR_SHAPE &&
+                !ps5_desktop_cursor_shape_valid(received + consumed, header.size))
+            {
+                disconnect_hub();
+                return;
+            }
             if (deliver && on_message) on_message(received + consumed, handler_context);
             consumed += header.size;
             messages++;

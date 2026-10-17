@@ -43,7 +43,7 @@ static int64_t shutdown_grace, shutdown_deadline;
 
 #if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS
 
-#define PW_HUB_MAX_FRAME (sizeof(struct ps5_desktop_text) + PS5_DESKTOP_MAX_TEXT * sizeof(uint16_t))
+#define PW_HUB_MAX_FRAME PS5_DESKTOP_MAX_MESSAGE
 #define PW_HUB_MAX_OUTPUT (1024u * 1024u)
 #define PW_HUB_TITLE_INPUT (64u * 1024u)
 #define PW_HUB_TITLE_OUTPUT (1024u * 1024u)
@@ -73,6 +73,8 @@ struct pw_hub_window
     struct pw_hub_window *above, *below;
     struct pw_hub_peer *owner;
     struct ps5_desktop_window state;
+    struct ps5_desktop_cursor_shape *cursor;
+    int replay_cursor, replay_cursor_changed;
 };
 
 struct pw_desktop_hub
@@ -81,6 +83,8 @@ struct pw_desktop_hub
     unsigned int sink_serial;
     int input_dropped;
     struct pw_hub_window *top, *bottom;
+    struct ps5_desktop_cursor_shape *desktop_cursor;
+    int replay_cursors, replay_desktop_cursor, replay_desktop_changed;
 };
 
 struct pw_ring
@@ -214,6 +218,15 @@ static int hub_queue_title(const void *data, size_t size)
     return result;
 }
 
+static size_t hub_title_space(void)
+{
+    size_t space;
+    pthread_mutex_lock(&desktop_lock);
+    space = desktop_title_connected ? desktop_title_output.capacity - desktop_title_output.size : 0;
+    pthread_mutex_unlock(&desktop_lock);
+    return space;
+}
+
 static void hub_drop_peer(struct pw_hub_peer *peer)
 {
     if (peer->fd >= 0) close(peer->fd);
@@ -299,6 +312,7 @@ static void hub_remove_window(struct pw_desktop_hub *hub, struct pw_hub_window *
     hub_unlink_window(hub, window);
     if (window->state.shm[0])
         pw_desktop_surface(window->state.shm, 0, PS5_TITLE_SURFACE_UNLINK);
+    free(window->cursor);
     free(window);
 }
 
@@ -329,6 +343,42 @@ static void hub_restack(struct pw_desktop_hub *hub, struct pw_hub_window *window
     else hub->top = window;
 }
 
+/* Stream bounded generations: updates to an already-visited entry go into
+ * the next generation, never back ahead of outstanding snapshot entries.
+ * Keep 64 KiB headroom and cache-local pending bits (no retained node pointers). */
+static void hub_replay_cursors(struct pw_desktop_hub *hub)
+{
+    struct pw_hub_window *window;
+    size_t budget = 65536;
+    if (!hub->replay_cursors) return;
+    for (window = hub->top; window; window = window->below)
+    {
+        size_t size;
+        if (!window->replay_cursor) continue;
+        if (!window->cursor) { window->replay_cursor = 0; continue; }
+        size = window->cursor->header.size;
+        if (size > budget || size + 65536 > hub_title_space()) return;
+        if (!hub_queue_title(window->cursor, size)) return;
+        window->replay_cursor = 0;
+        budget -= size;
+    }
+    if (hub->replay_desktop_cursor && hub->desktop_cursor)
+    {
+        size_t size = hub->desktop_cursor->header.size;
+        if (size > budget || size + 65536 > hub_title_space()) return;
+        if (!hub_queue_title(hub->desktop_cursor, size)) return;
+    }
+    hub->replay_desktop_cursor = hub->replay_desktop_changed;
+    hub->replay_desktop_changed = 0;
+    hub->replay_cursors = hub->replay_desktop_cursor;
+    for (window = hub->top; window; window = window->below)
+    {
+        window->replay_cursor = window->replay_cursor_changed;
+        window->replay_cursor_changed = 0;
+        hub->replay_cursors |= window->replay_cursor;
+    }
+}
+
 static void hub_replay(struct pw_desktop_hub *hub)
 {
     struct pw_hub_window *window;
@@ -338,6 +388,14 @@ static void hub_replay(struct pw_desktop_hub *hub)
     };
     uint64_t previous = PS5_DESKTOP_Z_TOP;
 
+    hub->replay_cursors = 1;
+    hub->replay_desktop_cursor = hub->desktop_cursor != NULL;
+    hub->replay_desktop_changed = 0;
+    for (window = hub->top; window; window = window->below)
+    {
+        window->replay_cursor = window->cursor != NULL;
+        window->replay_cursor_changed = 0;
+    }
     for (window = hub->top; window; window = window->below)
     {
         state = window->state;
@@ -354,6 +412,7 @@ static void hub_replay(struct pw_desktop_hub *hub)
         damage.bottom = window->state.height;
         if (!hub_queue_title(&damage, sizeof(damage))) return;
     }
+    hub_replay_cursors(hub);
 }
 
 static struct pw_hub_peer *hub_previous_sink(struct pw_desktop_hub *hub)
@@ -402,6 +461,12 @@ static int hub_driver_message(struct pw_desktop_hub *hub, struct pw_hub_peer *pe
             peer->sink_order = 0;
             if (hub->input_sink == peer) hub_set_sink(hub, hub_previous_sink(hub));
         }
+        if (hello->flags & PS5_DESKTOP_CURSOR_CAPABLE)
+        {
+            struct ps5_desktop_hello reply = {
+                .header = {PS5_DESKTOP_HELLO, sizeof(reply)}, .flags = PS5_DESKTOP_CURSOR_CAPABLE};
+            hub_queue_peer(peer, &reply, sizeof(reply));
+        }
         return 1;
     }
     if (!peer->hello) return 0;
@@ -444,6 +509,33 @@ static int hub_driver_message(struct pw_desktop_hub *hub, struct pw_hub_peer *pe
         if (header->size != sizeof(struct ps5_desktop_point)) return 0;
         hub_queue_title(header, header->size);
         return 1;
+    case PS5_DESKTOP_CURSOR_SHAPE:
+    {
+        const struct ps5_desktop_cursor_shape *shape = (const void *)header;
+        struct ps5_desktop_cursor_shape **saved;
+        if (!ps5_desktop_cursor_shape_valid(header, header->size)) return 0;
+        if (shape->id)
+        {
+            if (!(window = hub_find_window(hub, shape->id))) return 1;
+            saved = &window->cursor;
+        }
+        else saved = &hub->desktop_cursor;
+        if (*saved && (*saved)->header.size == header->size &&
+            !memcmp(*saved, header, header->size)) return 1;
+        if (!*saved && !(*saved = malloc(PS5_DESKTOP_MAX_MESSAGE))) return 0;
+        memcpy(*saved, header, header->size);
+        if (hub->replay_cursors)
+        {
+            if (shape->id)
+            {
+                if (!window->replay_cursor) window->replay_cursor_changed = 1;
+            }
+            else if (!hub->replay_desktop_cursor) hub->replay_desktop_changed = 1;
+            return 1;
+        }
+        hub_queue_title(header, header->size);
+        return 1;
+    }
     case PS5_DESKTOP_TEXT_INPUT:
         if (header->size != sizeof(struct ps5_desktop_text_input)) return 0;
         hub_queue_title(header, header->size);
@@ -611,6 +703,7 @@ static void *desktop_hub_loop(void *unused)
     {
         hub_add_pending(hub);
         if (take_replay_request()) hub_replay(hub);
+        else hub_replay_cursors(hub);
         for (unsigned int i = 0; i < 128; i++)
         {
             int size = take_title_message(title_message.bytes, sizeof(title_message.bytes));
@@ -673,6 +766,8 @@ static void *desktop_hub_loop(void *unused)
     }
     for (peer = hub->peers; peer; peer = peer->next) hub_drop_peer(peer);
     hub_cleanup_peers(hub);
+    free(hub->desktop_cursor);
+    hub->desktop_cursor = NULL;
     free(pollfds);
     pthread_mutex_lock(&desktop_lock);
     while ((peer = desktop_pending))

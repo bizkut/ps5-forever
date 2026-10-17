@@ -4596,6 +4596,20 @@
     {
       "binding": "strong",
       "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtGdiExtGetObjectW",
+      "target": "NtGdiExtGetObjectW"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtGdiGetDIBitsInternal",
+      "target": "NtGdiGetDIBitsInternal"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
       "owner": "title_ntdll",
       "symbol": "NtTerminateProcess",
       "target": "NtTerminateProcess"
@@ -4634,6 +4648,13 @@
       "owner": "title_win32u",
       "symbol": "NtUserGetDCEx",
       "target": "NtUserGetDCEx"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtUserGetIconInfo",
+      "target": "NtUserGetIconInfo"
     },
     {
       "binding": "strong",
@@ -4872,6 +4893,13 @@
       "owner": "fself_public_or_platform",
       "symbol": "munmap",
       "target": "munmap"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "fself_public_or_platform",
+      "symbol": "poll",
+      "target": "poll"
     },
     {
       "binding": "strong",

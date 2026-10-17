@@ -257,10 +257,127 @@ static void run_surface(BOOL title, BOOL fallback)
     owner.surface = NULL;
 }
 
+static void test_cursor_shape(void)
+{
+    union
+    {
+        struct ps5_desktop_cursor_shape shape;
+        unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+    } message;
+    struct ps5_desktop_cursor_shape *shape = &message.shape;
+    compositor_init(10, 20);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == 0xff000000, "default cursor arrow preserved");
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4 * 4},
+        .width = 2, .height = 2, .hotspot_x = 1, .hotspot_y = 1, .visible = 1};
+    shape->pixels[0] = 0x80ff0000;
+    shape->pixels[1] = 0xff00ff00;
+    shape->pixels[2] = 0xff0000ff;
+    shape->pixels[3] = 0;
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[19 * DISPLAY_WIDTH + 9] == 0xff89050f, "cursor alpha blended");
+    check(image[19 * DISPLAY_WIDTH + 10] == 0xff00ff00, "cursor hotspot offsets image");
+    check(image[20 * DISPLAY_WIDTH + 9] == 0xff0000ff, "cursor second row");
+    check(image[20 * DISPLAY_WIDTH + 10] == BACKGROUND, "transparent cursor pixel");
+    compositor_cursor(11, 20);
+    compositor_compose();
+    check(image[19 * DISPLAY_WIDTH + 9] == BACKGROUND, "old cursor bounds repainted");
+    check(image[19 * DISPLAY_WIDTH + 11] == 0xff00ff00, "new cursor bounds repainted");
+    *shape = (struct ps5_desktop_cursor_shape){.header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape)}};
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[19 * DISPLAY_WIDTH + 11] == BACKGROUND, "app hide removes cursor");
+    compositor_cursor(12, 20);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == BACKGROUND, "motion does not unhide app cursor");
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4},
+        .width = 1, .height = 1, .visible = 1};
+    shape->pixels[0] = 0xffffffff;
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xffffffff, "visible shape unhides cursor");
+    compositor_reset();
+}
+
+static void test_cursor_ownership(void)
+{
+    struct ps5_desktop_window a = {
+        .header = {PS5_DESKTOP_WINDOW, sizeof(a)}, .id = 100,
+        .x = 90, .y = 90, .width = 40, .height = 40, .flags = PS5_DESKTOP_VISIBLE,
+        .visible_right = 40, .visible_bottom = 40};
+    struct ps5_desktop_window b = a;
+    union {
+        struct ps5_desktop_cursor_shape shape;
+        unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+    } message;
+    struct ps5_desktop_cursor_shape *shape = &message.shape;
+    compositor_reset();
+    compositor_init(100, 100);
+    compositor_window(&a);
+    b.id = 200; b.x = 120;
+    compositor_window(&b);
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4},
+        .id = a.id, .width = 1, .height = 1, .visible = 1};
+    shape->pixels[0] = 0xffff0000;
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "pointer owner A selects its cursor");
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape)}, .id = b.id};
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "stale owner B hide cannot hide A");
+    compositor_cursor(130, 100);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 130] == BACKGROUND, "enter B selects its remembered hide");
+    compositor_cursor(100, 100);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "return A restores cached cursor without new message");
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4},
+        .id = b.id, .width = 1, .height = 1, .visible = 1};
+    shape->pixels[0] = 0xff00ff00;
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "stale B shape cannot replace A");
+    b.x = 95; b.flags |= PS5_DESKTOP_TOPMOST;
+    compositor_window(&b);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xff00ff00, "topmost visible window owns stationary pointer");
+    b.visible_left = b.visible_top = 20;
+    compositor_window(&b);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "surface padding cannot steal pointer ownership");
+    compositor_cursor(120, 115);
+    compositor_compose();
+    check(image[115 * DISPLAY_WIDTH + 120] == 0xff00ff00, "visible inset selects top window");
+    compositor_cursor(100, 100);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "leaving visible inset restores underlying owner");
+    b.flags &= ~PS5_DESKTOP_VISIBLE;
+    compositor_window(&b);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "invisible window cannot own pointer");
+    *shape = (struct ps5_desktop_cursor_shape){.header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape)}};
+    compositor_cursor_shape(shape);
+    compositor_compose();
+    check(image[100 * DISPLAY_WIDTH + 100] == 0xffff0000, "NULL hwnd desktop hide does not hide window cursor");
+    compositor_cursor(0, 0);
+    compositor_compose();
+    check(image[0] == BACKGROUND, "desktop state selected outside windows");
+    compositor_reset();
+}
+
 int main(void)
 {
     title_runtime.exit = 1;
     title_runtime.desktop_surface = pw_desktop_surface;
+    test_cursor_shape();
+    test_cursor_ownership();
     compositor_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
     for (int title = 0; title <= 1; title++)
         for (int fallback = 0; fallback <= 1; fallback++) run_surface(title, fallback);

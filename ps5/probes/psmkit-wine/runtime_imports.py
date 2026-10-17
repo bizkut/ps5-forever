@@ -331,6 +331,7 @@ TITLE_NTDLL_EXPORTS = {
 }
 B1_WIN32U_EXPORTS = {
     "NtGdiCreateCompatibleDC", "NtGdiDdDDICreateDCFromMemory", "NtGdiDeleteObjectApp",
+    "NtGdiExtGetObjectW", "NtGdiGetDIBitsInternal", "NtUserGetIconInfo",
     "NtGdiGetDCDword", "NtUserCallHwnd", "NtUserCallHwndParam", "NtUserCallNoParam",
     "NtUserCallOneParam", "NtUserGetAncestor", "NtUserGetDCEx",
     "NtUserGetObjectInformation", "NtUserGetProp", "NtUserGetThreadDesktop",

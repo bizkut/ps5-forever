@@ -10,11 +10,6 @@ import re
 import shlex
 import subprocess
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--wine', type=Path, required=True)
-parser.add_argument('--output', type=Path, required=True)
-parser.add_argument('--cc', default='cc')
-args = parser.parse_args()
 
 
 def definition(path, name, structure=False, expected=1):
@@ -58,24 +53,34 @@ def definition(path, name, structure=False, expected=1):
     return matches[0]
 
 
-here = Path(__file__).resolve().parent
-window = args.wine / 'dlls/wineps5.drv/window.c'
-args.output.parent.mkdir(parents=True, exist_ok=True)
-(args.output.parent / 'desktop-surface-types.inc').write_text('\n\n'.join(
-    definition(window, name, structure=True)
-    for name in ('ps5_window_surface', 'ps5_foreign_surface')) + '\n')
-functions = '\n\n'.join(definition(window, name) for name in (
-    'intersect_rect', 'unlink_surface', 'ps5_surface_destroy', 'create_surface',
-    'ps5_surface_flush', 'foreign_surface_destroy', 'open_foreign_surface',
-    'foreign_surface_flush'))
-(args.output.parent / 'desktop-surface-functions.inc').write_text(functions + '\n')
-callbacks = definition(here / 'runtime-parent.c', 'surface_name_valid') + '\n\n'
-callbacks += definition(here / 'runtime-parent.c', 'pw_desktop_surface', expected=2) + '\n\n'
-callbacks += definition(args.wine / 'dlls/ntdll/unix/server.c', '__wine_ps5_desktop_surface') + '\n'
-(args.output.parent / 'desktop-surface-callbacks.inc').write_text(callbacks)
-command = shlex.split(args.cc) + ['-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
-                                '-Wno-unused-parameter', '-Wno-sign-compare', '-pthread', '-D__PROSPERO__',
-                                '-I' + str(args.output.parent), '-I' + str(args.wine / 'include'),
-                                str(here / 'test-desktop-surface.c'), '-o', str(args.output)]
-subprocess.run(command, check=True)
-print('DESKTOP_SURFACE_ISOLATION lifecycle=owner,remote flush=owner,remote callbacks=ntdll,parent implementation=UNCHANGED')
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--wine', type=Path, required=True)
+    parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--cc', default='cc')
+    args = parser.parse_args()
+    here = Path(__file__).resolve().parent
+    window = args.wine / 'dlls/wineps5.drv/window.c'
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    (args.output.parent / 'desktop-surface-types.inc').write_text('\n\n'.join(
+        definition(window, name, structure=True)
+        for name in ('ps5_window_surface', 'ps5_foreign_surface')) + '\n')
+    functions = '\n\n'.join(definition(window, name) for name in (
+        'intersect_rect', 'unlink_surface', 'ps5_surface_destroy', 'create_surface',
+        'ps5_surface_flush', 'foreign_surface_destroy', 'open_foreign_surface',
+        'foreign_surface_flush'))
+    (args.output.parent / 'desktop-surface-functions.inc').write_text(functions + '\n')
+    callbacks = definition(here / 'runtime-parent.c', 'surface_name_valid') + '\n\n'
+    callbacks += definition(here / 'runtime-parent.c', 'pw_desktop_surface', expected=2) + '\n\n'
+    callbacks += definition(args.wine / 'dlls/ntdll/unix/server.c', '__wine_ps5_desktop_surface') + '\n'
+    (args.output.parent / 'desktop-surface-callbacks.inc').write_text(callbacks)
+    command = shlex.split(args.cc) + ['-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
+                                    '-Wno-unused-parameter', '-Wno-sign-compare', '-pthread', '-D__PROSPERO__',
+                                    '-I' + str(args.output.parent), '-I' + str(args.wine / 'include'),
+                                    str(here / 'test-desktop-surface.c'), '-o', str(args.output)]
+    subprocess.run(command, check=True)
+    print('DESKTOP_SURFACE_ISOLATION lifecycle=owner,remote flush=owner,remote callbacks=ntdll,parent implementation=UNCHANGED')
+
+
+if __name__ == '__main__':
+    main()

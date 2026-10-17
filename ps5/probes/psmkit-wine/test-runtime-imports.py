@@ -66,6 +66,35 @@ if candidate_ownership('future_secret_runtime_api') != (
         'UNREVIEWED_NOT_AUTHORIZED', 'future_secret_runtime_api'):
     raise SystemExit('unknown import received permissive candidate ownership')
 
+for symbol in ('NtGdiExtGetObjectW', 'NtGdiGetDIBitsInternal', 'NtUserGetIconInfo'):
+    if candidate_ownership(symbol, profile_name='b1') != ('title_win32u', symbol):
+        raise SystemExit(f'cursor GDI import is not owned by title win32u: {symbol}')
+    cursor_policy = load_policy(here / 'runtime-import-policy-b1.json', profile_name='b1')
+    row = next((row for row in cursor_policy
+                if row['module'] == 'wineps5.so' and row['symbol'] == symbol), None)
+    if not row or row['owner'] != 'title_win32u' or row['target'] != symbol:
+        raise SystemExit(f'cursor GDI import missing from reviewed B1 policy: {symbol}')
+
+driver_tls = next((row for row in cursor_policy
+                   if row['module'] == 'wineps5.so' and row['symbol'] == '__tls_get_addr'), None)
+if driver_tls:
+    raise SystemExit('wineps5.so must not introduce an ELF TLS resolver import')
+driver_poll = next((row for row in cursor_policy
+                    if row['module'] == 'wineps5.so' and row['symbol'] == 'poll'), None)
+if not driver_poll or (driver_poll['owner'], driver_poll['target']) != ('fself_public_or_platform', 'poll'):
+    raise SystemExit('cursor negotiation is missing its reviewed poll import')
+
+for symbol in ('malloc', 'free', 'memcpy', 'memset', 'pthread_mutex_lock',
+               'pthread_mutex_unlock', 'pthread_once', '__wine_ps5_get_vulkan_proc'):
+    row = next((row for row in cursor_policy
+                if row['module'] == 'win32u.so' and row['symbol'] == symbol), None)
+    owner = 'title_ntdll' if symbol == '__wine_ps5_get_vulkan_proc' else 'fself_public_or_platform'
+    expected = (owner, symbol)
+    if not row or (row['owner'], row['target']) != expected:
+        raise SystemExit(f'title-GPU cursor dependency is not reviewed for win32u.so: {symbol}')
+if any(row['module'] == 'win32u.so' and row['symbol'] == '__tls_get_addr' for row in cursor_policy):
+    raise SystemExit('title-GPU cursor state must not introduce an ELF TLS resolver import')
+
 
 def rejected(symbols, rows, description):
     try:

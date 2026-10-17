@@ -297,6 +297,9 @@ static void on_hub_message(const void *message, void *context)
         pointer_set_position(position.x, position.y);
         break;
     }
+    case PS5_DESKTOP_CURSOR_SHAPE:
+        compositor_cursor_shape(message);
+        break;
     case PS5_DESKTOP_TEXT_INPUT:
     {
         /* A text field took (active) or lost the focus. Chromium does not

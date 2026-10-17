@@ -114,7 +114,8 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-title-icon \
-		$(HOST_OUT)/test-desktop-surface \
+		$(HOST_OUT)/test-desktop-surface $(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
+		$(HOST_OUT)/test-cursor-peer \
 		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile \
 		../../tools/test-ps5-capture.py
 	$(HOST_OUT)/test-protocol
@@ -136,6 +137,12 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-forever-setup
 	$(HOST_OUT)/test-title-icon
 	$(HOST_OUT)/test-desktop-surface
+	$(HOST_OUT)/test-cursor
+	$(HOST_OUT)/test-cursor --no-proc
+	$(HOST_OUT)/test-cursor --no-cursor-proc
+	$(HOST_OUT)/test-cursor --cursor-no-modes
+	$(HOST_OUT)/test-cursor-hub
+	$(HOST_OUT)/test-cursor-peer
 	python3 ../../tools/test-ps5-capture.py
 
 $(HOST_OUT)/test-fd-parking: test-fd-parking.c build-fd-parking-test.py $(WINE_SRC)/server/fd.c
@@ -169,6 +176,33 @@ $(HOST_OUT)/test-desktop-surface: test-desktop-surface.c build-desktop-surface-t
 		$(WINE_SRC)/include/wine/ps5_desktop.h $(WINE_SRC)/include/wine/ps5_title.h \
 		runtime-parent.c protocol.h
 	python3 build-desktop-surface-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+.PHONY: test-cursor
+test-cursor: $(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub $(HOST_OUT)/test-cursor-peer
+	$(HOST_OUT)/test-cursor
+	$(HOST_OUT)/test-cursor --no-proc
+	$(HOST_OUT)/test-cursor --no-cursor-proc
+	$(HOST_OUT)/test-cursor --cursor-no-modes
+	$(HOST_OUT)/test-cursor-hub
+	$(HOST_OUT)/test-cursor-peer
+
+$(HOST_OUT)/test-cursor: test-cursor.c build-cursor-test.py build-desktop-surface-test.py \
+		../../title/hub.c ../../title/hub.h $(WINE_SRC)/dlls/wineps5.drv/cursor.c \
+		$(WINE_SRC)/dlls/win32u/driver.c $(WINE_SRC)/include/wine/ps5_cursor.h \
+		$(WINE_SRC)/include/wine/ps5_desktop.h $(WINE_SRC)/include/wine/ps5_title.h
+	python3 build-cursor-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-cursor-hub: test-cursor-hub.c ../../title/hub.c ../../title/hub.h \
+		$(WINE_SRC)/include/wine/ps5_desktop.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -I "$(WINE_SRC)/include" $< -o $@
+
+$(HOST_OUT)/test-cursor-peer: test-cursor-peer.c build-cursor-peer-test.py build-desktop-surface-test.py \
+		runtime-parent.c $(WINE_SRC)/loader/main.c $(WINE_SRC)/dlls/wineps5.drv/init.c \
+		$(WINE_SRC)/include/wine/ps5_desktop.h $(WINE_SRC)/dlls/wineps5.drv/ps5drv.h \
+		$(WINE_SRC)/include/wine/ps5_cursor.h $(WINE_SRC)/dlls/wineps5.drv/cursor.c \
+		$(WINE_SRC)/dlls/win32u/driver.c
+	python3 build-cursor-peer-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 
 $(HOST_OUT)/test-writebroker-autostart: test-writebroker-autostart.c writebroker-autostart.h
 	mkdir -p $(HOST_OUT)
@@ -227,7 +261,7 @@ $(HOST_OUT)/test-elf-runtime: test-elf-runtime.c elf-runtime.c elf-runtime.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-elf-runtime.c -o $@
 
-$(HOST_OUT)/test-wine-title: $(WINE_SRC)/loader/tests/ps5_title.c $(WINE_SRC)/include/wine/ps5_title.h $(WINE_SRC)/include/wine/ps5_title_private.h $(WINE_SRC)/include/wine/ps5_suspend.h
+$(HOST_OUT)/test-wine-title: $(WINE_SRC)/loader/tests/ps5_title.c $(WINE_SRC)/include/wine/ps5_title.h $(WINE_SRC)/include/wine/ps5_title_private.h $(WINE_SRC)/include/wine/ps5_suspend.h $(WINE_SRC)/include/wine/ps5_desktop.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -pthread -I "$(WINE_SRC)/include" $< -o $@
 

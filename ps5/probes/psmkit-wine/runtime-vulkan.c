@@ -19,6 +19,7 @@ extern PFN_vkVoidFunction vk_icdGetInstanceProcAddr(VkInstance, const char *);
 extern PFN_vkVoidFunction vk_common_GetDeviceProcAddr(VkDevice, const char *);
 
 int pw_title_read_input(union ps5_title_input *, unsigned, int, int, int, int);
+int pw_title_set_cursor(const void *, unsigned);
 unsigned pw_title_get_gamepad(unsigned, struct wine_ps5_gamepad_state *, int);
 unsigned pw_title_set_gamepad_vibration(unsigned, unsigned, unsigned);
 void pw_title_enable_gamepad(int);
@@ -392,6 +393,7 @@ void *pw_title_vulkan_proc(const char *name)
     if (!strcmp(name, "wineCreateDisplaySurface")) return (void *)title_create_display_surface;
     if (!strcmp(name, "wineGetDisplayModes")) return (void *)title_display_modes;
     if (!strcmp(name, "wineReadInput")) return (void *)pw_title_read_input;
+    if (!strcmp(name, "wineSetCursor")) return (void *)pw_title_set_cursor;
     if (!strcmp(name, "wineGetGamepad")) return (void *)pw_title_get_gamepad;
     if (!strcmp(name, "wineSetGamepadVibration")) return (void *)pw_title_set_gamepad_vibration;
     if (!strcmp(name, "wineEnableGamepad")) return (void *)pw_title_enable_gamepad;

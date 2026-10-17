@@ -224,6 +224,41 @@ docker run --rm --pull=never --user "$(id -u):$(id -g)" \
   bash -c 'mkdir -p "$HOME"; make -s -C ps5/probes/psmkit-wine test MINGW_CC=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang MINGW32_CC=/opt/llvm-mingw/bin/i686-w64-mingw32-clang'
 ```
 
+The cursor host regressions are included in that suite (`test-cursor`,
+`test-runtime-input`, `test-wine-title`, and `test-desktop-surface`). Wine sends
+top-down straight-alpha ARGB images up to 64×64 with a desktop-space hotspot;
+Battle.net's CPU compositor uses them at 1×, and the GPU parent uses two 64 KiB
+VideoOut slots. Its nearest-neighbour integer scale follows RADV's fixed
+3840×2160 scanout versus the 1920×1080 desktop (2× when the complete image fits
+64×64, otherwise 1×); the hotspot is scaled identically. App-hidden cursors
+stay hidden on motion; the GPU plane still hides after three seconds idle.
+The B1 headless GPU parent uses win32u's title-GPU driver (null-driver behaviour
+plus native cursor callbacks), enabled only by the `wineSetCursor` callback.
+CPU-only headless children retain the plain null driver. This GPU role does not
+load wineps5.drv; that driver publishes maintenance/desktop cursor messages.
+Both paths use the single conversion/cache implementation in `wine/ps5_cursor.h`.
+The 40-byte cursor prefix includes the top-level HWND (zero means desktop)
+and a reserved zero word; the maximum frame is 16,424 bytes. Conversion is
+cached per HCURSOR and evicted by DestroyCursorIcon, but every SetCursor republishes.
+The compositor uses each window's clipped visible rectangle for ownership and
+remembers other windows' states. Both hubs replay cursor snapshots incrementally
+in at most 64 KiB batches, retaining 64 KiB of queue headroom for live updates.
+Outstanding snapshot entries finish before newer live updates are promoted to the
+next generation, preventing frequently changing windows from starving replay.
+HELLO flag `PS5_DESKTOP_CURSOR_CAPABLE` requests an opt-in support reply;
+no reply means no type-12 publication, preserving old hubs and driver connections.
+Capability probes only peek at ordinary input and never probe a buffered partial
+frame. The latest pending shape is sent when HELLO completes; the publishing GUI
+queue handles late replies. Per-thread queue registration is independent of the
+desktop INPUT_SINK activation, including activation from another GUI thread.
+Registration uses a connection-mutex-protected thread-id set, cleaned by
+ThreadDetach, not ELF TLS. On ELF hosts the cursor host gate compiles the real
+desktop driver sources and the native cursor adapter with Wine API/table
+declarations, rejecting TLS segments, sections, relocations and unreviewed imports.
+Animation uses frame zero and monochrome invert pixels become black. Native
+checks must still establish WoW's `gxCursor 0` software/hardware-cursor interaction,
+mouselook hide/show, and the VideoOut buffer-switch/cache-flush behaviour.
+
 After building Wine's host tools, run the focused assembler/linker regression
 inside the same image (paths below are relative to `ps5-wow`):
 

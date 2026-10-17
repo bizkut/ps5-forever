@@ -113,16 +113,21 @@ static void count_text(const struct pointer_event *pointer_event, void *context)
     if (pointer_event->kind == POINTER_TEXT) text_events++;
 }
 static int cursor_shown, cursor_open = 0;
+static const uint32_t *shown_image;
+static int shown_hotspot_x, shown_hotspot_y, shown_x, shown_y;
 int wsi_videoout_cursor_set(const uint32_t *image, int hotspot_x, int hotspot_y)
 {
-    (void)image; (void)hotspot_x; (void)hotspot_y;
     if (!cursor_open) return 1;
+    shown_image = image;
+    shown_hotspot_x = hotspot_x;
+    shown_hotspot_y = hotspot_y;
     cursor_shown = 1;
     return 0;
 }
 int wsi_videoout_cursor_position(int x, int y, int space_width, int space_height)
 {
-    (void)x; (void)y; (void)space_width; (void)space_height;
+    assert(space_width == PS5_DESKTOP_WIDTH && space_height == PS5_DESKTOP_HEIGHT);
+    shown_x = x; shown_y = y;
     return 0;
 }
 int wsi_videoout_cursor_disable(void)
@@ -162,6 +167,124 @@ static void test_keyboard_logging(void)
     assert(!strstr(logged_output, "modifiers="));
     atomic_store(&stat_queued, 0);
     atomic_store(&stat_read, 0);
+}
+
+static void *publish_cursor_shapes(void *unused)
+{
+    union {
+        struct ps5_desktop_cursor_shape shape;
+        unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+    } message = {.shape = {.header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(message.shape) + 16},
+        .width = 2, .height = 2, .hotspot_x = 1, .hotspot_y = 1, .visible = 1}};
+    (void)unused;
+    for (unsigned i = 0; i < 4096; i++)
+    {
+        for (unsigned pixel = 0; pixel < 4; pixel++) message.shape.pixels[pixel] = 0xff000000u | i;
+        assert(pw_title_set_cursor(&message, message.shape.header.size));
+    }
+    return NULL;
+}
+
+static void test_cursor_shapes(void)
+{
+    static uint32_t slots[2 * CURSOR_SLOT_BYTES / sizeof(uint32_t)];
+    union {
+        struct ps5_desktop_cursor_shape shape;
+        unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+    } message = {.shape = {.header = {PS5_DESKTOP_CURSOR_SHAPE, 0},
+        .width = 2, .height = 2, .hotspot_x = 1, .hotspot_y = 1, .visible = 1}};
+    uint32_t *pixels = message.shape.pixels;
+    uint64_t t = 1000000000000000ull;
+    const uint32_t *first_image;
+    cursor_image = slots;
+    cursor_build_image(slots);
+    cursor_open = 1;
+    pointer_set_position(200, 300);
+    pixels[0] = 0xffff0000; pixels[1] = 0xff00ff00;
+    pixels[2] = 0xff0000ff; pixels[3] = 0xffffffff;
+    message.shape.header.size = sizeof(message.shape) + 4 * sizeof(uint32_t);
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    cursor_update(t);
+    assert(cursor_shown && shown_hotspot_x == 2 && shown_hotspot_y == 2);
+    assert(shown_x == 200 && shown_y == 300); /* position remains the click hotspot */
+    /* The VideoOut cursor plane takes Windows ARGB unchanged (WoW's dumped
+     * gauntlet has a red-brown cuff, which showed red only without a swap). */
+    assert(shown_image[0] == 0xffff0000 && shown_image[1] == 0xffff0000);
+    assert(shown_image[2] == 0xff00ff00 && shown_image[2 * 64] == 0xff0000ff);
+    assert(!shown_image[4] && !shown_image[4 * 64]);
+    first_image = shown_image;
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    cursor_update(t);
+    assert(shown_image == first_image); /* republishing identical pixels needs no plane write */
+    pixels[0] = 0xff123456;
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    assert(first_image[0] == 0xffff0000); /* receiver cannot touch live direct memory */
+    cursor_open = 0;
+    cursor_update(t + 1);
+    assert(shown_image == first_image && first_image[0] == 0xffff0000);
+    cursor_open = 1;
+    cursor_update(t + 1);
+    assert(shown_image != first_image && shown_image[0] == 0xff123456);
+    pixels[0] = 0xffabcdef;
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    cursor_update(t + 2);
+    assert(shown_image == first_image && shown_image[0] == 0xffabcdef);
+    /* Clamp the integer scale, not the image edges or the hotspot. */
+    message.shape.width = 33; message.shape.height = 64;
+    message.shape.hotspot_x = 32; message.shape.hotspot_y = 63;
+    message.shape.header.size = sizeof(message.shape) + 33 * 64 * 4;
+    for (unsigned i = 0; i < 33 * 64; i++) pixels[i] = 0xff000000u | i;
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    cursor_update(t + 3);
+    assert(shown_hotspot_x == 32 && shown_hotspot_y == 63);
+    assert(shown_image[63 * 64 + 32] == pixels[33 * 64 - 1]);
+    assert(!shown_image[33]);
+    assert(!pw_title_set_cursor(&message, message.shape.header.size - 1));
+    message.shape.width = 65;
+    assert(!pw_title_set_cursor(&message, message.shape.header.size));
+    message.shape.width = 33;
+    message.shape.header.type = 0xf000;
+    assert(!pw_title_set_cursor(&message, message.shape.header.size));
+    message.shape = (struct ps5_desktop_cursor_shape){.header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(message.shape)}};
+    assert(pw_title_set_cursor(&message, sizeof(message.shape)));
+    cursor_update(t + 4);
+    assert(!cursor_shown);
+    pointer_set_position(201, 300);
+    cursor_update(t + 5);
+    assert(!cursor_shown); /* motion cannot override app hide / mouselook */
+    message.shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(message.shape) + 4},
+        .width = 1, .height = 1, .visible = 1};
+    assert(pw_title_set_cursor(&message, message.shape.header.size));
+    cursor_update(t + 6);
+    assert(cursor_shown);
+    cursor_update(t + 3000006);
+    assert(!cursor_shown); /* shape changes preserve the idle protection */
+    pointer_set_position(202, 300);
+    cursor_update(t + 3000007);
+    assert(cursor_shown);
+    {
+        pthread_t publisher;
+        message.shape = (struct ps5_desktop_cursor_shape){
+            .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(message.shape) + 16},
+            .width = 2, .height = 2, .hotspot_x = 1, .hotspot_y = 1, .visible = 1};
+        for (unsigned i = 0; i < 4; i++) pixels[i] = 0xff000000u;
+        assert(pw_title_set_cursor(&message, message.shape.header.size));
+        assert(!pthread_create(&publisher, NULL, publish_cursor_shapes, NULL));
+        for (unsigned i = 0; i < 4096; i++)
+        {
+            cursor_update(t + 3000008 + i);
+            assert(shown_hotspot_x == 2 && shown_hotspot_y == 2);
+            for (unsigned y = 0; y < 4; y++)
+                for (unsigned x = 0; x < 4; x++)
+                    assert(shown_image[y * 64 + x] == shown_image[0]);
+            assert(!shown_image[4]);
+        }
+        assert(!pthread_join(publisher, NULL));
+        cursor_update(t + 3005000);
+        assert(shown_image[0] == (0xff000000u | 4095));
+    }
+    cursor_image = NULL;
 }
 
 int main(void)
@@ -528,7 +651,7 @@ int main(void)
         /* Hardware cursor: shown on motion, hidden after 3 s idle, shown
          * again on motion; gamepad use alone does not hide it. */
         {
-            static uint32_t image[1];
+            static uint32_t image[2 * CURSOR_SLOT_BYTES / sizeof(uint32_t)];
             uint64_t t = now + 300000000ull;
             cursor_image = image;
             cursor_open = 1;
@@ -550,6 +673,7 @@ int main(void)
             cursor_image = NULL;
         }
     }
+    test_cursor_shapes();
     puts("runtime GPU input queue/routing/XInput/IME: PASS");
     return 0;
 }

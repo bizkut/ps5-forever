@@ -2,6 +2,7 @@
  * linear image. Only damaged screen rectangles are recomposed. */
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -47,6 +48,7 @@ struct window
     const uint8_t *mapping;
     const uint8_t *pixels;
     size_t mapped_bytes;
+    struct ps5_desktop_cursor_shape *cursor;
     int used;
 };
 
@@ -57,6 +59,17 @@ static size_t mapped_bytes;
 static struct display_rect dirty[MAX_DAMAGE];
 static unsigned dirty_count;
 static int bounding_damage, cursor_x, cursor_y;
+static uint32_t cursor_pixels[PS5_DESKTOP_CURSOR_SIDE * PS5_DESKTOP_CURSOR_SIDE];
+static unsigned cursor_width = CURSOR_WIDTH, cursor_height = CURSOR_HEIGHT;
+static int cursor_hotspot_x, cursor_hotspot_y, cursor_visible = 1, cursor_custom;
+static struct ps5_desktop_cursor_shape *desktop_cursor, *cursor_selected;
+static uint64_t cursor_owner = UINT64_MAX;
+
+static struct display_rect cursor_rect(void)
+{
+    int left = cursor_x - cursor_hotspot_x, top = cursor_y - cursor_hotspot_y;
+    return (struct display_rect){left, top, left + (int)cursor_width, top + (int)cursor_height};
+}
 
 #define FONT_WIDTH 8
 #define FONT_HEIGHT 16
@@ -393,10 +406,48 @@ static void insert_order(unsigned slot)
     window_count++;
 }
 
+/* Pointer ownership follows the compositor's actual top-to-bottom visible
+ * window order, not the process which last happened to publish a cursor. */
+static void select_cursor(int force)
+{
+    struct ps5_desktop_cursor_shape *shape = desktop_cursor;
+    uint64_t owner = 0;
+    for (unsigned i = window_count; i; i--)
+    {
+        const struct window *window = &windows[order[i - 1]];
+        const struct ps5_desktop_window *state = &window->state;
+        struct display_rect visible;
+        if (!visible_rect(window, NULL, &visible) || cursor_x < visible.left || cursor_y < visible.top ||
+            cursor_x >= visible.right || cursor_y >= visible.bottom) continue;
+        owner = state->id;
+        shape = window->cursor;
+        break;
+    }
+    if (!force && owner == cursor_owner && shape == cursor_selected) return;
+    add_damage(cursor_rect());
+    cursor_owner = owner;
+    cursor_selected = shape;
+    cursor_custom = shape != NULL;
+    cursor_width = shape ? shape->width : CURSOR_WIDTH;
+    cursor_height = shape ? shape->height : CURSOR_HEIGHT;
+    cursor_hotspot_x = shape ? shape->hotspot_x : 0;
+    cursor_hotspot_y = shape ? shape->hotspot_y : 0;
+    cursor_visible = shape ? shape->visible : 1;
+    if (shape) memcpy(cursor_pixels, shape->pixels, cursor_width * cursor_height * sizeof(uint32_t));
+    add_damage(cursor_rect());
+}
+
 void compositor_init(int x, int y)
 {
     cursor_x = x;
     cursor_y = y;
+    cursor_width = CURSOR_WIDTH;
+    cursor_height = CURSOR_HEIGHT;
+    cursor_hotspot_x = cursor_hotspot_y = cursor_custom = 0;
+    cursor_visible = 1;
+    cursor_selected = NULL;
+    cursor_owner = UINT64_MAX;
+    select_cursor(0);
     load_background();
     add_damage((struct display_rect){0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT});
 }
@@ -406,9 +457,18 @@ void compositor_reset(void)
     for (unsigned i = 0; i < MAX_WINDOWS; i++)
     {
         unmap_window(&windows[i]);
+        free(windows[i].cursor);
+        windows[i].cursor = NULL;
         windows[i].used = 0;
     }
     window_count = 0;
+    free(desktop_cursor);
+    desktop_cursor = cursor_selected = NULL;
+    cursor_owner = UINT64_MAX;
+    cursor_width = CURSOR_WIDTH;
+    cursor_height = CURSOR_HEIGHT;
+    cursor_hotspot_x = cursor_hotspot_y = cursor_custom = 0;
+    cursor_visible = 1;
     add_damage((struct display_rect){0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT});
 }
 
@@ -449,6 +509,7 @@ void compositor_window(const struct ps5_desktop_window *state)
     if (!window->pixels) map_window(window, bytes);
     if (reorder) insert_order((unsigned)slot);
     damage_window(window);
+    select_cursor(0);
 }
 
 void compositor_destroy(uint64_t id)
@@ -457,8 +518,11 @@ void compositor_destroy(uint64_t id)
     if (slot < 0) return;
     damage_window(&windows[slot]);
     unmap_window(&windows[slot]);
+    free(windows[slot].cursor);
+    windows[slot].cursor = NULL;
     remove_order((unsigned)slot);
     windows[slot].used = 0;
+    select_cursor(0);
 }
 
 void compositor_damage(const struct ps5_desktop_damage *damage)
@@ -477,10 +541,31 @@ void compositor_cursor(int x, int y)
     if (x >= DISPLAY_WIDTH) x = DISPLAY_WIDTH - 1;
     if (y >= DISPLAY_HEIGHT) y = DISPLAY_HEIGHT - 1;
     if (x == cursor_x && y == cursor_y) return;
-    add_damage((struct display_rect){cursor_x, cursor_y, cursor_x + CURSOR_WIDTH, cursor_y + CURSOR_HEIGHT});
+    add_damage(cursor_rect());
     cursor_x = x;
     cursor_y = y;
-    add_damage((struct display_rect){x, y, x + CURSOR_WIDTH, y + CURSOR_HEIGHT});
+    select_cursor(0);
+    add_damage(cursor_rect());
+}
+
+void compositor_cursor_shape(const void *message)
+{
+    struct ps5_desktop_cursor_shape state, **saved;
+    int slot, force;
+    memcpy(&state, message, sizeof(state));
+    if (!ps5_desktop_cursor_shape_valid(message, state.header.size)) return;
+    if (state.id)
+    {
+        if ((slot = find_window(state.id)) < 0) return;
+        saved = &windows[slot].cursor;
+    }
+    else saved = &desktop_cursor;
+    force = *saved && *saved == cursor_selected;
+    if (*saved && (*saved)->header.size == state.header.size &&
+        !memcmp(*saved, message, state.header.size)) return;
+    if (!*saved && !(*saved = malloc(PS5_DESKTOP_MAX_MESSAGE))) return;
+    memcpy(*saved, message, state.header.size);
+    select_cursor(force);
 }
 
 static uint32_t blend(uint32_t source, uint32_t destination, unsigned alpha)
@@ -564,15 +649,26 @@ static void draw_window(const struct window *window, const struct display_rect *
 
 static void draw_cursor(const struct display_rect *damage, uint32_t *image)
 {
-    const char (*arrow)[CURSOR_WIDTH + 1] = ps5_cursor_arrow;
-    struct display_rect rect = {cursor_x, cursor_y, cursor_x + CURSOR_WIDTH, cursor_y + CURSOR_HEIGHT};
+    struct display_rect rect = cursor_rect();
+    int left = rect.left, top = rect.top;
 
-    if (!intersect(&rect, damage)) return;
+    if (!cursor_visible || !intersect(&rect, damage)) return;
     for (int y = rect.top; y < rect.bottom; y++)
         for (int x = rect.left; x < rect.right; x++)
         {
-            char pixel = arrow[y - cursor_y][x - cursor_x];
-            if (pixel != ' ') image[(size_t)y * DISPLAY_WIDTH + x] = pixel == '#' ? 0xff000000u : 0xffffffffu;
+            uint32_t pixel;
+            if (cursor_custom)
+                pixel = cursor_pixels[(y - top) * cursor_width + x - left];
+            else
+            {
+                char value = ps5_cursor_arrow[y - top][x - left];
+                pixel = value == '#' ? 0xff000000u : value == '.' ? 0xffffffffu : 0;
+            }
+            if (pixel >> 24)
+            {
+                uint32_t *destination = &image[(size_t)y * DISPLAY_WIDTH + x];
+                *destination = blend(pixel, *destination, pixel >> 24);
+            }
         }
 }
 
