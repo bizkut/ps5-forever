@@ -6,7 +6,7 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.010
+### Forever Launcher 01.000.011
 
 - Battle.net no longer asks to update installed games on every start: Wine now reports the folder permissions its Agent expects.
 - WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and Battle.net's text and link cursors, with the click point in the right place.
@@ -26,6 +26,8 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 - Windows programs see the console's real free disk space.
 - The purple desktop background is back.
 - Drives: `C:` and `W:` only; `Z:` and network paths are not supported.
+
+01.000.010 was not published: its build failed on a compiler warning in the new cursor code.
 
 The `01.000.007` workflow failed before publication because of stale import-policy entries. `01.000.008` removed only the obsolete `wineps5` `strlen`/`strstr` policy rows; the remaining import checks stay enabled.
 

@@ -22,7 +22,7 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.010
+## Changes in 01.000.011
 
 - Battle.net no longer asks to update installed games on every start: Wine now
   reports the folder permissions its Agent expects.
@@ -54,6 +54,8 @@ with HDR and frame generation.
 - Windows sees the real free disk space through the write broker. An older or
   unavailable broker falls back to the previous fixed 16 GiB answer.
 - The drawn purple desktop background is restored.
+
+01.000.010 was not published: its build failed on a compiler warning in the new cursor code.
 
 The `01.000.007` workflow failed before publication because of stale import-policy
 entries. `01.000.008` removed only the obsolete `wineps5` `strlen`/`strstr`

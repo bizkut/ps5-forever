@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.010
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.011
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -62,7 +62,7 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
-## 01.000.010 source changes
+## 01.000.011 source changes
 
 - PS5 in-process title servers synthesize Battle.net Agent's expected ACL grants
   for world-rwx files and directories when security xattrs cannot persist;
@@ -122,12 +122,14 @@ evidence: `release-proof/broker-bench-20261016T163238Z`. This measures parallel
 file-write throughput, not real Battle.net download or update throughput; those
 speedups have not yet been measured.
 
+01.000.010 was not published: its build failed on a compiler warning in the new cursor code.
+
 The `01.000.007` workflow failed before publication because of stale import-policy
 entries. The `.008` import-policy correction removes only the obsolete
 `wineps5.so` `strlen` and `strstr` rows from the B1 policy; all other policy entries
 and qualification requirements remain unchanged.
 
-Native acceptance of the exact final `.010` archive is **pending**. These source
+Native acceptance of the exact final `.011` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
@@ -165,7 +167,7 @@ loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchange
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
-The `.010` sources retain the two independent drive-reporting fixes:
+The `.011` sources retain the two independent drive-reporting fixes:
 
 - Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
   `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
