@@ -10,7 +10,10 @@ if [[ ${1:-} != --container ]]; then
     image=forever-launcher-linux:ubuntu-24.04
     start=$SECONDS
     docker build --platform linux/amd64 --tag "$image" "$here"
-    image_id=$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$image")
+    # Docker with the containerd image store needs --platform to select the
+    # amd64 image; older Docker (the classic store) has no such flag.
+    image_id=$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$image" 2>/dev/null) ||
+        image_id=$(docker image inspect --format '{{.Id}}' "$image")
     printf 'BUILD_STAGE image seconds=%s id=%s\n' "$((SECONDS - start))" "$image_id"
     exec docker run --rm --platform linux/amd64 \
         --user "$(id -u):$(id -g)" \
