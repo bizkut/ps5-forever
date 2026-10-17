@@ -4,8 +4,8 @@ Run **Battle.net** on a jailbroken **PlayStation 5**.
 
 Forever Launcher (`PPSA99030`) runs Battle.net and World of Warcraft through
 Wine, using DirectX 12 on the PS5's own GPU. The default game is
-**World of Warcraft: Forever** final (`Wow.exe` in `_forever_`).
-**World of Warcraft Classic beta** (`WowB.exe` in `_classic_beta_`) remains
+**World of Warcraft Classic beta** (`WowB.exe` in `_classic_beta_`).
+**World of Warcraft: Forever** final (`Wow.exe` in `_forever_`) is also
 supported when selected in Battle.net. The supplied settings use 4K output
 with HDR and frame generation.
 
@@ -85,9 +85,9 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 2. Forever Launcher downloads Blizzard's Battle.net installer. Follow its
    on-screen prompts to install Battle.net.
 3. Sign in to Battle.net (see below).
-4. Battle.net opens on **World of Warcraft: Forever** final (`Wow.exe` in
-   `_forever_`) by default. Press **Install**, wait for the download (about 50 GB),
-   then press **Play**. Classic beta remains supported if you select it in Battle.net.
+4. Battle.net opens on **World of Warcraft Classic beta** (`WowB.exe` in
+   `_classic_beta_`) by default. Press **Install**, wait for the download (about 50 GB),
+   then press **Play**. The final Forever game also works if you select it in Battle.net.
 
 ## Signing in to Battle.net
 

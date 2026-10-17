@@ -22,18 +22,11 @@ struct pw_game_direct_profile
 static inline const struct pw_game_direct_profile *pw_game_direct_profile(pw_game_exists_fn exists,
                                                                          void *context)
 {
-    /* Keep aligned with b1-game-wow-forever.json and b1-game-wow-classic-beta.json.
+    /* Keep aligned with b1-game-wow-classic-beta.json and b1-game-wow-forever.json.
      * Maintenance builds do not contain the GPU profile's generated argv.
-     * Prefer final, fall back to beta, and never stage an incomplete install. */
+     * Prefer Classic beta (the current default), fall back to final, and
+     * never stage an incomplete install. */
     static const struct pw_game_direct_profile profiles[] = {
-        {
-            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe",
-             "-launcherlogin", "-uid", "wowf", NULL},
-            "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"
-        },
         {
             {"C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.exe",
              "-launcherlogin", "-uid", "wow_classic_beta", NULL},
@@ -41,6 +34,14 @@ static inline const struct pw_game_direct_profile *pw_game_direct_profile(pw_gam
             FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_",
             FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe",
             FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"
+        },
+        {
+            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe",
+             "-launcherlogin", "-uid", "wowf", NULL},
+            "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
+            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"
         }
     };
     if (!exists) return NULL;

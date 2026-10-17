@@ -22,12 +22,12 @@ product = json.loads(Path(__file__).with_name('b1-product.json').read_text())
 assert product['debug'] == 'err+all,err-seh'
 assert product['argv'] == [
     r'C:\windows\system32\explorer.exe', '/desktop',
-    r'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe', '--exec=launch_uid wowf']
+    r'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe', '--exec=launch_uid wow_classic_beta']
 game_config = json.loads(Path(__file__).with_name('b1-game-wow-forever.json').read_text())
 beta_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
 maintenance = profile('b1', product)
 assert maintenance['refused_programs'] == []
-assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-forever.json' in (
+assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json' in (
     Path(__file__).with_name('Makefile').read_text())
 for config, channel, executable, uid in (
         (game_config, '_forever_', 'Wow.exe', 'wowf'),

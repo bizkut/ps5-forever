@@ -31,7 +31,7 @@ B1_QUARANTINE ?= $(B1_OUT)-quarantine
 B1_MAINTENANCE_OUT ?= $(B1_OUT)-maintenance
 B1_GAME_OUT ?= $(B1_OUT)-game
 B1_PROFILE_CONFIG ?=
-B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-forever.json
+B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json
 B1_CONFIG_ARG := $(if $(B1_PROFILE_CONFIG),--profile-config "$(B1_PROFILE_CONFIG)",)
 TITLE_DESKTOP := ../../title/main.c ../../title/hub.c ../../title/compositor.c \
 	../../title/display.c ../../title/input.c ../../title/pointer.c ../../title/ime.c
@@ -115,7 +115,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-title-icon \
 		$(HOST_OUT)/test-desktop-surface $(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
-		$(HOST_OUT)/test-cursor-peer \
+		$(HOST_OUT)/test-cursor-peer $(HOST_OUT)/test-file-security \
 		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile \
 		../../tools/test-ps5-capture.py
 	$(HOST_OUT)/test-protocol
@@ -143,10 +143,17 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-cursor --cursor-no-modes
 	$(HOST_OUT)/test-cursor-hub
 	$(HOST_OUT)/test-cursor-peer
+	$(HOST_OUT)/test-file-security
 	python3 ../../tools/test-ps5-capture.py
 
 $(HOST_OUT)/test-fd-parking: test-fd-parking.c build-fd-parking-test.py $(WINE_SRC)/server/fd.c
 	python3 build-fd-parking-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-file-security: test-file-security.c build-file-security-test.py \
+		build-desktop-surface-test.py $(WINE_SRC)/server/file.c \
+		$(WINE_SRC)/server/token.c $(WINE_SRC)/server/security.h \
+		$(WINE_SRC)/include/wine/server_protocol.h
+	python3 build-file-security-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 
 $(HOST_OUT)/test-audio-selection: test-audio-selection.c \
 		$(WINE_SRC)/dlls/mmdevapi/ps5audio.h
