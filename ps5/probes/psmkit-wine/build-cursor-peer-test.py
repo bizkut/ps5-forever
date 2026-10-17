@@ -149,7 +149,10 @@ extern int sceKernelDebugOutText(int, const char *);
     ):
         obj = root / (label + '.o')
         subprocess.run(shlex.split(args.cc) + [
-            '-std=gnu11', '-O2', '-fPIC', '-D__WINESRC__', '-DWINE_UNIX_LIB', *defines,
+            # Distribution compilers default to fortify/stack-protector, which
+            # the title toolchain does not; their helpers are not title imports.
+            '-std=gnu11', '-O2', '-fPIC', '-U_FORTIFY_SOURCE', '-D_FORTIFY_SOURCE=0',
+            '-fno-stack-protector', '-D__WINESRC__', '-DWINE_UNIX_LIB', *defines,
             '-I' + str(root), '-I' + str(args.wine / 'include'),
             '-c', str(unit), '-o', str(obj)], check=True)
         inspect_no_tls(obj, root / (label + '.so'), label)
