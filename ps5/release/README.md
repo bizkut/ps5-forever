@@ -11,7 +11,7 @@ with HDR and frame generation.
 
 > [!NOTE]
 > This Battle.net launcher is designed for **World of Warcraft: Forever**. It
-> might be used to install other games, but keyboard support is in development.
+> might be used to install other games. A USB keyboard works in Battle.net and WoW.
 
 > [!WARNING]
 > **Alpha software.** Expect bugs. Forever Launcher is not made, approved or
