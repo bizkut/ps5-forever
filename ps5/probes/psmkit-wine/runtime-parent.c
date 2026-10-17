@@ -28,6 +28,9 @@ int sceUserServiceInitialize(const void *);
 void title_desktop_message(const char *);
 #endif
 #endif
+#if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+void forever_title_menu_wait_lifetime(void);
+#endif
 
 int32_t sceSystemServiceAddLocalProcessForPsmKit(
     const char *, const char *const [], const struct local_process_param *);
@@ -39,6 +42,9 @@ static pthread_t reaper;
 static struct pw_slot slots[PW_CHILDREN];
 static uint64_t generation;
 static int stopping, started;
+#ifdef PW_RUNTIME_B1
+static int quiescing, quiesce_error;
+#endif
 static int64_t shutdown_grace, shutdown_deadline;
 
 #if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS
@@ -998,8 +1004,12 @@ void pw_supervisor_wait_children(void)
         kill_occupied_slots();
     }
 #endif
-    while (occupied_slots()) pthread_cond_wait(&children_changed, &lock);
+    while (occupied_slots() && !quiesce_error)
+        pthread_cond_wait(&children_changed, &lock);
     pthread_mutex_unlock(&lock);
+#if !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+    forever_title_menu_wait_lifetime();
+#endif
 }
 #endif
 
@@ -1493,6 +1503,32 @@ void pw_supervisor_end_children(void)
     kill_occupied_slots();
     pthread_mutex_unlock(&lock);
 }
+
+int pw_supervisor_quiesce_children(void)
+{
+    int64_t now;
+    int result;
+    if (!started) return -ESRCH;
+    pthread_mutex_lock(&lock);
+    if (stopping)
+    {
+        result = -EBUSY;
+        pthread_mutex_unlock(&lock);
+        return result;
+    }
+    quiescing = 1;
+    quiesce_error = 0;
+    stopping = 1;
+    now = io_now_ms();
+    shutdown_grace = now;
+    shutdown_deadline = now + 2000;
+    io_log("b1 parent quiescing children=%u new_spawns=refused", occupied_slots());
+    while (occupied_slots() && !quiesce_error)
+        pthread_cond_wait(&children_changed, &lock);
+    result = quiesce_error ? -quiesce_error : 0;
+    pthread_mutex_unlock(&lock);
+    return result;
+}
 #endif
 /* The title's budget allows 256 open files (FD_FILE) for the whole title;
  * the in-process wineserver holds one for every file any Wine process has
@@ -1590,11 +1626,30 @@ static void *reap_children(void *unused)
                     kills[kill_count++] = (struct pw_kill_request){.slot = &slots[i]};
                     break;
                 case PW_SHUTDOWN_ABANDON:
+#ifdef PW_RUNTIME_B1
+                    if (quiescing)
+                    {
+                        if (!quiesce_error)
+                            io_log("b1 parent quiesce failed slot=%u generation=%llx pid=%d error=%d",
+                                   i, (unsigned long long)generation, slots[i].unix_pid, ETIMEDOUT);
+                        quiesce_error = ETIMEDOUT;
+                        pthread_cond_broadcast(&children_changed);
+                    }
+                    else
+                    {
+                        io_log("p1c supervisor abandoned slot=%u generation=%llx pid=%d failed=1",
+                               i, (unsigned long long)generation, slots[i].unix_pid);
+                        pw_slot_poison(&slots[i]);
+                        pw_slot_release(&slots[i], generation, slots[i].nonce);
+                        --live;
+                    }
+#else
                     io_log("p1c supervisor abandoned slot=%u generation=%llx pid=%d failed=1",
                            i, (unsigned long long)generation, slots[i].unix_pid);
                     pw_slot_poison(&slots[i]);
                     pw_slot_release(&slots[i], generation, slots[i].nonce);
                     --live;
+#endif
                     break;
                 case PW_SHUTDOWN_WAIT:
                     break;
@@ -1602,7 +1657,11 @@ static void *reap_children(void *unused)
             }
             if (kill_count) kill_slots_parallel(kills, kill_count);
         }
+#ifdef PW_RUNTIME_B1
+        int done = stopping && (!live || quiesce_error);
+#else
         int done = stopping && !live;
+#endif
         pthread_mutex_unlock(&lock);
         if (done) return NULL;
         struct timespec pause = {.tv_nsec = 10000000};

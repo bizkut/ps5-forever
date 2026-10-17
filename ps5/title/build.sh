@@ -48,6 +48,8 @@ work=${PS5_TITLE_WORK:-$here/../build/title}
 mkdir -p "$work/obj" "$out/sce_sys" "$out/sce_module"
 cc() { PS5_PAYLOAD_SDK="$sdk" sh "$vulkan/tooling/prospero-clang18" "$@"; }
 cxxflags=(-std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti -ffunction-sections -fdata-sections)
+diag_flags=()
+[[ ${FOREVER_MENU_DIAG:-0} == 1 ]] && diag_flags+=(-DFOREVER_MENU_DIAG=1)
 cc "${cxxflags[@]}" -c "$native/app_crt.cpp" -o "$work/obj/app_crt.o"
 cc "${cxxflags[@]}" -c "$native/app_cpp_runtime.cpp" -o "$work/obj/app_cpp_runtime.o"
 objs=()
@@ -63,7 +65,8 @@ for input in "$@"; do
             obj=$work/obj/$(basename "${input%.c}").o
             # Wine headers last: only private PS5 host/protocol interfaces.
             cc -std=gnu11 -O2 -g -Wall -Wextra -Werror -ffunction-sections -fdata-sections \
-                -I "$here/../include" "${includes[@]}" -idirafter "$wine_src/include" -c "$input" -o "$obj"
+                "${diag_flags[@]}" -I "$here/../include" "${includes[@]}" \
+                -idirafter "$wine_src/include" -c "$input" -o "$obj"
             objs+=("$obj")
             ;;
         *) echo "unsupported title input: $input (expected .c, .o or .a)" >&2; exit 2 ;;

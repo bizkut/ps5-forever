@@ -112,6 +112,17 @@ static void count_text(const struct pointer_event *pointer_event, void *context)
     (void)context;
     if (pointer_event->kind == POINTER_TEXT) text_events++;
 }
+static int escape_down, escape_up;
+static void count_shortcuts(const struct pointer_event *pointer_event, void *context)
+{
+    (void)context;
+    if (pointer_event->kind == POINTER_TEXT) text_events++;
+    else if (pointer_event->kind == POINTER_KEY && pointer_event->code == 0x29)
+    {
+        if (pointer_event->down) escape_down++;
+        else escape_up++;
+    }
+}
 static int cursor_shown, cursor_open = 0;
 static const uint32_t *shown_image;
 static int shown_hotspot_x, shown_hotspot_y, shown_x, shown_y;
@@ -295,74 +306,19 @@ int main(void)
     struct pointer_event pointer = {.kind = POINTER_MOVE};
     {
         const unsigned chord = PAD_L3 | PAD_R3;
-        assert(!hud_chord_update(PAD_L3 | PAD_CROSS, 1, 0));
-        assert(!hud_chord_update(chord | PAD_CROSS, 1, 100));
-        assert(!hud_chord_update(chord, 1, 1000099));
-        assert(hud_chord_update(chord, 1, 1000100) == 1);
-        assert(!hud_chord_update(chord | PAD_CROSS, 1, 9000000));
+        assert(!osk_chord_update(PAD_L3 | PAD_CROSS, 1, 0));
+        assert(!osk_chord_update(chord | PAD_CROSS, 1, 100));
+        assert(!osk_chord_update(chord, 1, 2000000)); /* no one-second HUD action */
         /* A one-sample drop inside the hold is a flicker, not a release. */
-        assert(!hud_chord_update(PAD_R3, 1, 9000001));
-        assert(!hud_chord_update(chord, 1, 9000002));
-        assert(!hud_chord_update(chord, 1, 10000002));
-        /* A release of at least 40 ms re-arms; a fired hold ends silently. */
-        assert(!hud_chord_update(0, 1, 10000003));
-        assert(!hud_chord_update(0, 1, 10040003));
-        assert(!hud_chord_update(chord, 1, 11000000));
-        assert(!hud_chord_update(PAD_L3, 1, 11999999));
-        assert(!hud_chord_update(PAD_L3, 1, 12039998));
-        assert(hud_chord_update(PAD_L3, 1, 12039999) == 2);
-        assert(hud_chord_held_us == 999999);
-        assert(!hud_chord_update(chord, 1, 12100000));
-        assert(!hud_chord_update(chord, 0, 13000000));
-        assert(!hud_chord_update(0, 1, 13000001));
-        assert(!hud_chord_update(0, 1, 13100000));
-        assert(!hud_chord_update(chord, 1, 14000000));
-        assert(!hud_chord_update(0, 1, 15000000));
-        assert(hud_chord_update(0, 1, 15040000) == 1);
-        /* A long drop that ends with both held again, without a tick in
-         * between, is a release followed by a new hold. */
-        assert(!hud_chord_update(chord, 1, 16000000));
-        assert(!hud_chord_update(0, 1, 16100000));
-        assert(hud_chord_update(chord, 1, 16200000) == 2);
-        assert(hud_chord_update(chord, 1, 17200000) == 1);
-        assert(!hud_chord_update(0, 1, 17300000));
-        assert(!hud_chord_update(0, 1, 17400000));
-    }
-    {
-        char directory[] = "/tmp/wineps5-hud-test-XXXXXX";
-        char path[256], temporary[256], text[256];
-        int enabled;
-        FILE *file;
-        size_t size;
-        const char *original = "pos=br\t hud=off\r\nscale=3 custom=user-content\n";
-        assert(mkdtemp(directory));
-        snprintf(path, sizeof(path), "%s/hud.txt", directory);
-        snprintf(temporary, sizeof(temporary), "%s/hud.tmp", directory);
-        assert(!hud_toggle_file(path, temporary, &enabled) && enabled);
-        file = fopen(path, "rb"); assert(file);
-        size = fread(text, 1, sizeof(text) - 1, file); fclose(file); text[size] = 0;
-        assert(!strcmp(text, "hud=on\n"));
-        file = fopen(path, "wb"); assert(file);
-        assert(fwrite(original, 1, strlen(original), file) == strlen(original));
-        assert(!fclose(file));
-        assert(!hud_toggle_file(path, temporary, &enabled) && enabled);
-        file = fopen(path, "rb"); assert(file);
-        size = fread(text, 1, sizeof(text) - 1, file); fclose(file); text[size] = 0;
-        assert(!strcmp(text, "pos=br\t hud=on\r\nscale=3 custom=user-content\n"));
-        assert(!hud_toggle_file(path, temporary, &enabled) && !enabled);
-        file = fopen(path, "rb"); assert(file);
-        size = fread(text, 1, sizeof(text) - 1, file); fclose(file); text[size] = 0;
-        assert(!strcmp(text, original));
-        file = fopen(path, "wb"); assert(file);
-        assert(fwrite("pos=tr scale=4", 1, 14, file) == 14);
-        assert(!fclose(file));
-        assert(!hud_toggle_file(path, temporary, &enabled) && enabled);
-        file = fopen(path, "rb"); assert(file);
-        size = fread(text, 1, sizeof(text) - 1, file); fclose(file); text[size] = 0;
-        assert(!strcmp(text, "pos=tr scale=4\nhud=on\n"));
-        assert(access(temporary, F_OK) && errno == ENOENT);
-        assert(!unlink(path));
-        assert(!rmdir(directory));
+        assert(!osk_chord_update(PAD_R3, 1, 2000001));
+        assert(!osk_chord_update(chord, 1, 2000002));
+        assert(!osk_chord_update(0, 1, 3000000));
+        assert(!osk_chord_update(0, 1, 3039999));
+        assert(osk_chord_update(0, 1, 3040000) == 1);
+        /* Disconnect cancels rather than opening the keyboard. */
+        assert(!osk_chord_update(chord, 1, 4000000));
+        assert(!osk_chord_update(chord, 0, 5000000));
+        assert(!osk_chord_update(0, 1, 5100000));
     }
     pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
     test_keyboard_logging();
@@ -426,19 +382,26 @@ int main(void)
 
     {
         /* The shared desktop pointer (Battle.net): L3+R3 toggle the
-         * keyboard once, when either is released; L2 and a lone thumb do
-         * nothing; a disconnect cancels. */
+         * keyboard once on release. L2 owns Escape; Options and R2 are
+         * unmapped so the maintenance title can consume Options itself. */
         struct input_event pad = {.kind = INPUT_PAD, .connected = 1,
             .lx = 128, .ly = 128, .rx = 128, .ry = 128};
-        static const unsigned sequence[] = {PAD_L2, 0, PAD_L3, PAD_L3 | PAD_R3,
-            PAD_L3 | PAD_R3, PAD_R3, 0, PAD_R3, 0};
-        text_events = 0;
+        static const unsigned sequence[] = {PAD_L2, PAD_L2 | PAD_R2, PAD_R2, 0,
+            PAD_OPTIONS, 0, PAD_L3, PAD_L3 | PAD_R3, PAD_L3 | PAD_R3, PAD_R3, 0};
+        text_events = escape_down = escape_up = 0;
         for (unsigned i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++)
         {
             pad.code = sequence[i];
-            pointer_input(&pad, count_text, NULL);
-            assert(text_events == (i >= 5));
+            pointer_input(&pad, count_shortcuts, NULL);
+            assert(text_events == (i >= 9));
         }
+        pointer_options_escape(1);
+        pad.code = PAD_OPTIONS;
+        pointer_input(&pad, count_shortcuts, NULL);
+        pad.code = 0;
+        pointer_input(&pad, count_shortcuts, NULL);
+        assert(escape_down == 2 && escape_up == 2);
+        pointer_options_escape(0);
         pad.code = PAD_L3 | PAD_R3;
         pointer_input(&pad, count_text, NULL);
         pad = (struct input_event){.kind = INPUT_PAD, .lx = 128, .ly = 128, .rx = 128, .ry = 128};
@@ -624,7 +587,7 @@ int main(void)
         assert(!osk_calls && !osk_open);
         route_pad(&device, now + 48000, NULL);
         assert(osk_calls == 1 && osk_open);
-        assert(!strcmp(logged_line, "title pad chord action=osk held_ms=4 drops=0"));
+        assert(!strcmp(logged_line, "title pad chord action=osk"));
         assert(!pw_title_get_gamepad(0, &state, 0));
         assert(!state.pad.buttons && !state.pad.left_trigger && !state.pad.lx);
         osk_open = 0;

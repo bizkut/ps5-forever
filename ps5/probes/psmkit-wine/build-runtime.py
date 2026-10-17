@@ -587,8 +587,12 @@ if args.profile == 'b1':
 loader_source = Path(loader_entry['file'])
 if not loader_source.is_absolute():
     loader_source = Path(loader_entry.get('directory', build)) / loader_source
+diagnostic_menu = (
+    os.environ.get('FOREVER_MENU_DIAG') == '1' and args.profile == 'b1' and
+    not selected['headless'] and not selected.get('gpu', False))
 env = dict(os.environ, PS5_TITLE_WORK=str(work), PS5_TITLE_RADV='',
            WINE_SRC=str(loader_source.resolve().parents[1]))
+env.pop('FOREVER_MENU_DIAG', None)  # diagnostic code belongs only to the maintenance parent
 run(['bash', here / '../../title/build.sh', child_out, wrapper,
      here / 'elf-runtime.c', here / 'protocol.c', *io_sources,
      loader_object, safe_libc_archive], cwd=here, env=env)
@@ -649,8 +653,8 @@ if args.profile == 'b1' and not selected['headless']:
         '#define PS5_TITLE_EMBEDDED 1\n'
         f'#include {json.dumps(str(title / "hub.c"))}\n')
     desktop_sources = [
-        desktop_wrapper, hub_wrapper, title / 'compositor.c', title / 'display.c',
-        title / 'input.c', title / 'pointer.c', title / 'ime.c',
+        desktop_wrapper, hub_wrapper, title / 'compositor.c', title / 'forever-menu.c',
+        title / 'display.c', title / 'input.c', title / 'pointer.c', title / 'ime.c',
     ]
 gpu_sources = []
 if selected.get('gpu', False):
@@ -663,6 +667,8 @@ if gpu_sources and not radv_archive.is_file():
     raise SystemExit(f'RADV archive missing (build it separately, never as part of title qualification): {radv_archive}')
 parent_env = dict(env, PS5_TITLE_WORK=str(parent_work),
                   PS5_TITLE_RADV=str(radv_archive) if gpu_sources else '')
+if diagnostic_menu:
+    parent_env['FOREVER_MENU_DIAG'] = '1'
 run(['bash', here / '../../title/build.sh', parent_out, parent_wrapper,
      here / 'elf-runtime.c', parent_protocol, parent_supervisor, *desktop_sources, *gpu_sources,
      *io_sources, parent_loader_object, safe_libc_archive],
@@ -796,6 +802,7 @@ build_manifest = {
     **({'desktop': {
         'enabled': not selected['headless'],
         'sources': [str(path) for path in desktop_sources],
+        **({'diagnostic_menu': True} if diagnostic_menu else {}),
     }} if args.profile == 'b1' else {}),
     'gpu': {
         'enabled': bool(gpu_sources),

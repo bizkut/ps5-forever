@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include "wine/ps5_title.h"
 #include "protocol.h"
+#include "../../title/forever-menu.h"
 #include "../../title/compositor.c"
 
 typedef int BOOL;
@@ -302,6 +303,88 @@ static void test_cursor_shape(void)
     compositor_reset();
 }
 
+static void write_menu_preview(void)
+{
+    const char *path = getenv("FOREVER_MENU_PREVIEW_PPM");
+    if (!path || !*path) return;
+    FILE *file = fopen(path, "wb");
+    assert(file);
+    fprintf(file, "P6\n%d %d\n255\n", DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    for (size_t i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
+    {
+        unsigned char rgb[] = {
+            (unsigned char)(image[i] >> 16),
+            (unsigned char)(image[i] >> 8),
+            (unsigned char)image[i],
+        };
+        assert(fwrite(rgb, 1, sizeof(rgb), file) == sizeof(rgb));
+    }
+    assert(!fclose(file));
+}
+
+static void test_menu_overlay(void)
+{
+    struct forever_menu_state menu;
+    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
+    struct display_rect panel, title, selected, hdr, fg_value, hdr_value, hud_value, addons_value;
+    char text[FOREVER_MENU_TEXT_BYTES];
+    unsigned antialiased = 0, title_pixels = 0;
+
+    forever_menu_init(&menu);
+    forever_menu_open(&menu, &values);
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_reset();
+    compositor_init(0, 0);
+    compositor_menu(text);
+    compositor_compose();
+    panel = menu_rect;
+    check(menu_rect.right - menu_rect.left == MENU_PANEL_WIDTH,
+          "menu uses the large fixed-width TV panel");
+    check(compositor_menu_line_bounds(0, &title) &&
+          compositor_menu_line_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &selected) &&
+          compositor_menu_line_bounds(FOREVER_MENU_LINE_HDR, &hdr),
+          "menu publishes title and item geometry");
+    check(compositor_menu_line_at((hdr.left + hdr.right) / 2, (hdr.top + hdr.bottom) / 2) ==
+          FOREVER_MENU_LINE_HDR, "mouse hit testing follows the HDR row geometry");
+    check(compositor_menu_value_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &fg_value) &&
+          compositor_menu_value_bounds(FOREVER_MENU_LINE_HDR, &hdr_value) &&
+          compositor_menu_value_bounds(FOREVER_MENU_LINE_HUD, &hud_value) &&
+          compositor_menu_value_bounds(FOREVER_MENU_LINE_ADDONS, &addons_value) &&
+          fg_value.right == hdr_value.right && hdr_value.right == hud_value.right &&
+          hud_value.right == addons_value.right,
+          "item values share one right-aligned column");
+    check(compositor_menu_line_at(menu_rect.left - 1, (hdr.top + hdr.bottom) / 2) == -1,
+          "mouse outside menu selects nothing");
+    check(image[(size_t)(selected.top + 2) * DISPLAY_WIDTH + selected.left + 2] ==
+          MENU_SELECTION, "selected item has a full-width highlight bar");
+    for (int y = title.top; y < title.bottom; y++)
+        for (int x = title.left; x < title.right; x++)
+        {
+            uint32_t pixel = image[(size_t)y * DISPLAY_WIDTH + x];
+            if (pixel != MENU_PANEL && pixel != MENU_BORDER) title_pixels++;
+            if (pixel != MENU_PANEL && pixel != MENU_TEXT && pixel != MENU_BORDER) antialiased++;
+        }
+    check(title_pixels > 100, "pre-rasterized title text is drawn inside the panel");
+    check(antialiased > 20, "glyph coverage is alpha blended");
+    check(image[(size_t)panel.top * DISPLAY_WIDTH + panel.left - 1] == BACKGROUND,
+          "menu drawing changes nothing outside its panel");
+    write_menu_preview();
+    forever_menu_notice(
+        &menu,
+        "Could not remove all Battle.net files (error 13). Your games were not touched.");
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_line_bounds(3, &hdr) &&
+          hdr.bottom - hdr.top >= 2 * MENU_ROW_HEIGHT,
+          "long status notices wrap into additional measured rows");
+    compositor_menu(NULL);
+    compositor_compose();
+    check(image[(size_t)panel.top * DISPLAY_WIDTH + panel.left] == BACKGROUND,
+          "closing menu repaints its old bounds");
+    compositor_reset();
+}
+
 static void test_cursor_ownership(void)
 {
     struct ps5_desktop_window a = {
@@ -377,11 +460,12 @@ int main(void)
     title_runtime.exit = 1;
     title_runtime.desktop_surface = pw_desktop_surface;
     test_cursor_shape();
+    test_menu_overlay();
     test_cursor_ownership();
     compositor_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
     for (int title = 0; title <= 1; title++)
         for (int fallback = 0; fallback <= 1; fallback++) run_surface(title, fallback);
     if (failures) { fprintf(stderr, "desktop surface: %d failures\n", failures); return 1; }
-    puts("desktop surface: PASS (owner/remote flush isolation, clipping, fallback, title/payload mappings)");
+    puts("desktop surface/menu: PASS (owner/remote isolation, overlay order/hit testing, cursors)");
     return 0;
 }

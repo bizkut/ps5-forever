@@ -20,10 +20,14 @@
 #include <wine/ps5_desktop.h>
 #include "compositor.h"
 #include "display.h"
+#include "forever-menu.h"
 #include "hub.h"
 #include "ime.h"
 #include "input.h"
 #include "pointer.h"
+#ifdef FOREVER_MENU_DIAG
+#include "menu-diag.h"
+#endif
 
 #ifndef PS5_TITLE_EMBEDDED
 #define WINE_ELF "/app0/wine/lib/wine/x86_64-unix/wine"
@@ -39,6 +43,29 @@ static int user = -1;
 static pthread_mutex_t message_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char pending_message[640];
 static int message_pending;
+#ifdef PS5_TITLE_EMBEDDED
+static struct forever_menu_state menu;
+static char pending_menu_status[FOREVER_MENU_STATUS_BYTES];
+static int pending_menu_status_kind, input_draining;
+static uint8_t physical_keys[256], forwarded_keys[256];
+static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
+
+int forever_title_menu_load(struct forever_menu_values *);
+#ifdef FOREVER_MENU_DIAG
+#define MENU_DIAG_SCRIPT "/data/homebrew/PPSA99030/wine/menu-script.txt"
+#define MENU_DIAG_DONE "/data/homebrew/PPSA99030/wine/menu-script.done"
+static struct
+{
+    char script[4096], dump_name[49];
+    size_t size, offset;
+    uint64_t poll_at, wait_until;
+    int active, dump_pending;
+} menu_diag;
+void pw_elf_sha256(const void *, size_t, uint8_t[32]);
+void io_log(const char *, ...) __attribute__((format(printf, 1, 2)));
+#endif
+int forever_title_menu_action(enum forever_menu_command, int);
+#endif
 
 /* Producers never touch compositor state; the desktop consumes the copy. */
 void title_desktop_message(const char *text)
@@ -48,6 +75,17 @@ void title_desktop_message(const char *text)
     message_pending = 1;
     pthread_mutex_unlock(&message_mutex);
 }
+
+#ifdef PS5_TITLE_EMBEDDED
+/* Menu workers publish copies; only the compositor thread mutates menu state. */
+void title_desktop_menu_status(const char *text, int notice)
+{
+    pthread_mutex_lock(&message_mutex);
+    snprintf(pending_menu_status, sizeof(pending_menu_status), "%s", text ? text : "");
+    pending_menu_status_kind = notice ? 2 : 1;
+    pthread_mutex_unlock(&message_mutex);
+}
+#endif
 
 #ifndef PS5_TITLE_EMBEDDED
 static int32_t agc = -1;   /* sceAgcInit's result: 0 once AGC is ready */
@@ -306,15 +344,24 @@ static void on_hub_message(const void *message, void *context)
          * report password fields: L3+R3 open the keyboard there. */
         struct ps5_desktop_text_input input;
         memcpy(&input, message, sizeof(input));
-        if (user >= 0) ime_show(user, input.active != 0);
+#ifdef PS5_TITLE_EMBEDDED
+        if (user >= 0 && !forever_menu_is_open(&menu) && !input_draining)
+#else
+        if (user >= 0)
+#endif
+            ime_show(user, input.active != 0);
         break;
     }
-    }
+}
 }
 
 static void on_hub_disconnect(void *context)
 {
     (void)context;
+#ifdef PS5_TITLE_EMBEDDED
+    memset(forwarded_keys, 0, sizeof(forwarded_keys));
+    forwarded_mouse = 0;
+#endif
     compositor_reset();
 }
 
@@ -331,12 +378,55 @@ static uint32_t mouse_button(uint32_t code)
     }
 }
 
+#ifdef PS5_TITLE_EMBEDDED
+#define KEY_ENTER 0x28u
+#define KEY_ESCAPE 0x29u
+#define KEY_F12 0x45u
+#define KEY_DOWN 0x51u
+#define KEY_UP 0x52u
+static void render_menu(void);
+static int physical_input_neutral(void);
+static void close_menu(void);
+static void open_menu(void);
+static void apply_menu_result(struct forever_menu_result result);
+static void menu_key(uint32_t usage);
+#ifdef FOREVER_MENU_DIAG
+static void menu_diag_log_state(const char *event);
+#endif
+#endif
+
 static void on_pointer(const struct pointer_event *event, void *context)
 {
     int x, y;
     struct ps5_desktop_mouse mouse = {.header = {PS5_DESKTOP_MOUSE, sizeof(mouse)}};
     (void)context;
 
+#ifdef PS5_TITLE_EMBEDDED
+    if (event->kind == POINTER_KEY && event->code == KEY_F12)
+    {
+        if (event->down && !event->repeat)
+        {
+            if (forever_menu_is_open(&menu)) close_menu();
+            else if (!input_draining) open_menu();
+        }
+        return;
+    }
+    if (forever_menu_is_open(&menu))
+    {
+        if (event->kind == POINTER_KEY && event->down) menu_key(event->code);
+        else if (event->kind == POINTER_BUTTON && event->down)
+        {
+            if (event->code == MOUSE_LEFT)
+            {
+                pointer_position(&x, &y);
+                apply_menu_result(forever_menu_click_line(&menu, compositor_menu_line_at(x, y)));
+            }
+            else if (event->code == MOUSE_RIGHT)
+                apply_menu_result(forever_menu_back(&menu));
+        }
+        return;
+    }
+#endif
     switch (event->kind)
     {
     case POINTER_KEY:
@@ -347,7 +437,12 @@ static void on_pointer(const struct pointer_event *event, void *context)
             .down = !!event->down,
             .repeat = !!event->repeat,
         };
-        hub_send(&key, sizeof(key));
+        if (hub_send(&key, sizeof(key)))
+        {
+#ifdef PS5_TITLE_EMBEDDED
+            if (event->code < sizeof(forwarded_keys)) forwarded_keys[event->code] = !!event->down;
+#endif
+        }
         return;
     }
     case POINTER_TEXT:
@@ -371,13 +466,381 @@ static void on_pointer(const struct pointer_event *event, void *context)
     pointer_position(&x, &y);
     mouse.x = x;
     mouse.y = y;
-    hub_send(&mouse, sizeof(mouse));
+    if (hub_send(&mouse, sizeof(mouse)))
+    {
+#ifdef PS5_TITLE_EMBEDDED
+        if (event->kind == POINTER_BUTTON)
+        {
+            if (event->down) forwarded_mouse |= event->code;
+            else forwarded_mouse &= ~event->code;
+        }
+#endif
+    }
 }
 
 static void on_input(const struct input_event *event, void *context)
 {
+#ifdef PS5_TITLE_EMBEDDED
+    uint32_t previous_pad = physical_pad;
+    if (event->kind == INPUT_KEY && event->code < sizeof(physical_keys))
+        physical_keys[event->code] = !!event->down;
+    else if (event->kind == INPUT_MOUSE_BUTTON)
+    {
+        if (event->down) physical_mouse |= event->code;
+        else physical_mouse &= ~event->code;
+    }
+    else if (event->kind == INPUT_PAD)
+        physical_pad = event->connected ? event->code & ~PAD_INTERCEPTED : 0;
+    if (input_draining)
+    {
+        if (physical_input_neutral())
+        {
+            pointer_cancel();
+            input_draining = 0;
+        }
+        return;
+    }
+    if (event->kind == INPUT_PAD && (physical_pad & PAD_OPTIONS) &&
+        !(previous_pad & PAD_OPTIONS))
+    {
+        if (!forever_menu_is_open(&menu)) open_menu();
+        else if (menu.page == FOREVER_MENU_MAIN) close_menu();
+        else apply_menu_result(forever_menu_back(&menu));
+        return;
+    }
+    if (event->kind == INPUT_PAD && forever_menu_is_open(&menu))
+    {
+        uint32_t changed = physical_pad ^ menu_pad;
+        struct input_event pointer = *event;
+        menu_pad = physical_pad;
+        if (changed & physical_pad & PAD_UP) forever_menu_move(&menu, -1);
+        if (changed & physical_pad & PAD_DOWN) forever_menu_move(&menu, 1);
+#ifdef FOREVER_MENU_DIAG
+        if (changed & physical_pad & (PAD_UP | PAD_DOWN))
+            menu_diag_log_state("selection");
+#endif
+        if (changed & physical_pad & PAD_CROSS)
+            apply_menu_result(forever_menu_select(&menu));
+        else if (changed & physical_pad & PAD_CIRCLE)
+            apply_menu_result(forever_menu_back(&menu));
+        if (!forever_menu_is_open(&menu)) return;
+        pointer.code &= PAD_TOUCHPAD;
+        pointer_input(&pointer, on_pointer, context);
+        render_menu();
+        return;
+    }
+#endif
     pointer_input(event, on_pointer, context);
 }
+#if defined(PS5_TITLE_EMBEDDED) && defined(FOREVER_MENU_DIAG)
+static void menu_diag_log_state(const char *event)
+{
+    io_log("menu diag menu %s page=%d selected=%d",
+           event, menu.page, menu.selected);
+}
+
+static void menu_diag_load(uint64_t now)
+{
+    int fd;
+    ssize_t count;
+    size_t used = 0;
+
+    menu_diag.poll_at = now + 1000000;
+    if (rename(MENU_DIAG_SCRIPT, MENU_DIAG_DONE))
+    {
+        if (errno != ENOENT)
+            io_log("menu diag input script rename failed errno=%d", errno);
+        return;
+    }
+    if ((fd = open(MENU_DIAG_DONE, O_RDONLY)) < 0)
+    {
+        io_log("menu diag input script open failed errno=%d", errno);
+        return;
+    }
+    while (used < sizeof(menu_diag.script) &&
+           (count = read(fd, menu_diag.script + used, sizeof(menu_diag.script) - used)) != 0)
+    {
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0)
+        {
+            io_log("menu diag input script read failed errno=%d", errno);
+            close(fd);
+            return;
+        }
+        used += (size_t)count;
+    }
+    close(fd);
+    if (used == sizeof(menu_diag.script) || memchr(menu_diag.script, 0, used))
+    {
+        io_log("menu diag input script refused bytes=%zu", used);
+        return;
+    }
+    menu_diag.size = used;
+    menu_diag.offset = 0;
+    menu_diag.active = 1;
+    io_log("menu diag input script bytes=%zu", used);
+}
+
+static void menu_diag_press_pad(uint32_t code)
+{
+    struct input_event event = {
+        .kind = INPUT_PAD, .connected = 1, .code = code,
+        .lx = 128, .ly = 128, .rx = 128, .ry = 128,
+    };
+    on_input(&event, NULL);
+    event.code = 0;
+    on_input(&event, NULL);
+}
+
+static void menu_diag_press_key(uint32_t code)
+{
+    struct input_event event = {.kind = INPUT_KEY, .code = code, .down = 1};
+    on_input(&event, NULL);
+    event.down = 0;
+    on_input(&event, NULL);
+}
+
+static void menu_diag_click(int x, int y)
+{
+    int current_x, current_y;
+    pointer_position(&current_x, &current_y);
+    struct input_event event = {
+        .kind = INPUT_MOUSE_MOVE, .dx = x - current_x, .dy = y - current_y};
+    on_input(&event, NULL);
+    event = (struct input_event){.kind = INPUT_MOUSE_BUTTON, .code = MOUSE_LEFT, .down = 1};
+    on_input(&event, NULL);
+    event.down = 0;
+    on_input(&event, NULL);
+}
+
+static void menu_diag_step(uint64_t now)
+{
+    if (menu_diag.dump_pending) return;
+    if (menu_diag.wait_until)
+    {
+        if (now < menu_diag.wait_until) return;
+        menu_diag.wait_until = 0;
+    }
+    if (!menu_diag.active)
+    {
+        if (now < menu_diag.poll_at) return;
+        menu_diag_load(now);
+        if (!menu_diag.active) return;
+    }
+    while (menu_diag.offset < menu_diag.size)
+    {
+        size_t start = menu_diag.offset, end = start;
+        struct forever_menu_diag_command command;
+        while (end < menu_diag.size && menu_diag.script[end] != '\n') end++;
+        menu_diag.offset = end < menu_diag.size ? end + 1 : end;
+        size_t length = end - start;
+        io_log("menu diag input %.*s", (int)length, menu_diag.script + start);
+        if (forever_menu_diag_parse(menu_diag.script + start, length, &command))
+        {
+            io_log("menu diag input invalid");
+            continue;
+        }
+        switch (command.kind)
+        {
+        case FOREVER_MENU_DIAG_PAD: menu_diag_press_pad(command.code); break;
+        case FOREVER_MENU_DIAG_KEY: menu_diag_press_key(command.code); break;
+        case FOREVER_MENU_DIAG_CLICK: menu_diag_click(command.x, command.y); break;
+        case FOREVER_MENU_DIAG_WAIT:
+            menu_diag.wait_until = now_us() + (uint64_t)command.milliseconds * 1000;
+            return;
+        case FOREVER_MENU_DIAG_DUMP:
+            snprintf(menu_diag.dump_name, sizeof(menu_diag.dump_name), "%s", command.name);
+            menu_diag.dump_pending = 1;
+            return;
+        }
+    }
+    menu_diag.active = 0;
+}
+
+static void menu_diag_dump(void)
+{
+    static const char root[] = "/data/homebrew/PPSA99030/wine/menu-";
+    char path[256], temporary[272], hex[65];
+    uint8_t digest[32];
+    const void *pixels = display_image();
+    const size_t bytes = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint32_t);
+    int fd, error = 0;
+
+    if (!menu_diag.dump_pending) return;
+    snprintf(path, sizeof(path), "%s%s.bgra", root, menu_diag.dump_name);
+    snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+    pw_elf_sha256(pixels, bytes, digest);
+    for (unsigned i = 0; i < sizeof(digest); i++)
+        snprintf(hex + 2 * i, sizeof(hex) - 2 * i, "%02x", digest[i]);
+    if ((fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666)) < 0)
+        error = errno;
+    else
+    {
+        size_t done = 0;
+        while (done < bytes)
+        {
+            ssize_t count = write(fd, (const char *)pixels + done, bytes - done);
+            if (count < 0 && errno == EINTR) continue;
+            if (count <= 0) { error = count < 0 ? errno : EIO; break; }
+            done += (size_t)count;
+        }
+        if (close(fd) && !error) error = errno;
+        if (!error && rename(temporary, path)) error = errno;
+    }
+    if (error)
+    {
+        unlink(temporary);
+        io_log("menu diag dump name=%s failed errno=%d",
+               menu_diag.dump_name, error);
+    }
+    else
+        io_log("menu diag dump name=%s bytes=%zu sha256=%s",
+               menu_diag.dump_name, bytes, hex);
+    menu_diag.dump_pending = 0;
+}
+#endif
+
+#ifdef PS5_TITLE_EMBEDDED
+
+static void render_menu(void)
+{
+    char text[FOREVER_MENU_TEXT_BYTES];
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+}
+
+static int physical_input_neutral(void)
+{
+    if (physical_pad || physical_mouse) return 0;
+    for (unsigned i = 0; i < sizeof(physical_keys); i++)
+        if (physical_keys[i]) return 0;
+    return 1;
+}
+
+static void release_forwarded_input(void)
+{
+    int x, y;
+    for (unsigned usage = 0; usage < sizeof(forwarded_keys); usage++)
+        if (forwarded_keys[usage])
+        {
+            struct ps5_desktop_key key = {
+                .header = {PS5_DESKTOP_KEY, sizeof(key)}, .usage = usage};
+            hub_send(&key, sizeof(key));
+        }
+    pointer_position(&x, &y);
+    for (unsigned code = MOUSE_LEFT; code <= MOUSE_X2; code <<= 1)
+        if (forwarded_mouse & code)
+        {
+            struct ps5_desktop_mouse mouse = {
+                .header = {PS5_DESKTOP_MOUSE, sizeof(mouse)},
+                .kind = PS5_DESKTOP_MOUSE_BUTTON, .x = x, .y = y,
+                .button = mouse_button(code),
+            };
+            hub_send(&mouse, sizeof(mouse));
+        }
+    memset(forwarded_keys, 0, sizeof(forwarded_keys));
+    forwarded_mouse = 0;
+}
+
+static void close_menu(void)
+{
+    release_forwarded_input();
+    forever_menu_close(&menu);
+    compositor_menu(NULL);
+    pointer_cancel();
+    menu_pad = 0;
+    input_draining = !physical_input_neutral();
+#ifdef FOREVER_MENU_DIAG
+    menu_diag_log_state("close");
+#endif
+}
+
+static void open_menu(void)
+{
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0};
+    int error;
+    if (user >= 0) ime_show(user, 0);
+    release_forwarded_input();
+    pointer_cancel();
+    error = forever_title_menu_load(&values);
+    forever_menu_open(&menu, &values);
+    if (error)
+    {
+        char status[FOREVER_MENU_STATUS_BYTES];
+        snprintf(status, sizeof(status), "Could not read the settings (error %d).", -error);
+        forever_menu_status(&menu, status);
+    }
+    menu_pad = physical_pad;
+    input_draining = 0;
+    render_menu();
+#ifdef FOREVER_MENU_DIAG
+    menu_diag_log_state("open");
+    io_log("menu diag action load result=%d", error);
+#endif
+}
+
+static void apply_menu_result(struct forever_menu_result result)
+{
+    int error;
+    char status[FOREVER_MENU_STATUS_BYTES];
+    if (result.command == FOREVER_MENU_COMMAND_NONE)
+    {
+        render_menu();
+#ifdef FOREVER_MENU_DIAG
+        menu_diag_log_state("selection");
+#endif
+        return;
+    }
+    if (result.command == FOREVER_MENU_COMMAND_CLOSE)
+    {
+        close_menu();
+        return;
+    }
+    if (result.command == FOREVER_MENU_COMMAND_REINSTALL ||
+        result.command == FOREVER_MENU_COMMAND_UNINSTALL)
+    {
+        forever_menu_progress(&menu, result.command == FOREVER_MENU_COMMAND_REINSTALL ?
+                              "Stopping Battle.net before reinstalling..." :
+                              "Stopping Battle.net before removing it...");
+        render_menu();
+        error = forever_title_menu_action(result.command, 0);
+#ifdef FOREVER_MENU_DIAG
+        io_log("menu diag action command=%d enabled=0 result=%d",
+               result.command, error);
+#endif
+        if (!error) return;
+        snprintf(status, sizeof(status), "Could not start the operation (error %d).", -error);
+        forever_menu_notice(&menu, status);
+        render_menu();
+        return;
+    }
+    error = forever_title_menu_action(result.command, result.enabled);
+#ifdef FOREVER_MENU_DIAG
+    io_log("menu diag action command=%d enabled=%d result=%d",
+           result.command, result.enabled, error);
+#endif
+    if (!error) forever_menu_commit(&menu, result.command, result.enabled);
+    else
+    {
+        snprintf(status, sizeof(status), "Could not save the setting (error %d).", -error);
+        forever_menu_status(&menu, status);
+    }
+    render_menu();
+}
+
+static void menu_key(uint32_t usage)
+{
+    if (usage == KEY_UP) forever_menu_move(&menu, -1);
+    else if (usage == KEY_DOWN) forever_menu_move(&menu, 1);
+    else if (usage == KEY_ENTER) apply_menu_result(forever_menu_select(&menu));
+    else if (usage == KEY_ESCAPE) apply_menu_result(forever_menu_back(&menu));
+#ifdef FOREVER_MENU_DIAG
+    if (usage == KEY_UP || usage == KEY_DOWN) menu_diag_log_state("selection");
+#endif
+    if (forever_menu_is_open(&menu)) render_menu();
+}
+#endif
+
 
 static void send_text(const uint16_t *text, size_t length)
 {
@@ -444,6 +907,16 @@ static int desktop_open(void)
     user = input_open(&result);
     fprintf(stderr, "input user=%d status=%#x %s\n", user, result, input_describe());
     pointer_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+#ifdef PS5_TITLE_EMBEDDED
+    forever_menu_init(&menu);
+    memset(physical_keys, 0, sizeof(physical_keys));
+    memset(forwarded_keys, 0, sizeof(forwarded_keys));
+    physical_pad = menu_pad = physical_mouse = forwarded_mouse = 0;
+    input_draining = pending_menu_status_kind = 0;
+#ifdef FOREVER_MENU_DIAG
+    memset(&menu_diag, 0, sizeof(menu_diag));
+#endif
+#endif
     pointer_position(&x, &y);
     compositor_init(x, y);
     hub_init(on_hub_message, on_hub_disconnect, NULL);
@@ -465,20 +938,40 @@ static void desktop_frame(void)
         compositor_message(pending_message);
         message_pending = 0;
     }
+#ifdef PS5_TITLE_EMBEDDED
+    if (pending_menu_status_kind)
+    {
+        if (pending_menu_status_kind == 2) forever_menu_notice(&menu, pending_menu_status);
+        else forever_menu_progress(&menu, pending_menu_status);
+        pending_menu_status_kind = 0;
+        render_menu();
+    }
+#endif
     pthread_mutex_unlock(&message_mutex);
 
     input_poll(on_input, NULL);
+#if defined(PS5_TITLE_EMBEDDED) && defined(FOREVER_MENU_DIAG)
+    menu_diag_step(now);
+#endif
     pointer_frame(now, on_pointer, NULL);
     if (ime_poll(&edit))
     {
-        for (unsigned i = 0; i < edit.erase; i++) send_key(0x2a); /* Backspace */
-        send_text(edit.text, edit.length);
-        if (edit.enter) send_key(0x28);                            /* Enter */
+#ifdef PS5_TITLE_EMBEDDED
+        if (!forever_menu_is_open(&menu) && !input_draining)
+#endif
+        {
+            for (unsigned i = 0; i < edit.erase; i++) send_key(0x2a); /* Backspace */
+            send_text(edit.text, edit.length);
+            if (edit.enter) send_key(0x28);                            /* Enter */
+        }
     }
     hub_poll(now);
     pointer_position(&x, &y);
     compositor_cursor(x, y);
     compositor_compose();
+#if defined(PS5_TITLE_EMBEDDED) && defined(FOREVER_MENU_DIAG)
+    menu_diag_dump();
+#endif
     display_present();
 }
 

@@ -3,6 +3,7 @@
 #include "protocol.h"
 #include "runtime-relaunch.h"
 #include "writebroker-autostart.h"
+#include "writebroker-menu.h"
 #include <wine/ps5_title.h>
 #include <wine/ps5_writebroker.h>
 #ifdef PW_PARENT_ROLE
@@ -12,6 +13,7 @@
 #include "title-log.h"
 #include "forever-paths.h"
 #include "forever-setup.h"
+#include "forever-menu-settings.h"
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
 #include "title-icon.h"
@@ -403,11 +405,56 @@ extern int sceSystemServiceLoadExec(const char *, const char *const []);
 static struct pw_game_wire game_wire;
 static pthread_mutex_t game_lock = PTHREAD_MUTEX_INITIALIZER;
 static int game_relaunch_pending;
+#if !PW_RUNTIME_HEADLESS
+enum forever_menu_lifetime
+{
+    FOREVER_MENU_IDLE,
+    FOREVER_MENU_ACTIVE,
+    FOREVER_MENU_TERMINAL_NOTICE,
+    FOREVER_MENU_REINSTALL_READY,
+};
+static pthread_mutex_t forever_menu_lifetime_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t forever_menu_lifetime_changed = PTHREAD_COND_INITIALIZER;
+static int forever_menu_operation;
+static atomic_int forever_menu_relaunch_pending;
+#endif
 /* This start found no initialized Wine prefix in /data/forever: it runs
  * wineboot -i instead of Battle.net, then restarts the app. */
 static int forever_prefix_init;
 static void forever_say(const char *text);
 static void b1_wait(void);
+#if !PW_RUNTIME_HEADLESS
+static int pw_writebroker_remove_path(const char *path);
+#endif
+
+#if !PW_RUNTIME_HEADLESS
+static int forever_title_menu_begin_lifetime(void)
+{
+    int result = 0;
+    pthread_mutex_lock(&forever_menu_lifetime_lock);
+    if (forever_menu_operation != FOREVER_MENU_IDLE) result = -EBUSY;
+    else forever_menu_operation = FOREVER_MENU_ACTIVE;
+    pthread_mutex_unlock(&forever_menu_lifetime_lock);
+    return result;
+}
+
+static void forever_title_menu_finish_lifetime(enum forever_menu_lifetime state)
+{
+    pthread_mutex_lock(&forever_menu_lifetime_lock);
+    forever_menu_operation = state;
+    pthread_cond_broadcast(&forever_menu_lifetime_changed);
+    pthread_mutex_unlock(&forever_menu_lifetime_lock);
+}
+
+void forever_title_menu_wait_lifetime(void)
+{
+    pthread_mutex_lock(&forever_menu_lifetime_lock);
+    while (forever_menu_operation == FOREVER_MENU_ACTIVE ||
+           forever_menu_operation == FOREVER_MENU_TERMINAL_NOTICE)
+        pthread_cond_wait(&forever_menu_lifetime_changed, &forever_menu_lifetime_lock);
+    pthread_mutex_unlock(&forever_menu_lifetime_lock);
+}
+#endif
 
 static int pw_game_loader_exists(const char *path, void *context)
 {
@@ -1425,6 +1472,18 @@ void __attribute__((noreturn)) pw_native_exit(int status)
     close(3); /* Last native action: supervisor EOF now means lifetime ended. */
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
+#if !PW_RUNTIME_HEADLESS
+    if (atomic_load(&forever_menu_relaunch_pending))
+    {
+        io_log("forever: Battle.net reinstall restart; LoadExec path=/app0/eboot.bin");
+        fflush(NULL);
+        int result = sceSystemServiceLoadExec("/app0/eboot.bin", NULL);
+        io_log("forever: Battle.net reinstall LoadExec returned result=%d", result);
+        forever_say("Battle.net was removed, but Forever Launcher could not restart itself.\n"
+                    "Close Forever Launcher and start it again to reinstall Battle.net.");
+        b1_wait();
+    }
+#endif
     if (game_relaunch_pending)
         pw_maintenance_loadexec_game("shutdown complete");
     if (forever_prefix_init)
@@ -1658,6 +1717,7 @@ static int pw_forever_start(void)
         { FOREVER_DRIVE_C "/wineps5-tune.txt", FOREVER_TUNE_DEFAULT },
         { FOREVER_DRIVE_C "/wineps5-fg.txt", FOREVER_FG_DEFAULT },
         { FOREVER_DRIVE_C "/wineps5-hud.txt", FOREVER_HUD_DEFAULT },
+        { FOREVER_DRIVE_C "/wineps5-hdr-output.txt", FOREVER_HDR_OUTPUT_DEFAULT },
     };
     char from[256] = "", message[320];
     int result = forever_mkdirs(FOREVER_ROOT);
@@ -1758,6 +1818,146 @@ static void *pw_forever_init_watch(void *unused)
     wine_ps5_title_native_request_exit(1);
     return NULL;
 }
+
+#if !PW_RUNTIME_HEADLESS
+void title_desktop_menu_status(const char *, int);
+
+int forever_title_menu_load(struct forever_menu_values *values)
+{
+    return forever_menu_read_settings(
+        FOREVER_DRIVE_C "/wineps5-fg.txt",
+        FOREVER_DRIVE_C "/wineps5-hdr-output.txt",
+        FOREVER_DRIVE_C "/wineps5-hud.txt",
+        &values->frame_generation, &values->hdr, &values->hud);
+}
+
+static void *pw_forever_menu_remove(void *argument)
+{
+    enum forever_menu_command command = (enum forever_menu_command)(uintptr_t)argument;
+    int reinstall = command == FOREVER_MENU_COMMAND_REINSTALL;
+    int error;
+
+    title_desktop_menu_status("Stopping Battle.net and its update agent...", 0);
+    error = pw_supervisor_quiesce_children();
+#ifdef FOREVER_MENU_DIAG
+    io_log("menu diag action quiesce result=%d", error);
+#endif
+    if (error)
+    {
+        char message[FOREVER_MENU_STATUS_BYTES];
+        snprintf(message, sizeof(message),
+                 "Could not stop every Battle.net process (error %d). Nothing was removed.",
+                 -error);
+        title_desktop_menu_status(message, 1);
+        forever_title_menu_finish_lifetime(FOREVER_MENU_TERMINAL_NOTICE);
+        return NULL;
+    }
+    title_desktop_menu_status(reinstall ? "Removing Battle.net and the cached installer..." :
+                                         "Removing Battle.net and its update agent...", 0);
+    error = 0;
+    for (unsigned i = 0; !error && i < 3u + !!reinstall; i++)
+    {
+        char path[1100];
+        error = forever_menu_path(path, sizeof(path), FOREVER_PREFIX, i, reinstall);
+        if (!error && !forever_menu_delete_path_allowed(FOREVER_PREFIX, path, reinstall))
+            error = -EACCES;
+        if (!error)
+            for (unsigned attempt = 0; attempt < 50; attempt++)
+            {
+                error = pw_writebroker_remove_path(path);
+                if (error != -EAGAIN && error != -ECONNREFUSED && error != -ENOENT) break;
+                if (attempt == 49) break;
+                usleep(100000);
+            }
+#ifdef FOREVER_MENU_DIAG
+        io_log("menu diag action delete index=%u path=%.240s result=%d", i, path, error);
+#endif
+    }
+    io_log("forever: Battle.net %s remove result=%d games=kept",
+           reinstall ? "reinstall" : "uninstall", error);
+    if (error)
+    {
+        char message[FOREVER_MENU_STATUS_BYTES];
+        snprintf(message, sizeof(message),
+                 "Could not remove all Battle.net files (error %d). Your games were not touched.",
+                 -error);
+        title_desktop_menu_status(message, 1);
+        forever_title_menu_finish_lifetime(FOREVER_MENU_TERMINAL_NOTICE);
+        return NULL;
+    }
+    if (!reinstall)
+    {
+        title_desktop_menu_status(
+            "Battle.net removed. Close and start Forever Launcher to reinstall it.", 1);
+        forever_title_menu_finish_lifetime(FOREVER_MENU_TERMINAL_NOTICE);
+        return NULL;
+    }
+    atomic_store(&forever_menu_relaunch_pending, 1);
+    title_desktop_menu_status("Restarting Forever Launcher to download a fresh installer...", 0);
+    forever_title_menu_finish_lifetime(FOREVER_MENU_REINSTALL_READY);
+    wine_ps5_title_native_request_exit(0);
+    return NULL;
+}
+
+int forever_title_menu_action(enum forever_menu_command command, int enabled)
+{
+    int result;
+    pthread_t thread;
+    switch (command)
+    {
+    case FOREVER_MENU_COMMAND_SET_FRAME_GENERATION:
+#ifdef FOREVER_MENU_DIAG
+        result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
+        io_log("menu diag action file=" FOREVER_DRIVE_C "/wineps5-fg.txt value=fg=%s result=%d",
+               enabled ? "on" : "off", result);
+        return result;
+#else
+        return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
+#endif
+    case FOREVER_MENU_COMMAND_SET_HUD:
+#ifdef FOREVER_MENU_DIAG
+        result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-hud.txt", "hud", enabled);
+        io_log("menu diag action file=" FOREVER_DRIVE_C "/wineps5-hud.txt value=hud=%s result=%d",
+               enabled ? "on" : "off", result);
+        return result;
+#else
+        return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-hud.txt", "hud", enabled);
+#endif
+    case FOREVER_MENU_COMMAND_SET_HDR:
+        result = forever_menu_set_wow_hdr(FOREVER_APP_SHARE, FOREVER_PREFIX, enabled);
+#ifdef FOREVER_MENU_DIAG
+        io_log("menu diag action configs=Config.wtf value=HDROutput=%d result=%d",
+               !!enabled, result);
+#endif
+        if (result < 0) return result;
+#ifdef FOREVER_MENU_DIAG
+        result = forever_menu_rewrite_switch(
+            FOREVER_DRIVE_C "/wineps5-hdr-output.txt", "hdr", enabled);
+        io_log("menu diag action file=" FOREVER_DRIVE_C
+               "/wineps5-hdr-output.txt value=hdr=%s result=%d",
+               enabled ? "on" : "off", result);
+        return result;
+#else
+        return forever_menu_rewrite_switch(
+            FOREVER_DRIVE_C "/wineps5-hdr-output.txt", "hdr", enabled);
+#endif
+    case FOREVER_MENU_COMMAND_REINSTALL:
+    case FOREVER_MENU_COMMAND_UNINSTALL:
+        if ((result = forever_title_menu_begin_lifetime())) return result;
+        result = pthread_create(&thread, NULL, pw_forever_menu_remove,
+                                (void *)(uintptr_t)command);
+        if (result)
+        {
+            forever_title_menu_finish_lifetime(FOREVER_MENU_IDLE);
+            return -result;
+        }
+        pthread_detach(thread);
+        return 0;
+    default:
+        return -EINVAL;
+    }
+}
+#endif
 #endif
 #endif
 
@@ -1844,6 +2044,61 @@ static int pw_writebroker_transfer(int fd, void *data, size_t size, int sending,
     return 0;
 }
 
+#if !PW_RUNTIME_GPU && !PW_RUNTIME_HEADLESS
+static int pw_writebroker_remove_path(const char *path)
+{
+    struct wb_hello hello = {.magic = WB_MAGIC, .version = WB_VERSION};
+    struct wb_write capability = {.magic = WB_MENU_CAPS_MAGIC};
+    struct wb_write request = {.magic = WB_MENU_REMOVE_MAGIC};
+    struct wb_reply reply = {0};
+    int64_t deadline = io_now_ms() + 2000;
+    size_t length = strlen(path);
+    int fd = -1, token_fd, result = -EIO;
+
+    if (!length || length > WB_MAX_PATH) return -ENAMETOOLONG;
+    if ((fd = pw_writebroker_connect_port(PW_WRITEBROKER_PORT, deadline)) < 0) return -errno;
+    token_fd = open(WB_TOKEN_FILE, O_RDONLY);
+    if (token_fd < 0) { result = -errno; goto done; }
+    if (read(token_fd, hello.token, sizeof(hello.token)) != (ssize_t)sizeof(hello.token))
+    {
+        result = -(errno ? errno : EIO);
+        close(token_fd);
+        goto done;
+    }
+    close(token_fd);
+    if (pw_writebroker_transfer(fd, &hello, sizeof(hello), 1, deadline) ||
+        pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline) ||
+        reply.magic != WB_MAGIC || reply.result)
+    {
+        result = reply.magic == WB_MAGIC && reply.result < 0 ? reply.result : -EPROTO;
+        goto done;
+    }
+    if (pw_writebroker_transfer(fd, &capability, sizeof(capability), 1, deadline) ||
+        pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline) ||
+        reply.magic != WB_MAGIC || reply.result != WB_MENU_CAPS_REMOVE)
+    {
+        result = -EAGAIN;
+        goto done;
+    }
+    request.path_length = (uint32_t)length;
+    if (pw_writebroker_transfer(fd, &request, sizeof(request), 1, deadline) ||
+        pw_writebroker_transfer(fd, (void *)path, length, 1, deadline))
+    {
+        result = -EIO;
+        goto done;
+    }
+    deadline = io_now_ms() + 300000;
+    if (pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline) ||
+        reply.magic != WB_MAGIC)
+        result = -EIO;
+    else
+        result = reply.result;
+done:
+    if (fd >= 0) close(fd);
+    return result;
+}
+#endif
+
 /* 1: a broker of this app's protocol version answers. 0: none, or one left
  * running by an older app (it refuses or reports another version), which the
  * broker this app sends replaces. -1 with *error otherwise. */
@@ -1851,7 +2106,8 @@ static int pw_writebroker_probe(void *context, int64_t deadline, int *error)
 {
     static int reported;
     struct wb_hello hello = {.magic = WB_MAGIC, .version = WB_VERSION};
-    struct wb_reply reply;
+    struct wb_reply reply, capabilities;
+    struct wb_write request = {.magic = WB_MENU_CAPS_MAGIC};
     int fd, token_fd, have_token;
 
     (void)context;
@@ -1868,9 +2124,18 @@ static int pw_writebroker_probe(void *context, int64_t deadline, int *error)
     if (have_token && !pw_writebroker_transfer(fd, &hello, sizeof(hello), 1, deadline) &&
         !pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline))
     {
+        if (reply.magic == WB_MAGIC && !reply.result &&
+            !pw_writebroker_transfer(fd, &request, sizeof(request), 1, deadline) &&
+            !pw_writebroker_transfer(fd, &capabilities, sizeof(capabilities), 0, deadline) &&
+            capabilities.magic == WB_MAGIC &&
+            capabilities.result == WB_MENU_CAPS_REMOVE)
+        {
+            close(fd);
+            return 1;
+        }
         close(fd);
-        if (reply.magic == WB_MAGIC && !reply.result) return 1;
-        if (!reported++) io_log("title write broker answers another version result=%d; replacing it", reply.result);
+        if (!reported++)
+            io_log("title write broker lacks menu removal capability; replacing it");
         return 0;
     }
     if (have_token && errno != EPIPE)
@@ -2328,8 +2593,14 @@ int main(int argc, char **argv)
         setenv("WINEPS5_PROFILE", PW_RUNTIME_PROFILE, 0)) return 1;
     if (*PW_RUNTIME_LOG_ASYNC &&
         setenv("WINEPS5_LOG_ASYNC", PW_RUNTIME_LOG_ASYNC, 0)) return 1;
-    if (*PW_RUNTIME_PROTON_ENABLE_HDR &&
-        setenv("PROTON_ENABLE_HDR", PW_RUNTIME_PROTON_ENABLE_HDR, 0)) return 1;
+    int hdr_output = forever_menu_hdr_runtime_enabled(
+        FOREVER_DRIVE_C "/wineps5-hdr-output.txt");
+    if (!hdr_output)
+    {
+        if (unsetenv("PROTON_ENABLE_HDR") || unsetenv("DXVK_HDR")) return 1;
+    }
+    else if (*PW_RUNTIME_PROTON_ENABLE_HDR &&
+             setenv("PROTON_ENABLE_HDR", PW_RUNTIME_PROTON_ENABLE_HDR, 0)) return 1;
     if (*PW_RUNTIME_DIRECT_REQUESTS &&
         setenv("WINEPS5_DIRECT_REQUESTS", PW_RUNTIME_DIRECT_REQUESTS, 0)) return 1;
     if (*PW_RUNTIME_HDR_TRACE &&
@@ -2341,9 +2612,11 @@ int main(int argc, char **argv)
     if (*PW_RUNTIME_SDR_WHITE_NITS &&
         setenv("WINEPS5_SDR_WHITE_NITS", PW_RUNTIME_SDR_WHITE_NITS, 0)) return 1;
     const char *enable_hdr = getenv("PROTON_ENABLE_HDR");
-    if (enable_hdr && !strcmp(enable_hdr, "1") && setenv("DXVK_HDR", "1", 1)) return 1;
+    if (hdr_output && enable_hdr && !strcmp(enable_hdr, "1") &&
+        setenv("DXVK_HDR", "1", 1)) return 1;
     const char *dxvk_hdr = getenv("DXVK_HDR");
-    fprintf(stderr, "title gpu env: PROTON_ENABLE_HDR=%s DXVK_HDR=%s\n",
+    fprintf(stderr, "title gpu env: hdr_output=%s PROTON_ENABLE_HDR=%s DXVK_HDR=%s\n",
+            hdr_output ? "on" : "off",
             enable_hdr ? enable_hdr : "(unset)", dxvk_hdr ? dxvk_hdr : "(unset)");
     fprintf(stderr, "title gpu diagnostics: present_mode=%s videoout_stats=%s queue_profile=%s "
             "cpu_profile=%s vkd3d_config=%s hdr_mode=%s query_trace=%s\n",

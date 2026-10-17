@@ -77,7 +77,8 @@ def main():
     command = shlex.split(args.cc) + ['-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Werror',
                                     '-Wno-unused-parameter', '-Wno-sign-compare', '-pthread', '-D__PROSPERO__',
                                     '-I' + str(args.output.parent), '-I' + str(args.wine / 'include'),
-                                    str(here / 'test-desktop-surface.c'), '-o', str(args.output)]
+                                    str(here / 'test-desktop-surface.c'),
+                                    str(here / '../../title/forever-menu.c'), '-o', str(args.output)]
     subprocess.run(command, check=True)
     print('DESKTOP_SURFACE_ISOLATION lifecycle=owner,remote flush=owner,remote callbacks=ntdll,parent implementation=UNCHANGED')
 

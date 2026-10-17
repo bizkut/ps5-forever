@@ -24,9 +24,10 @@
 
 static const struct { uint32_t button; uint32_t usage; int shift; } pad_keys[] = {
     {PAD_UP, KEY_UP, 0}, {PAD_DOWN, KEY_DOWN, 0}, {PAD_LEFT, KEY_LEFT, 0}, {PAD_RIGHT, KEY_RIGHT, 0},
-    {PAD_R1, KEY_TAB, 0}, {PAD_L1, KEY_TAB, 1}, {PAD_TRIANGLE, KEY_ENTER, 0}, {PAD_OPTIONS, KEY_ESCAPE, 0},
-    /* as PS5_WineLauncher's: Square erases in the field; L3+R3 opens the
-     * keyboard (pad_input), as in the GPU game */
+    {PAD_R1, KEY_TAB, 0}, {PAD_L1, KEY_TAB, 1}, {PAD_TRIANGLE, KEY_ENTER, 0},
+    {PAD_L2, KEY_ESCAPE, 0}, {PAD_OPTIONS, KEY_ESCAPE, 0},
+    /* Square erases in the field; Options belongs to the maintenance menu,
+     * and L3+R3 opens the keyboard (pad_input), as in the GPU game. */
     {PAD_SQUARE, KEY_BACKSPACE, 0},
 };
 #define PAD_KEYS (sizeof(pad_keys) / sizeof(pad_keys[0]))
@@ -47,6 +48,7 @@ static float scroll_touch_x, scroll_touch_y;
 static uint32_t touch_click;
 static int held_left, held_right;
 static int text_chord;         /* L3+R3 held together, not yet released */
+static int options_escape;
 
 static void emit_move(pointer_handler handler, void *context)
 {
@@ -69,12 +71,30 @@ static void pad_key(unsigned index, int down, int repeat, pointer_handler handle
     emit_key(pad_keys[index].usage, down, repeat, handler, context);
 }
 
+void pointer_cancel(void)
+{
+    pad_buttons = 0;
+    lx = ly = rx = ry = 128;
+    touching = touch_id = 0;
+    touch_click = held_left = held_right = text_chord = 0;
+    scroll_x = scroll_y = scroll_touch_x = scroll_touch_y = 0;
+    repeat_key = -1;
+    repeat_at = last_frame = 0;
+}
+
 void pointer_init(int w, int h)
 {
     width = w;
     height = h;
     px = w / 2.0f;
     py = h / 2.0f;
+    options_escape = 0;
+    pointer_cancel();
+}
+
+void pointer_options_escape(int enabled)
+{
+    options_escape = !!enabled;
 }
 
 void pointer_position(int *x, int *y)
@@ -111,9 +131,8 @@ static void pad_input(const struct input_event *e, pointer_handler handler, void
         handler(&(struct pointer_event){.kind = POINTER_BUTTON, .code = MOUSE_RIGHT, .down = right}, context);
     held_left = left;
     held_right = right;
-    /* L3+R3 toggle the keyboard when either is released, as the GPU game's
-     * short chord does (runtime-input.c, where a 1-s hold toggles the HUD
-     * instead); a disconnect cancels. */
+    /* L3+R3 toggle the keyboard when either is released, as in the GPU game;
+     * a disconnect cancels. */
     if ((e->code & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3)) text_chord = e->connected;
     else if (text_chord)
     {
@@ -122,6 +141,7 @@ static void pad_input(const struct input_event *e, pointer_handler handler, void
     }
     for (unsigned i = 0; i < PAD_KEYS; i++)
     {
+        if (pad_keys[i].button == PAD_OPTIONS && !options_escape) continue;
         if (!(changed & pad_keys[i].button)) continue;
         int down = !!(e->code & pad_keys[i].button);
         pad_key(i, down, 0, handler, context);

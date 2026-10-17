@@ -166,6 +166,23 @@ Native acceptance of the exact final `.012` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
+## Forever menu source changes
+
+- The maintenance role links the CPU-composited Forever menu; the headless GPU
+  role does not. Options and F12 are consumed before Wine while the menu is open;
+  L2 supplies Battle.net's Escape mapping.
+- The large menu uses committed alpha glyph tables generated deterministically
+  from SHA-256-pinned Noto Sans Regular 30 px and Bold 40 px files, with Noto
+  Sans Symbols 2 for the controller symbols. Builds stay network-free;
+  `ps5/title/tools/make-menu-font.py` is the audited regeneration path.
+- Menu settings use bounded, atomic file rewrites. The HDR output flag defaults
+  to on, preserving the existing `PROTON_ENABLE_HDR=1` game environment; off
+  explicitly removes that variable before the game runtime is built.
+- Battle.net removal runs through the authenticated write broker and is
+  restricted to its three fixed data roots. Reinstall also removes the cached
+  installer and restarts into the existing installer path; World of Warcraft
+  paths are never deletion roots.
+
 ## Pinned inputs and limits
 
 `Dockerfile` pins the Ubuntu 24.04 image by digest and Ubuntu apt packages

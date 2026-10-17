@@ -12,7 +12,8 @@ CFLAGS := -Wall -Wextra -Werror -O2 -I$(WINE_SRC)/include -pthread
 .PHONY: all send clean
 all: $(ELF)
 
-$(ELF): writebroker.c $(WINE_SRC)/include/wine/ps5_writebroker.h
+$(ELF): writebroker.c ../probes/psmkit-wine/writebroker-menu.h \
+		$(WINE_SRC)/include/wine/ps5_writebroker.h
 	mkdir -p $(OUT)
 	$(CC) $(CFLAGS) -o $@ writebroker.c
 

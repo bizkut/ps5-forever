@@ -27,7 +27,7 @@ source and build instructions.
 | [libtasn1](https://www.gnu.org/software/libtasn1/) | LGPL-2.1-or-later | linked into GnuTLS |
 | [pacbrew](https://github.com/OpenAGC/pacbrew-repo) recipes | see the repository | build recipes for GnuTLS, Nettle and libtasn1 |
 | Mozilla root certificates (`cacert.pem`) | MPL-2.0 | `wine-title/share/wine/cacert.pem`, trusted roots for HTTPS |
-| Noto and Droid fonts | OFL-1.1 / Apache-2.0 | `wine-title/share/wine/fonts/` |
+| Noto and Droid fonts | OFL-1.1 / Apache-2.0 | `wine-title/share/wine/fonts/`; Noto Sans menu glyph rasters in `ps5/title/menu-font.h`; notices in `ps5/release/licenses/fonts/` |
 | Wine built-in fonts | LGPL-2.1-or-later; Tahoma also retains the Bitstream Vera copyright/licence | `wine-title/share/wine/fonts/`; original font notices are included in `licenses/fonts/` |
 | `ps5/title/compositor.c` (adapted part, lines 67-68), `ps5/title/tools/make-title-background.py` and `ps5/title/tools/make-title-art.py`, from ps5-forever by Mihawk | MIT, notices kept in the files | title screen drawing, background and placeholder icon |
 | `ps5/probes/psmkit-wine/title-icon.h`, from ps5-forever `examples/battlenet/icon.c` by Mihawk | MIT, notice kept in the file | the home-screen icon made from the installed Battle.net launcher |

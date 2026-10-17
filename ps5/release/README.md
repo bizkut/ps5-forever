@@ -117,10 +117,28 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 
 | Press | Does |
 | --- | --- |
+| **Options** | Opens or closes the Forever menu while Battle.net is open |
+| **F12** on a USB keyboard | Opens or closes the Forever menu while Battle.net is open |
+| **L2** | Escape / back in Battle.net |
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
-| **L3 + R3, hold about 1 second** | Shows or hides the on-screen display (frame rate and GPU stats) |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).
+
+## Forever menu
+
+Open the menu over Battle.net with **Options**, or press **F12** on a USB
+keyboard. Use the D-pad and Cross; press Circle or Options at the top level to
+close, or click with a mouse. The menu can:
+
+- turn frame generation, HDR and the performance overlay on or off;
+- remove Battle.net while keeping installed games and their settings;
+- remove and reinstall Battle.net from a fresh installer download.
+
+**Add-ons** is shown as coming soon. If frame generation currently uses
+`fg=auto`, selecting it turns it off; selecting it again turns it on. Frame
+generation and the performance overlay use their live settings files; HDR
+applies the next time WoW starts. After removing Battle.net, close and start
+Forever Launcher to install it again.
 
 ## Frame generation
 
@@ -161,7 +179,8 @@ fg=on method=auto mult=2 flow=1.0
 | `method` | `auto` (Lossless Scaling when `Lossless.dll` is there, else FSR 3), `lossless`, or `fsr3` |
 
 The on-screen display settings are in `/data/forever/prefix/drive_c/wineps5-hud.txt`
-(`hud=on` or `hud=off`, `pos=tl`, `scale=2`); holding L3 + R3 changes it for you.
+(`hud=on` or `hud=off`, `pos=tl`, `scale=2`); the Forever menu changes `hud`
+without replacing the other options.
 
 ## WoW settings
 
@@ -170,7 +189,8 @@ HDR on, and the controller enabled. The preset covers both Forever final
 (`_forever_`) and Classic beta (`_classic_beta_`) independently: it is installed
 only when that channel's executable is installed and its own `Config.wtf` is
 absent. Change anything you like in WoW's options; neither channel's existing
-settings are overwritten.
+settings are overwritten. The Forever menu changes only `HDROutput` for both
+installed channels and leaves every other setting, including `HDRFactor`, alone.
 
 ## Where your data is
 
@@ -218,8 +238,9 @@ delete `/data/forever` to remove Battle.net, WoW and your settings.
   synthetic 16 GiB free-space answer. The kernel log identifies the source with
   `wine: title disk space source=broker` or `source=synthetic`; restart the updated
   app so it can replace an older broker.
-- **Frame generation does nothing**: check that `wineps5-fg.txt` says `fg=on`. The on-screen
-  display (hold L3 + R3) shows `FG LOSSLESS` or `FG FSR3`; for Lossless Scaling, the file must be
+- **Frame generation does nothing**: check that `wineps5-fg.txt` says `fg=on`.
+  Open the Forever menu from Battle.net to turn the performance overlay on; it
+  shows `FG LOSSLESS` or `FG FSR3`. For Lossless Scaling, the file must be
   exactly `/data/forever/prefix/drive_c/Lossless.dll`.
 - **Logs**: the console's kernel log (port 3232) shows what the app is doing.
   Lines starting with `forever:` describe setup.

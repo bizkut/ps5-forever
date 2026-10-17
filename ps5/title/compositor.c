@@ -10,6 +10,7 @@
 #include "compositor.h"
 #include "display.h"
 #include "cursor-arrow.h"
+#include "menu-font.h"
 
 #define MAX_WINDOWS 128u
 #define MAX_DAMAGE 32u
@@ -64,11 +65,42 @@ static unsigned cursor_width = CURSOR_WIDTH, cursor_height = CURSOR_HEIGHT;
 static int cursor_hotspot_x, cursor_hotspot_y, cursor_visible = 1, cursor_custom;
 static struct ps5_desktop_cursor_shape *desktop_cursor, *cursor_selected;
 static uint64_t cursor_owner = UINT64_MAX;
+#define MENU_PANEL_WIDTH 1100
+#define MENU_PANEL_PADDING 40
+#define MENU_TITLE_HEIGHT 72
+#define MENU_ROW_HEIGHT 52
+#define MENU_SEPARATOR_HEIGHT 16
+#define MENU_BLANK_HEIGHT 14
+#define MENU_FOOTER_HEIGHT 58
+#define MENU_MAX_LINES 32
+#define MENU_PANEL 0xff12151cu
+#define MENU_BORDER 0xff666a74u
+#define MENU_SELECTION 0xff34405cu
+#define MENU_TEXT 0xffeeeeeeu
+#define MENU_MUTED 0xffa9afbau
+#define MENU_ACCENT 0xff8fc7ffu
+struct menu_layout_line
+{
+    size_t begin, length;
+    struct display_rect rect;
+    int separator, blank, selected;
+    unsigned rows;
+};
+static char menu_text[1024];
+static struct display_rect menu_rect;
+static struct menu_layout_line menu_lines[MENU_MAX_LINES];
+static unsigned menu_line_count;
+static unsigned menu_wrapped_rows(const char *text, size_t length, int bold, int max_width);
+static int menu_text_width(const char *text, size_t length, int bold);
 
 static struct display_rect cursor_rect(void)
 {
-    int left = cursor_x - cursor_hotspot_x, top = cursor_y - cursor_hotspot_y;
-    return (struct display_rect){left, top, left + (int)cursor_width, top + (int)cursor_height};
+    unsigned width = menu_text[0] ? CURSOR_WIDTH : cursor_width;
+    unsigned height = menu_text[0] ? CURSOR_HEIGHT : cursor_height;
+    int hotspot_x = menu_text[0] ? 0 : cursor_hotspot_x;
+    int hotspot_y = menu_text[0] ? 0 : cursor_hotspot_y;
+    int left = cursor_x - hotspot_x, top = cursor_y - hotspot_y;
+    return (struct display_rect){left, top, left + (int)width, top + (int)height};
 }
 
 #define FONT_WIDTH 8
@@ -270,6 +302,137 @@ void compositor_message(const char *text)
     add_damage(message_rect);
 }
 
+static int menu_line_separator(const char *text, size_t length)
+{
+    size_t at = 0, marks = 0;
+    while (at < length && text[at] == ' ') at++;
+    while (at < length && text[at] == '-') { at++; marks++; }
+    while (at < length && text[at] == ' ') at++;
+    return marks >= 3 && at == length;
+}
+
+static int menu_line_blank(const char *text, size_t length)
+{
+    for (size_t i = 0; i < length; i++)
+        if (text[i] != ' ' && text[i] != '\t' && text[i] != '\r') return 0;
+    return 1;
+}
+
+static void layout_menu(void)
+{
+    const char *at = menu_text;
+    int content_height = 0;
+
+    menu_line_count = 0;
+    while (*at && menu_line_count < MENU_MAX_LINES)
+    {
+        const char *end = strchr(at, '\n');
+        size_t length = end ? (size_t)(end - at) : strlen(at);
+        struct menu_layout_line *line = &menu_lines[menu_line_count];
+        *line = (struct menu_layout_line){
+            .begin = (size_t)(at - menu_text), .length = length,
+            .separator = menu_line_separator(at, length),
+            .blank = menu_line_blank(at, length),
+            .selected = length && at[0] == '>',
+            .rows = 1,
+        };
+        if (!menu_line_count) content_height += MENU_TITLE_HEIGHT;
+        else if (line->separator) content_height += MENU_SEPARATOR_HEIGHT;
+        else if (line->blank) content_height += MENU_BLANK_HEIGHT;
+        else
+        {
+            const char *visible = at;
+            size_t visible_length = length;
+            while (visible_length && (*visible == ' ' || *visible == '>'))
+            {
+                visible++;
+                visible_length--;
+            }
+            const char *tab = memchr(visible, '\t', visible_length);
+            if (tab) visible_length = (size_t)(tab - visible);
+            line->rows = menu_wrapped_rows(
+                visible, visible_length, 0,
+                MENU_PANEL_WIDTH - MENU_PANEL_PADDING - 48);
+            content_height += MENU_ROW_HEIGHT * (int)line->rows;
+        }
+        menu_line_count++;
+        if (!end || !end[1]) break;
+        at = end + 1;
+    }
+    int height = 2 * MENU_PANEL_PADDING + content_height + MENU_FOOTER_HEIGHT;
+    int left = (DISPLAY_WIDTH - MENU_PANEL_WIDTH) / 2;
+    int top = (DISPLAY_HEIGHT - height) / 2;
+    int y = top + MENU_PANEL_PADDING;
+    menu_rect = (struct display_rect){left, top, left + MENU_PANEL_WIDTH, top + height};
+    for (unsigned i = 0; i < menu_line_count; i++)
+    {
+        struct menu_layout_line *line = &menu_lines[i];
+        int line_height = !i ? MENU_TITLE_HEIGHT :
+            line->separator ? MENU_SEPARATOR_HEIGHT :
+            line->blank ? MENU_BLANK_HEIGHT : MENU_ROW_HEIGHT * (int)line->rows;
+        line->rect = (struct display_rect){
+            menu_rect.left + MENU_PANEL_PADDING / 2, y,
+            menu_rect.right - MENU_PANEL_PADDING / 2, y + line_height};
+        y += line_height;
+    }
+}
+
+void compositor_menu(const char *text)
+{
+    if (!text) text = "";
+    if (!strncmp(menu_text, text, sizeof(menu_text) - 1)) return;
+    add_damage(cursor_rect());
+    add_damage(menu_rect);
+    strncpy(menu_text, text, sizeof(menu_text) - 1);
+    menu_text[sizeof(menu_text) - 1] = 0;
+    if (!menu_text[0])
+    {
+        menu_rect = (struct display_rect){0};
+        menu_line_count = 0;
+        add_damage(cursor_rect());
+        return;
+    }
+    layout_menu();
+    add_damage(menu_rect);
+    add_damage(cursor_rect());
+}
+
+int compositor_menu_line_at(int x, int y)
+{
+    if (!menu_text[0] || x < menu_rect.left || x >= menu_rect.right ||
+        y < menu_rect.top || y >= menu_rect.bottom) return -1;
+    for (unsigned i = 0; i < menu_line_count; i++)
+        if (x >= menu_lines[i].rect.left && x < menu_lines[i].rect.right &&
+            y >= menu_lines[i].rect.top && y < menu_lines[i].rect.bottom) return (int)i;
+    return -1;
+}
+
+int compositor_menu_line_bounds(int line, struct display_rect *rect)
+{
+    if (!rect || line < 0 || (unsigned)line >= menu_line_count) return 0;
+    *rect = menu_lines[line].rect;
+    return 1;
+}
+
+int compositor_menu_value_bounds(int line, struct display_rect *rect)
+{
+    const struct menu_layout_line *layout;
+    const char *text, *tab;
+    size_t value_length;
+    int right;
+    if (!rect || line < 0 || (unsigned)line >= menu_line_count) return 0;
+    layout = &menu_lines[line];
+    text = menu_text + layout->begin;
+    tab = memchr(text, '\t', layout->length);
+    if (!tab) return 0;
+    value_length = layout->length - (size_t)(tab + 1 - text);
+    right = layout->rect.right - 24;
+    *rect = (struct display_rect){
+        right - menu_text_width(tab + 1, value_length, 0),
+        layout->rect.top, right, layout->rect.top + MENU_ROW_HEIGHT};
+    return 1;
+}
+
 static int find_window(uint64_t id)
 {
     for (unsigned i = 0; i < MAX_WINDOWS; i++)
@@ -447,6 +610,9 @@ void compositor_init(int x, int y)
     cursor_visible = 1;
     cursor_selected = NULL;
     cursor_owner = UINT64_MAX;
+    message[0] = menu_text[0] = 0;
+    message_rect = menu_rect = (struct display_rect){0};
+    menu_line_count = 0;
     select_cursor(0);
     load_background();
     add_damage((struct display_rect){0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT});
@@ -649,16 +815,20 @@ static void draw_window(const struct window *window, const struct display_rect *
 
 static void draw_cursor(const struct display_rect *damage, uint32_t *image)
 {
-    struct display_rect rect = cursor_rect();
-    int left = rect.left, top = rect.top;
+    unsigned width = menu_text[0] ? CURSOR_WIDTH : cursor_width;
+    unsigned height = menu_text[0] ? CURSOR_HEIGHT : cursor_height;
+    int hotspot_x = menu_text[0] ? 0 : cursor_hotspot_x;
+    int hotspot_y = menu_text[0] ? 0 : cursor_hotspot_y;
+    int left = cursor_x - hotspot_x, top = cursor_y - hotspot_y;
+    struct display_rect rect = {left, top, left + (int)width, top + (int)height};
 
-    if (!cursor_visible || !intersect(&rect, damage)) return;
+    if ((!menu_text[0] && !cursor_visible) || !intersect(&rect, damage)) return;
     for (int y = rect.top; y < rect.bottom; y++)
         for (int x = rect.left; x < rect.right; x++)
         {
             uint32_t pixel;
-            if (cursor_custom)
-                pixel = cursor_pixels[(y - top) * cursor_width + x - left];
+            if (!menu_text[0] && cursor_custom)
+                pixel = cursor_pixels[(y - top) * width + x - left];
             else
             {
                 char value = ps5_cursor_arrow[y - top][x - left];
@@ -686,20 +856,21 @@ static void draw_character(unsigned char character, int x, int y, const struct d
     }
 }
 
-static void draw_message(const struct display_rect *damage, uint32_t *image)
+static void draw_text_panel(const char *text, const struct display_rect *panel,
+                            const struct display_rect *damage, uint32_t *image)
 {
-    struct display_rect rect = message_rect;
+    struct display_rect rect = *panel;
     unsigned column = 0, line = 0;
 
-    if (!message[0] || !intersect(&rect, damage)) return;
+    if (!text[0] || !intersect(&rect, damage)) return;
     for (int y = rect.top; y < rect.bottom; y++)
         for (int x = rect.left; x < rect.right; x++)
         {
-            int border = x == message_rect.left || x == message_rect.right - 1 ||
-                         y == message_rect.top || y == message_rect.bottom - 1;
+            int border = x == panel->left || x == panel->right - 1 ||
+                         y == panel->top || y == panel->bottom - 1;
             image[(size_t)y * DISPLAY_WIDTH + x] = border ? 0xff666a74u : 0xff12151cu;
         }
-    for (const unsigned char *p = (const unsigned char *)message; *p; p++)
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++)
     {
         if (*p == '\n')
         {
@@ -712,10 +883,263 @@ static void draw_message(const struct display_rect *damage, uint32_t *image)
             column = 0;
             line++;
         }
-        draw_character(*p, message_rect.left + MESSAGE_PADDING + (int)column * FONT_WIDTH,
-                       message_rect.top + MESSAGE_PADDING + (int)line * FONT_HEIGHT, &rect, image);
+        draw_character(*p, panel->left + MESSAGE_PADDING + (int)column * FONT_WIDTH,
+                       panel->top + MESSAGE_PADDING + (int)line * FONT_HEIGHT, &rect, image);
         column++;
     }
+}
+
+static const struct forever_raster_glyph *menu_glyph(uint32_t codepoint, int bold)
+{
+    const struct forever_raster_glyph *glyphs =
+        bold ? forever_font_bold_glyphs : forever_font_regular_glyphs;
+    size_t count = bold ? sizeof(forever_font_bold_glyphs) / sizeof(forever_font_bold_glyphs[0]) :
+                          sizeof(forever_font_regular_glyphs) / sizeof(forever_font_regular_glyphs[0]);
+    for (size_t i = 0; i < count; i++)
+        if (glyphs[i].codepoint == codepoint) return &glyphs[i];
+    for (size_t i = 0; i < count; i++)
+        if (glyphs[i].codepoint == '?') return &glyphs[i];
+    return NULL;
+}
+
+static uint32_t menu_utf8(const unsigned char **at, const unsigned char *end)
+{
+    const unsigned char *p = *at;
+    uint32_t value;
+    if (p >= end) return 0;
+    if (*p < 0x80) { *at = p + 1; return *p; }
+    if ((*p & 0xe0) == 0xc0 && p + 1 < end && (p[1] & 0xc0) == 0x80)
+    {
+        value = ((uint32_t)(p[0] & 0x1f) << 6) | (p[1] & 0x3f);
+        *at = p + 2;
+        return value;
+    }
+    if ((*p & 0xf0) == 0xe0 && p + 2 < end &&
+        (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80)
+    {
+        value = ((uint32_t)(p[0] & 0x0f) << 12) |
+                ((uint32_t)(p[1] & 0x3f) << 6) | (p[2] & 0x3f);
+        *at = p + 3;
+        return value;
+    }
+    if ((*p & 0xf8) == 0xf0 && p + 3 < end &&
+        (p[1] & 0xc0) == 0x80 && (p[2] & 0xc0) == 0x80 && (p[3] & 0xc0) == 0x80)
+    {
+        value = ((uint32_t)(p[0] & 7) << 18) | ((uint32_t)(p[1] & 0x3f) << 12) |
+                ((uint32_t)(p[2] & 0x3f) << 6) | (p[3] & 0x3f);
+        *at = p + 4;
+        return value;
+    }
+    *at = p + 1;
+    return '?';
+}
+
+static int menu_text_width(const char *text, size_t length, int bold)
+{
+    const unsigned char *at = (const unsigned char *)text;
+    const unsigned char *end = at + length;
+    int width = 0;
+    while (at < end)
+    {
+        const struct forever_raster_glyph *glyph = menu_glyph(menu_utf8(&at, end), bold);
+        if (glyph) width += glyph->advance;
+    }
+    return width;
+}
+
+static size_t menu_wrap_length(const char *text, size_t length, int bold, int max_width)
+{
+    const unsigned char *start = (const unsigned char *)text;
+    const unsigned char *at = start, *end = start + length;
+    size_t last_space = (size_t)-1;
+    int width = 0;
+
+    while (at < end)
+    {
+        const unsigned char *before = at;
+        uint32_t codepoint = menu_utf8(&at, end);
+        const struct forever_raster_glyph *glyph = menu_glyph(codepoint, bold);
+        int advance = glyph ? glyph->advance : 0;
+        if (codepoint == ' ') last_space = (size_t)(before - start);
+        if (width + advance > max_width)
+        {
+            if (last_space != (size_t)-1 && last_space) return last_space;
+            return before > start ? (size_t)(before - start) : (size_t)(at - start);
+        }
+        width += advance;
+    }
+    return length;
+}
+
+static unsigned menu_wrapped_rows(const char *text, size_t length, int bold, int max_width)
+{
+    unsigned rows = 0;
+    while (length)
+    {
+        while (length && *text == ' ') { text++; length--; }
+        if (!length) break;
+        size_t part = menu_wrap_length(text, length, bold, max_width);
+        if (!part) break;
+        rows++;
+        text += part;
+        length -= part;
+    }
+    return rows ? rows : 1;
+}
+
+static void draw_menu_text(const char *text, size_t length, int bold, int x, int baseline,
+                           uint32_t color, const struct display_rect *damage, uint32_t *image)
+{
+    const unsigned char *at = (const unsigned char *)text;
+    const unsigned char *end = at + length;
+    const uint8_t *coverage = bold ? forever_font_bold_coverage : forever_font_regular_coverage;
+
+    while (at < end)
+    {
+        const struct forever_raster_glyph *glyph = menu_glyph(menu_utf8(&at, end), bold);
+        if (!glyph) continue;
+        int left = x + glyph->left, top = baseline + glyph->top;
+        struct display_rect rect = {
+            left, top, left + glyph->width, top + glyph->height};
+        struct display_rect clipped = rect;
+        if (glyph->width && glyph->height && intersect(&clipped, damage) &&
+            intersect(&clipped, &menu_rect))
+            for (int py = clipped.top; py < clipped.bottom; py++)
+                for (int px = clipped.left; px < clipped.right; px++)
+                {
+                    unsigned alpha = coverage[glyph->offset +
+                        (size_t)(py - top) * glyph->width + (size_t)(px - left)];
+                    if (alpha)
+                    {
+                        uint32_t *destination = &image[(size_t)py * DISPLAY_WIDTH + px];
+                        *destination = blend(color, *destination, alpha);
+                    }
+                }
+        x += glyph->advance;
+    }
+}
+
+static void draw_menu_wrapped_text(
+    const char *text, size_t length, const struct display_rect *line,
+    uint32_t color, const struct display_rect *damage, uint32_t *image)
+{
+    unsigned row = 0;
+    int max_width = line->right - line->left - 48;
+    while (length)
+    {
+        while (length && *text == ' ') { text++; length--; }
+        if (!length) break;
+        size_t part = menu_wrap_length(text, length, 0, max_width);
+        if (!part) break;
+        int baseline = line->top + (int)row * MENU_ROW_HEIGHT +
+            (MENU_ROW_HEIGHT - FOREVER_FONT_REGULAR_ASCENT -
+             FOREVER_FONT_REGULAR_DESCENT) / 2 + FOREVER_FONT_REGULAR_ASCENT;
+        draw_menu_text(text, part, 0, line->left + 24, baseline, color, damage, image);
+        text += part;
+        length -= part;
+        row++;
+    }
+}
+
+static int menu_line_contains(const struct menu_layout_line *line, const char *needle)
+{
+    size_t length = strlen(needle);
+    if (length > line->length) return 0;
+    const char *text = menu_text + line->begin;
+    for (size_t i = 0; i + length <= line->length; i++)
+        if (!memcmp(text + i, needle, length)) return 1;
+    return 0;
+}
+
+static void draw_menu(const struct display_rect *damage, uint32_t *image)
+{
+    static const char footer[] = "\xe2\x9c\x95 Select   \xe2\x97\x8b Back   OPTIONS Close";
+    struct display_rect panel = menu_rect;
+    if (!menu_text[0] || !intersect(&panel, damage)) return;
+
+    for (int y = panel.top; y < panel.bottom; y++)
+        for (int x = panel.left; x < panel.right; x++)
+        {
+            int border = x < menu_rect.left + 2 || x >= menu_rect.right - 2 ||
+                         y < menu_rect.top + 2 || y >= menu_rect.bottom - 2;
+            image[(size_t)y * DISPLAY_WIDTH + x] = border ? MENU_BORDER : MENU_PANEL;
+        }
+    for (unsigned i = 0; i < menu_line_count; i++)
+    {
+        const struct menu_layout_line *line = &menu_lines[i];
+        if (line->selected)
+        {
+            struct display_rect bar = line->rect;
+            if (intersect(&bar, damage))
+                for (int y = bar.top; y < bar.bottom; y++)
+                    for (int x = bar.left; x < bar.right; x++)
+                        image[(size_t)y * DISPLAY_WIDTH + x] = MENU_SELECTION;
+        }
+        if (line->separator)
+        {
+            int y = (line->rect.top + line->rect.bottom) / 2;
+            if (y >= damage->top && y < damage->bottom)
+                for (int x = line->rect.left + 20; x < line->rect.right - 20; x++)
+                    if (x >= damage->left && x < damage->right)
+                        image[(size_t)y * DISPLAY_WIDTH + x] = MENU_BORDER;
+            continue;
+        }
+        if (line->blank) continue;
+        const char *text = menu_text + line->begin;
+        size_t length = line->length, value_length = 0;
+        const char *value = NULL;
+        while (length && (*text == ' ' || *text == '>')) { text++; length--; }
+        const char *tab = memchr(text, '\t', length);
+        if (tab)
+        {
+            value = tab + 1;
+            value_length = length - (size_t)(value - text);
+            length = (size_t)(tab - text);
+        }
+        int bold = i == 0;
+        uint32_t color = menu_line_contains(line, "Coming soon") ? MENU_MUTED : MENU_TEXT;
+        if (bold)
+        {
+            int baseline = line->rect.top +
+                (line->rect.bottom - line->rect.top - FOREVER_FONT_BOLD_ASCENT -
+                 FOREVER_FONT_BOLD_DESCENT) / 2 + FOREVER_FONT_BOLD_ASCENT;
+            int x = (menu_rect.left + menu_rect.right -
+                     menu_text_width(text, length, 1)) / 2;
+            draw_menu_text(text, length, 1, x, baseline, color, damage, image);
+        }
+        else
+            draw_menu_wrapped_text(text, length, &line->rect, color, damage, image);
+        if (value)
+        {
+            struct display_rect bounds;
+            compositor_menu_value_bounds((int)i, &bounds);
+            int baseline = bounds.top +
+                (MENU_ROW_HEIGHT - FOREVER_FONT_REGULAR_ASCENT -
+                 FOREVER_FONT_REGULAR_DESCENT) / 2 + FOREVER_FONT_REGULAR_ASCENT;
+            uint32_t value_color = menu_line_contains(line, "Coming soon") ?
+                MENU_MUTED : MENU_ACCENT;
+            draw_menu_text(value, value_length, 0, bounds.left, baseline,
+                           value_color, damage, image);
+        }
+    }
+    int footer_top = menu_rect.bottom - MENU_PANEL_PADDING - MENU_FOOTER_HEIGHT;
+    if (footer_top >= damage->top && footer_top < damage->bottom)
+        for (int x = menu_rect.left + MENU_PANEL_PADDING; x < menu_rect.right - MENU_PANEL_PADDING; x++)
+            if (x >= damage->left && x < damage->right)
+                image[(size_t)footer_top * DISPLAY_WIDTH + x] = MENU_BORDER;
+    int footer_width = menu_text_width(footer, sizeof(footer) - 1, 0);
+    int footer_baseline = footer_top +
+        (MENU_FOOTER_HEIGHT - FOREVER_FONT_REGULAR_ASCENT -
+         FOREVER_FONT_REGULAR_DESCENT) / 2 + FOREVER_FONT_REGULAR_ASCENT;
+    draw_menu_text(footer, sizeof(footer) - 1, 0,
+                   (menu_rect.left + menu_rect.right - footer_width) / 2,
+                   footer_baseline, MENU_MUTED, damage, image);
+}
+
+static void draw_message(const struct display_rect *damage, uint32_t *image)
+{
+    draw_text_panel(message, &message_rect, damage, image);
+    draw_menu(damage, image);
 }
 
 void compositor_compose(void)

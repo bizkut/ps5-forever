@@ -101,9 +101,11 @@ EXPECTED_PARENT_PRE_NEEDED = [*EXPECTED_PRE_NEEDED, 'libSceSystemService.sprx']
 if args.profile == 'b1':
     # Children forward networking, desktop and payload-spawn operations.
     EXPECTED_PARENT_PRE_NEEDED = [*EXPECTED_PRE_NEEDED, 'libSceNet.sprx',
-                                  'libSceNetCtl.sprx', 'libSceSystemService.sprx']
+                                  'libSceNetCtl.sprx', 'libSceSystemService.sprx',
+                                  'libSceUserService.sprx']
     EXPECTED_PARENT_NEEDED = [*EXPECTED_POST_NEEDED, 'libSceNet.prx',
-                              'libSceNetCtl.prx', 'libSceSystemService.prx']
+                              'libSceNetCtl.prx', 'libSceSystemService.prx',
+                              'libSceUserService.prx']
     if not selected['headless']:
         EXPECTED_PARENT_PRE_NEEDED = [
             'libkernel.sprx', 'libSceIme.prx', 'libSceKeyboard.sprx',
@@ -790,8 +792,8 @@ if args.profile == 'b1':
     require(desktop.get('enabled') == (not selected['headless']),
             'B1 native desktop selection differs from the profile')
     expected_desktop_sources = {
-        'title-desktop.c', 'title-hub.c', 'compositor.c', 'display.c',
-        'input.c', 'pointer.c', 'ime.c',
+        'title-desktop.c', 'title-hub.c', 'compositor.c', 'forever-menu.c',
+        'display.c', 'input.c', 'pointer.c', 'ime.c',
     } if not selected['headless'] else set()
     require({Path(path).name for path in desktop.get('sources', [])} == expected_desktop_sources,
             'B1 native desktop source inventory drift')

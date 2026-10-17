@@ -11,6 +11,9 @@ int pw_supervisor_spawn(const struct wine_ps5_title_spawn *);
 int pw_supervisor_signal(int, unsigned int, void *, int);
 int pw_supervisor_terminate(int);
 void pw_supervisor_end_children(void);
+/* Refuse new children, end all supervised Battle.net/Agent processes and wait
+ * until their control channels close. The desktop parent remains alive. */
+int pw_supervisor_quiesce_children(void);
 int pw_parent_stage_game_launch(char *const *, const char *, const char *);
 void pw_parent_request_game_launch(void);
 #endif

@@ -1,5 +1,6 @@
 #define _GNU_SOURCE 1
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -20,12 +21,14 @@
 #include <unistd.h>
 
 #include "wine/ps5_writebroker.h"
+#include "writebroker-menu.h"
 
 #define WB_CHUNK (1u << 20)
 static unsigned char token[WB_TOKEN_BYTES];
 static unsigned long long served_writes, served_bytes;
 static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
 static char directory[] = "/tmp/writebroker-space-XXXXXX";
+static char menu_prefix_root[1024];
 static char token_path[1024];
 static char writes_path[1024];
 static unsigned int statfs_calls, source_broker_logs, source_fallback_logs;
@@ -101,7 +104,11 @@ static ssize_t server_pwrite(int fd, const void *buffer, size_t length, off_t of
 #define statfs test_statfs
 #define open(path, ...) open(server_path(path), __VA_ARGS__)
 #define pwrite(fd, buffer, length, offset) server_pwrite(fd, buffer, length, offset)
+#define WB_MENU_PREFIX_ROOT menu_prefix_root
+#define WB_MENU_REMOVE_DEPTH 64u
 #include "writebroker-server.inc"
+#undef WB_MENU_PREFIX_ROOT
+#undef WB_MENU_REMOVE_DEPTH
 #undef statfs
 #undef pwrite
 #undef open
@@ -156,6 +163,36 @@ static void protocol_tests(void)
         "/tmp/outside", WB_USER_ROOT "../outside", "/data/forever-other/space", WB_USER_ROOT,
     };
     int fd = connection();
+    {
+        struct wb_write capability = {.magic = WB_MENU_CAPS_MAGIC};
+        struct wb_reply answer;
+        assert(!transfer(fd, &capability, sizeof(capability), 1));
+        assert(!transfer(fd, &answer, sizeof(answer), 0));
+        check(answer.magic == WB_MAGIC && answer.result == WB_MENU_CAPS_REMOVE,
+              "menu removal capability advertised");
+    }
+    {
+        static const char outside[] =
+            WB_USER_ROOT "prefix/drive_c/Program Files (x86)/World of Warcraft";
+        struct wb_write removal = {
+            .magic = WB_MENU_REMOVE_MAGIC, .path_length = sizeof(outside) - 1};
+        struct wb_reply answer;
+        assert(!transfer(fd, &removal, sizeof(removal), 1));
+        assert(!transfer(fd, (void *)outside, removal.path_length, 1));
+        assert(!transfer(fd, &answer, sizeof(answer), 0));
+        check(answer.magic == WB_MAGIC && answer.result == -EACCES,
+              "menu broker refuses every non-Battle.net root");
+        check(menu_remove_path_allowed(
+                  WB_USER_ROOT "prefix/drive_c/Program Files (x86)/Battle.net") &&
+              menu_remove_path_allowed(
+                  WB_USER_ROOT "prefix/drive_c/ProgramData/Battle.net") &&
+              menu_remove_path_allowed(
+                  WB_USER_ROOT "prefix/drive_c/users/steamuser/AppData/Local/Battle.net") &&
+              menu_remove_path_allowed(WB_USER_ROOT "prefix/drive_c/Battle.net-Setup.exe") &&
+              !menu_remove_path_allowed(
+                  WB_USER_ROOT "prefix/drive_c/Program Files (x86)/Battle.net/child"),
+              "menu broker deletion roots are the exact fixed set");
+    }
 
     assert(!statfs(directory, &expected));
     reply = query(fd, WB_USER_ROOT "space");
@@ -167,6 +204,7 @@ static void protocol_tests(void)
     __atomic_store_n(&negative_available, 1, __ATOMIC_SEQ_CST);
     reply = query(fd, WB_USER_ROOT "space");
     check(!reply.result && !reply.bavail, "negative statfs availability serialized as zero");
+
     check(reply.bfree == expected.f_bfree, "negative availability preserves actual free blocks");
     __atomic_store_n(&negative_available, 0, __ATOMIC_SEQ_CST);
     for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++)
@@ -195,6 +233,107 @@ static void protocol_tests(void)
         check(read(fd, &reply, sizeof(reply)) == 0, "embedded NUL query refused");
     }
     close(fd);
+}
+static void fixture_mkdirs(const char *path)
+{
+    char copy[1024];
+    size_t length = strlen(path);
+    assert(length < sizeof(copy));
+    memcpy(copy, path, length + 1);
+    for (char *p = copy + 1; ; p++)
+    {
+        if (*p != '/' && *p) continue;
+        char saved = *p;
+        *p = 0;
+        assert(!mkdir(copy, 0777) || errno == EEXIST);
+        if (!saved) break;
+        *p = saved;
+    }
+}
+
+static void fixture_put(const char *path, const char *text)
+{
+    char parent[1024];
+    assert(strlen(path) < sizeof(parent));
+    strcpy(parent, path);
+    char *slash = strrchr(parent, '/');
+    assert(slash);
+    *slash = 0;
+    fixture_mkdirs(parent);
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    assert(fd >= 0);
+    assert(write(fd, text, strlen(text)) == (ssize_t)strlen(text));
+    assert(!close(fd));
+}
+
+static int menu_remove_request(const char *path)
+{
+    struct wb_write request = {
+        .magic = WB_MENU_REMOVE_MAGIC, .path_length = (uint32_t)strlen(path)};
+    struct wb_reply reply;
+    int fd = connection();
+    assert(!transfer(fd, &request, sizeof(request), 1));
+    assert(!transfer(fd, (void *)path, request.path_length, 1));
+    assert(!transfer(fd, &reply, sizeof(reply), 0));
+    close(fd);
+    assert(reply.magic == WB_MAGIC);
+    return reply.result;
+}
+
+static void menu_removal_tests(void)
+{
+    char app[1024], wow[1024], outside[1024], ancestor[1024], local[1024], link[1024];
+    struct stat status;
+
+    snprintf(menu_prefix_root, sizeof(menu_prefix_root), "%s/menu-prefix", directory);
+    snprintf(app, sizeof(app), "%s/drive_c/Program Files (x86)/Battle.net", menu_prefix_root);
+    snprintf(wow, sizeof(wow), "%s/drive_c/Program Files (x86)/World of Warcraft/keep", menu_prefix_root);
+    fixture_put(wow, "keep");
+    {
+        char nested[1024];
+        snprintf(nested, sizeof(nested), "%s/sub/dir/file", app);
+        fixture_put(nested, "remove");
+    }
+    check(!menu_remove_request(WB_USER_ROOT "prefix/drive_c/Program Files (x86)/Battle.net"),
+          "production broker recursively deletes an accepted Battle.net root");
+    check(lstat(app, &status) && errno == ENOENT, "accepted Battle.net root is gone");
+    check(!stat(wow, &status) && S_ISREG(status.st_mode), "accepted deletion keeps WoW");
+
+    /* A file at an allowed root is unlinked without attempting directory traversal. */
+    fixture_put(app, "regular root");
+    check(!menu_remove_request(WB_USER_ROOT "prefix/drive_c/Program Files (x86)/Battle.net"),
+          "production broker removes a non-directory allowed root");
+    check(lstat(app, &status) && errno == ENOENT, "non-directory root is gone");
+
+    snprintf(outside, sizeof(outside), "%s/outside/Battle.net/keep", directory);
+    fixture_put(outside, "outside");
+    snprintf(ancestor, sizeof(ancestor), "%s/drive_c/ProgramData", menu_prefix_root);
+    {
+        char parent[1024], target[1024];
+        snprintf(parent, sizeof(parent), "%s/drive_c", menu_prefix_root);
+        fixture_mkdirs(parent);
+        snprintf(target, sizeof(target), "%s/outside", directory);
+        assert(!symlink(target, ancestor));
+    }
+    check(menu_remove_request(WB_USER_ROOT "prefix/drive_c/ProgramData/Battle.net") < 0,
+          "production broker refuses a symlinked ancestor");
+    check(!stat(outside, &status) && S_ISREG(status.st_mode), "ancestor symlink keeps outside tree");
+    assert(!unlink(ancestor));
+
+    snprintf(local, sizeof(local), "%s/drive_c/users/steamuser/AppData/Local/Battle.net",
+             menu_prefix_root);
+    fixture_mkdirs(local);
+    snprintf(link, sizeof(link), "%s/wow-link", local);
+    {
+        char target[1024];
+        snprintf(target, sizeof(target), "%s/drive_c/Program Files (x86)/World of Warcraft",
+                 menu_prefix_root);
+        assert(!symlink(target, link));
+    }
+    check(!menu_remove_request(
+              WB_USER_ROOT "prefix/drive_c/users/steamuser/AppData/Local/Battle.net"),
+          "production broker unlinks an internal symlink without descending");
+    check(!stat(wow, &status) && S_ISREG(status.st_mode), "internal symlink keeps WoW");
 }
 
 typedef uintptr_t HANDLE;
@@ -561,13 +700,17 @@ int main(void)
     pool_index_tests();
     pool_tests();
     protocol_tests();
+    menu_removal_tests();
     close_connections();
     client_tests();
     for (unsigned int i = 0; i < BOUNCE_SLOTS; i++)
         if (bounce_buffer[i]) assert(!munmap(bounce_buffer[i], BOUNCE_SIZE));
-    unlink(token_path);
-    rmdir(directory);
+    {
+        char cleanup[1100];
+        snprintf(cleanup, sizeof(cleanup), "rm -rf '%s'", directory);
+        assert(!system(cleanup));
+    }
     if (failures) return 1;
-    puts("write broker: sixteen-slot concurrent exact writes/locking, statfs guards/fallback, Windows sizes PASS");
+    puts("write broker: concurrent writes/statfs and no-follow fixed-root recursive removal PASS");
     return 0;
 }

@@ -1,7 +1,5 @@
 /* As WoWPS5 does, read devices on a 4 ms native worker and send hardware
  * input only from a Wine message-pump thread. No compositor is linked here. */
-#include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -16,7 +14,6 @@
 #include <wine/ps5_title_gamepad.h>
 #include "../../title/input.h"
 #include "../../title/pointer.h"
-#include "forever-paths.h"
 #include "../../title/ime.h"
 #include "../../title/cursor-arrow.h"
 #include "../localproc/psmkit-io.h"
@@ -204,9 +201,8 @@ static atomic_uint_fast64_t gamepad_poll_us;
 static struct input_event pad_sample = {.kind = INPUT_PAD, .lx = 128, .ly = 128, .rx = 128, .ry = 128};
 static unsigned chord_previous, chord_pending, chord_swallowed, chord_taps;
 static uint64_t chord_at[2], chord_tap_until[2];
-static int hud_chord_active, hud_chord_fired, hud_chord_dropping;
-static uint64_t hud_chord_at, hud_chord_drop_at, hud_chord_held_us;
-static unsigned hud_chord_drops, hud_chord_last_drops;
+static int osk_chord_active, osk_chord_dropping;
+static uint64_t osk_chord_drop_at;
 static int touch_active;
 static uint8_t touch_id;
 static uint16_t touch_x, touch_y;
@@ -456,148 +452,38 @@ static void on_pointer(const struct pointer_event *event, void *context)
     enqueue(&mouse);
 }
 
-/* This file is linked only into the GPU title runtime. File I/O happens only
- * on the one-second chord edge, never while sampling ordinary pad input. */
-static int hud_space(char c)
-{
-    return c == ' ' || c == '\t' || c == '\r' || c == '\n';
-}
+/* A one-sample drop shorter than this is controller flicker, not release. */
+#define OSK_CHORD_RELEASE_US 40000
 
-static int hud_toggle_file(const char *path, const char *temporary, int *enabled)
-{
-    char text[4096], output[sizeof(text) + 8];
-    size_t size = 0, begin = 0, end = 0, out_size;
-    int fd = open(path, O_RDONLY), found = 0, was_on = 0;
-    if (fd < 0 && errno != ENOENT) return -1;
-    if (fd >= 0)
-    {
-        ssize_t count;
-        while (size < sizeof(text) &&
-               (count = read(fd, text + size, sizeof(text) - size)) != 0)
-        {
-            if (count < 0)
-            {
-                if (errno == EINTR) continue;
-                close(fd);
-                return -1;
-            }
-            size += count;
-        }
-        close(fd);
-        /* Never truncate user content, including an unexpectedly large file. */
-        if (size >= sizeof(text) || memchr(text, 0, size)) return -1;
-    }
-    for (size_t i = 0; i < size;)
-    {
-        size_t token;
-        while (i < size && hud_space(text[i])) i++;
-        token = i;
-        while (i < size && !hud_space(text[i])) i++;
-        if (i - token >= 4 && !memcmp(text + token, "hud=", 4))
-        {
-            if (found) return -1; /* vkd3d also rejects duplicate HUD keys. */
-            found = 1;
-            begin = token + 4;
-            end = i;
-            was_on = end - begin == 2 && !memcmp(text + begin, "on", 2);
-        }
-    }
-    *enabled = !was_on;
-    if (found)
-    {
-        size_t value_size = *enabled ? 2 : 3;
-        memcpy(output, text, begin);
-        memcpy(output + begin, *enabled ? "on" : "off", value_size);
-        memcpy(output + begin + value_size, text + end, size - end);
-        out_size = begin + value_size + size - end;
-    }
-    else
-    {
-        memcpy(output, text, size);
-        out_size = size;
-        if (size && !hud_space(text[size - 1])) output[out_size++] = '\n';
-        memcpy(output + out_size, "hud=on\n", 7);
-        out_size += 7;
-    }
-    if ((fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) return -1;
-    for (size_t written = 0; written < out_size;)
-    {
-        ssize_t count = write(fd, output + written, out_size - written);
-        if (count < 0 && errno == EINTR) continue;
-        if (count <= 0)
-        {
-            close(fd);
-            unlink(temporary);
-            return -1;
-        }
-        written += count;
-    }
-    if (close(fd))
-    {
-        unlink(temporary);
-        return -1;
-    }
-    if (rename(temporary, path))
-    {
-        unlink(temporary);
-        return -1;
-    }
-    return 0;
-}
-
-/* A drop of the chord shorter than this is a flicker inside the hold, not a
- * release; the per-tick call ends a longer one even without new records. */
-#define HUD_CHORD_RELEASE_US 40000
-
-/* Returns 1 for HUD, 2 for the short OSK chord, zero otherwise. Releasing
- * either thumb (for HUD_CHORD_RELEASE_US) re-arms; disconnect cancels rather
- * than opening the OSK. hud_chord_held_us/hud_chord_last_drops describe the
- * hold that produced an action. */
-static int hud_chord_update(unsigned raw, int connected, uint64_t now)
+/* L3+R3 remains the on-screen keyboard chord. It acts only after a stable
+ * release, so neither thumb button reaches WoW while the chord is held. */
+static int osk_chord_update(unsigned raw, int connected, uint64_t now)
 {
     int both = connected && (raw & (PAD_L3 | PAD_R3)) == (PAD_L3 | PAD_R3);
     int action = 0;
 
     if (!connected)
     {
-        hud_chord_active = hud_chord_fired = hud_chord_dropping = 0;
+        osk_chord_active = osk_chord_dropping = 0;
         return 0;
     }
-    if (hud_chord_active && hud_chord_dropping
-        && now - hud_chord_drop_at >= HUD_CHORD_RELEASE_US)
+    if (osk_chord_active && osk_chord_dropping &&
+        now - osk_chord_drop_at >= OSK_CHORD_RELEASE_US)
     {
-        hud_chord_held_us = hud_chord_drop_at - hud_chord_at;
-        hud_chord_last_drops = hud_chord_drops;
-        if (!hud_chord_fired) action = hud_chord_held_us >= 1000000 ? 1 : 2;
-        hud_chord_active = hud_chord_fired = hud_chord_dropping = 0;
+        action = 1;
+        osk_chord_active = osk_chord_dropping = 0;
     }
     if (!both)
     {
-        if (hud_chord_active && !hud_chord_dropping)
+        if (osk_chord_active && !osk_chord_dropping)
         {
-            hud_chord_dropping = 1;
-            hud_chord_drop_at = now;
+            osk_chord_dropping = 1;
+            osk_chord_drop_at = now;
         }
         return action;
     }
-    if (!hud_chord_active)
-    {
-        hud_chord_active = 1;
-        hud_chord_at = now;
-        hud_chord_drops = 0;
-    }
-    if (hud_chord_dropping)
-    {
-        hud_chord_dropping = 0;
-        hud_chord_drops++;
-    }
-    if (!action && !hud_chord_fired && now - hud_chord_at >= 1000000)
-    {
-        hud_chord_fired = 1;
-        hud_chord_held_us = now - hud_chord_at;
-        hud_chord_last_drops = hud_chord_drops;
-        return 1;
-    }
+    if (!osk_chord_active) osk_chord_active = 1;
+    if (osk_chord_dropping) osk_chord_dropping = 0;
     return action;
 }
 
@@ -646,21 +532,11 @@ static void route_pad(const struct input_event *event, uint64_t now, void *conte
 {
     struct input_event pointer = *event, state = *event;
     unsigned buttons;
-    int chord_action = hud_chord_update(event->code, event->connected, now);
-    if (chord_action)
-        io_log("title pad chord action=%s held_ms=%u drops=%u", chord_action == 1 ? "hud" : "osk",
-               (unsigned)(hud_chord_held_us / 1000), hud_chord_last_drops);
-    if (chord_action == 1)
+    if (osk_chord_update(event->code, event->connected, now))
     {
-        int enabled;
-        if (!hud_toggle_file(FOREVER_DRIVE_C "/wineps5-hud.txt",
-                             FOREVER_DRIVE_C "/wineps5-hud.txt.chord-tmp", &enabled))
-            io_log("wine: title hud chord toggled hud=%s", enabled ? "on" : "off");
-        else
-            io_log("title hud chord write failed");
+        io_log("title pad chord action=osk");
+        if (user >= 0) ime_resume(user);
     }
-    else if (chord_action == 2 && user >= 0)
-        ime_resume(user);
     buttons = gamepad_chord(event->code, now);
     if (!event->connected)
     {
@@ -674,11 +550,11 @@ static void route_pad(const struct input_event *event, uint64_t now, void *conte
         buttons = 0;
     }
     gamepad_update(&state, buttons);
-    /* The thumb chord is handled above (HUD/OSK), never by the shared
-     * pointer's desktop L3+R3 keyboard shortcut. Filtering a complete
-     * sample also releases previously held pointer buttons/keys when
-     * GetState starts polling or XInputEnable changes the mode. */
-    pointer.code = buttons & ~(PAD_L3 | PAD_R3);
+    /* The thumb chord is handled above for the OSK. L2's maintenance-desktop
+     * Escape mapping is also excluded here: WoW receives L2 only as a game
+     * trigger. Filtering a complete sample releases previously held pointer
+     * buttons/keys when GetState starts polling or XInputEnable changes mode. */
+    pointer.code = buttons & ~(PAD_L3 | PAD_R3 | PAD_L2);
     if (gamepad_mode(now) || ime_is_open())
     {
         pointer.code = event->code & PAD_TOUCHPAD;
@@ -782,8 +658,8 @@ static void *poll_devices(void *unused)
                 io_log("title keyboard state connected=1 active_keys>=1 index=%u length=%u",
                        index, length);
         }
-        /* Expire the XInput lease, pending isolated thumb clicks, and HUD
-         * hold timer even when scePadRead has no new records. */
+        /* Expire the XInput lease, pending isolated thumb clicks, and the
+         * OSK release debounce even when scePadRead has no new records. */
         route_pad(&pad_sample, input_now_us(), NULL);
         pointer_frame((uint64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000, on_pointer, NULL);
         /* One coalesced hardware-plane update per input/display tick, after
@@ -863,6 +739,7 @@ int pw_title_input_start(void)
     user = input_open(&status);
     io_log("input user=%d status=%#x %s", user, status, input_describe());
     pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+    pointer_options_escape(1);
     if ((status = cursor_allocate())) return status;
     status = pthread_create(&thread, NULL, poll_devices, NULL);
     if (!status) pthread_detach(thread);

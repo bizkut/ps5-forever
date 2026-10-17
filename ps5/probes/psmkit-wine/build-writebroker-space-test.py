@@ -49,8 +49,10 @@ def definition(path, name):
 
 broker = Path(__file__).resolve().parents[2] / 'writebroker/writebroker.c'
 client = args.wine / 'dlls/ntdll/unix/file.c'
-server_names = ('transfer', 'discard', 'serve_write', 'read_whole', 'install_icon',
-                'serve_statfs', 'serve')
+server_names = ('transfer', 'discard', 'menu_remove_index', 'menu_remove_path_allowed',
+                'menu_open_child_directory', 'menu_open_prefix_root', 'menu_open_remove_parent',
+                'menu_remove_at', 'menu_remove_tree', 'serve_menu_remove', 'serve_write',
+                'read_whole', 'install_icon', 'serve_statfs', 'serve')
 client_names = ('bounce_acquire', 'bounce_release', 'broker_transfer', 'broker_connect',
                 'broker_get_connection', 'broker_query_fs', 'broker_request', 'broker_pwrite',
                 'get_full_size_info', 'get_full_size_info_ex')
@@ -73,4 +75,4 @@ command = shlex.split(args.cc) + [
 ]
 subprocess.run(command, check=True)
 print('WRITEBROKER_SPACE_ISOLATION complete=' + ','.join(server_names + client_names)
-      + ' implementation=UNCHANGED')
+      + ' implementation=PRODUCTION_EXTRACTED')
