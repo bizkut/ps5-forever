@@ -22,8 +22,12 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.011
+## Changes in 01.000.012
 
+- Fixes WoW freezing on the loading screen about half the time at start (a
+  startup crash): the app now keeps Wine's system DLLs in `/data/forever`
+  identical to the ones it loads. The first start after updating copies these
+  files once and takes about 2 minutes.
 - Battle.net no longer asks to update installed games on every start: Wine now
   reports the folder permissions its Agent expects.
 - WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and
@@ -182,8 +186,13 @@ Updating the app replaces only the app folder. Your games and settings stay.
 - **By hand:** close the app and replace only its `PPSA99030` app folder
   with the folder from the new zip. Do not delete `/data/forever`.
 
-The first start after an update copies the app's new Windows files into
-`/data/forever` by itself.
+The first start after an update synchronizes the app's Windows files into
+`/data/forever`, including Wine's system DLLs. This keeps the on-disk DLLs
+identical to the builtin images loaded by Wine; mismatched copies can crash
+protected games during startup. Only changed, missing or wrong-size managed
+files are copied. Existing native DLL replacements are preserved, while the
+app's managed DXVK/vkd3d graphics files take precedence. The first sync after
+updating to this version runs once and takes about 2 minutes.
 
 ## Uninstalling
 

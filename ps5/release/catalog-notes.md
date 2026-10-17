@@ -6,8 +6,9 @@ Battle.net launcher designed for World of Warcraft: Forever; other games may ins
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.011
+### Forever Launcher 01.000.012
 
+- Fixes WoW freezing on the loading screen about half the time at start (a startup crash): the app now keeps Wine's system DLLs in `/data/forever` identical to the ones it loads. The first start after updating copies these files once and takes about 2 minutes.
 - Battle.net no longer asks to update installed games on every start: Wine now reports the folder permissions its Agent expects.
 - WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and Battle.net's text and link cursors, with the click point in the right place.
 - On most Battle.net pages, the controller's D-pad moves between buttons and links; Triangle presses and Options goes back.
