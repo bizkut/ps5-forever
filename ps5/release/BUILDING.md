@@ -83,6 +83,16 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
+## 01.000.013 source changes
+
+- Before publishing its token or listening, the version-6 write broker repairs
+  modes only within fixed launcher-data roots. Traversal is descriptor-relative,
+  no-follow, bounded, hard-link-safe, and stays on `/data`'s filesystem device.
+- The broker token intentionally retains the existing protocol's `0644` mode in
+  the normally `0777` `/data/forever` directory. It authenticates cooperative
+  title clients but is readable by other local identities that can traverse the
+  directory; this release does not redesign the token scheme.
+
 ## 01.000.012 source changes
 
 - B1 staging inventories every Wine builtin/placeholder PE from both installed

@@ -31,6 +31,9 @@ static char directory[] = "/tmp/writebroker-space-XXXXXX";
 static char menu_prefix_root[1024];
 static char token_path[1024];
 static char writes_path[1024];
+static char repair_data_root[1024];
+static int inject_other_device, inject_readdir_error, inject_closedir_error;
+static int startup_order;
 static unsigned int statfs_calls, source_broker_logs, source_fallback_logs;
 static pthread_t threads[64];
 static unsigned int thread_count;
@@ -101,12 +104,77 @@ static ssize_t server_pwrite(int fd, const void *buffer, size_t length, off_t of
     return pwrite(fd, buffer, length, offset);
 }
 
+static int repair_test_fstatat(int fd, const char *name, struct stat *status, int flags)
+{
+    int result = fstatat(fd, name, status, flags);
+    if (!result && inject_other_device && !strcmp(name, "other-device"))
+        status->st_dev++;
+    return result;
+}
+
+
+static struct dirent *repair_test_readdir(DIR *directory_stream)
+{
+    if (inject_readdir_error)
+    {
+        inject_readdir_error = 0;
+        errno = EIO;
+        return NULL;
+    }
+    return readdir(directory_stream);
+}
+
+static int repair_test_closedir(DIR *directory_stream)
+{
+    int result = closedir(directory_stream);
+    if (!result && inject_closedir_error)
+    {
+        inject_closedir_error = 0;
+        errno = EIO;
+        return -1;
+    }
+    return result;
+}
+
+static int fake_startup_repair(void)
+{
+    check(!startup_order, "broker startup repairs before token creation");
+    startup_order = 1;
+    return 0;
+}
+
+static int fake_startup_token(void)
+{
+    check(startup_order == 1, "broker token is created after startup repair");
+    startup_order = 2;
+    return 0;
+}
+
 #define statfs test_statfs
 #define open(path, ...) open(server_path(path), __VA_ARGS__)
 #define pwrite(fd, buffer, length, offset) server_pwrite(fd, buffer, length, offset)
 #define WB_MENU_PREFIX_ROOT menu_prefix_root
 #define WB_MENU_REMOVE_DEPTH 64u
+enum { TEST_REPAIR_MAX_ENTRIES = 32, TEST_REPAIR_MAX_DEPTH = 8 };
+#undef WB_REPAIR_MAX_ENTRIES
+#undef WB_REPAIR_MAX_DEPTH
+#define WB_REPAIR_DATA_ROOT repair_data_root
+#define WB_REPAIR_MAX_ENTRIES 32u
+#define WB_REPAIR_MAX_DEPTH 8u
+#define WB_REPAIR_FSTATAT repair_test_fstatat
+#define WB_REPAIR_READDIR repair_test_readdir
+#define WB_REPAIR_CLOSEDIR repair_test_closedir
+#define WB_STARTUP_REPAIR fake_startup_repair
+#define WB_STARTUP_WRITE_TOKEN fake_startup_token
 #include "writebroker-server.inc"
+#undef WB_STARTUP_WRITE_TOKEN
+#undef WB_STARTUP_REPAIR
+#undef WB_REPAIR_CLOSEDIR
+#undef WB_REPAIR_READDIR
+#undef WB_REPAIR_FSTATAT
+#undef WB_REPAIR_MAX_DEPTH
+#undef WB_REPAIR_MAX_ENTRIES
+#undef WB_REPAIR_DATA_ROOT
 #undef WB_MENU_PREFIX_ROOT
 #undef WB_MENU_REMOVE_DEPTH
 #undef statfs
@@ -278,6 +346,180 @@ static int menu_remove_request(const char *path)
     close(fd);
     assert(reply.magic == WB_MAGIC);
     return reply.result;
+}
+
+
+static mode_t fixture_mode(const char *path)
+{
+    struct stat status;
+    assert(!lstat(path, &status));
+    return status.st_mode & 07777;
+}
+
+static void permission_repair_tests(void)
+{
+    char forever[1024], prefix[1024], home[1024], cache[1024], locked[1024];
+    char child[1024], executable[1024], private_dir[1024], made[1024];
+    char token_file[1024], outside[1024], link_path[1024], unmanaged[1024];
+    char hardlinked[1024], hardlink_outside[1024], other_device[1024];
+    char legacy_parent[1024], legacy_root[1024], legacy_file[1024], sibling[1024];
+    char store_parent[1024], store_root[1024], store_file[1024];
+    struct wb_permission_repair repair = {0};
+    struct stat status;
+    dev_t device;
+    int data_fd, result;
+
+    snprintf(repair_data_root, sizeof(repair_data_root), "%s/repair-data", directory);
+    snprintf(forever, sizeof(forever), "%s/forever", repair_data_root);
+    snprintf(prefix, sizeof(prefix), "%s/prefix", forever);
+    snprintf(home, sizeof(home), "%s/home", forever);
+    snprintf(cache, sizeof(cache), "%s/radv-shader-cache", forever);
+    snprintf(locked, sizeof(locked), "%s/locked", prefix);
+    snprintf(child, sizeof(child), "%s/child.txt", locked);
+    snprintf(executable, sizeof(executable), "%s/run.exe", locked);
+    snprintf(private_dir, sizeof(private_dir), "%s/private", prefix);
+    snprintf(token_file, sizeof(token_file), "%s/.writebroker-token", forever);
+    snprintf(outside, sizeof(outside), "%s/outside.txt", repair_data_root);
+    snprintf(unmanaged, sizeof(unmanaged), "%s/unmanaged.txt", forever);
+    snprintf(hardlinked, sizeof(hardlinked), "%s/hardlinked", prefix);
+    snprintf(hardlink_outside, sizeof(hardlink_outside), "%s/hardlink-outside", repair_data_root);
+    snprintf(other_device, sizeof(other_device), "%s/other-device", prefix);
+    snprintf(legacy_parent, sizeof(legacy_parent), "%s/homebrew/PPSA99030", repair_data_root);
+    snprintf(legacy_root, sizeof(legacy_root), "%s/wine", legacy_parent);
+    snprintf(legacy_file, sizeof(legacy_file), "%s/prefix/system.reg", legacy_root);
+    snprintf(sibling, sizeof(sibling), "%s/app-file", legacy_parent);
+    snprintf(store_parent, sizeof(store_parent), "%s/prosperostore/previous/PPSA99030",
+             repair_data_root);
+    snprintf(store_root, sizeof(store_root), "%s/wine", store_parent);
+    snprintf(store_file, sizeof(store_file), "%s/home/settings", store_root);
+
+    fixture_put(child, "child");
+    fixture_put(executable, "exec");
+    fixture_mkdirs(private_dir);
+    fixture_mkdirs(home);
+    fixture_mkdirs(cache);
+    fixture_put(token_file, "private token");
+    fixture_put(outside, "outside");
+    fixture_put(unmanaged, "not an allowlisted subtree");
+    fixture_put(hardlinked, "linked");
+    assert(!link(hardlinked, hardlink_outside));
+    fixture_put(other_device, "mounted");
+    fixture_put(legacy_file, "registry");
+    fixture_put(sibling, "immutable sibling");
+    fixture_put(store_file, "settings");
+    snprintf(link_path, sizeof(link_path), "%s/outside-link", locked);
+    assert(!symlink(outside, link_path));
+
+    assert(!chmod(forever, 0555));
+    assert(!chmod(locked, 0555));
+    assert(!chmod(private_dir, 0700));
+    assert(!chmod(child, 0400));
+    assert(!chmod(executable, 0500));
+    assert(!chmod(token_file, 0600));
+    assert(!chmod(outside, 0400));
+    assert(!chmod(unmanaged, 0400));
+    assert(!chmod(hardlinked, 0400));
+    assert(!chmod(other_device, 0400));
+    assert(!chmod(legacy_parent, 0555));
+    assert(!chmod(legacy_file, 0400));
+    assert(!chmod(sibling, 0400));
+    assert(!chmod(store_file, 0400));
+    snprintf(made, sizeof(made), "%s/new", locked);
+    errno = 0;
+    check(mkdir(made, 0700) && (errno == EACCES || errno == EPERM),
+          "locked directory makes the title-like write fail before startup repair");
+
+    inject_other_device = 1;
+    result = repair_all(&repair);
+    inject_other_device = 0;
+    check(!result && !repair.failed && repair.changed >= 8 && repair.skipped >= 3,
+          "production startup repair reports changed, skipped and failed counts");
+    check(fixture_mode(forever) == 0777 && fixture_mode(locked) == 0777 &&
+          fixture_mode(private_dir) == 0777 && fixture_mode(child) == 0666 &&
+          fixture_mode(executable) == 0777,
+          "startup repair makes 0555/0700 directories 0777 and preserves executable files");
+    check(!mkdir(made, 0700), "startup repair permits the failed title step to retry once");
+    check(!lstat(link_path, &status) && S_ISLNK(status.st_mode) &&
+          fixture_mode(outside) == 0400,
+          "startup repair skips an internal symlink without changing its target");
+    check(fixture_mode(hardlinked) == 0400 && fixture_mode(hardlink_outside) == 0400,
+          "startup repair skips multiply-linked regular files");
+    check(fixture_mode(other_device) == 0400,
+          "startup repair skips an entry reported on another device");
+    check(fixture_mode(token_file) == 0600,
+          "startup repair never widens the authentication token");
+    check(fixture_mode(unmanaged) == 0400,
+          "startup repair does not recurse through unknown forever-root children");
+    check(fixture_mode(legacy_parent) == 0777 && fixture_mode(legacy_file) == 0666 &&
+          fixture_mode(sibling) == 0400,
+          "legacy repair changes only the rename parent and recursive wine tree");
+    check(fixture_mode(store_parent) == 0777 && fixture_mode(store_file) == 0666,
+          "store legacy root and rename parent are repaired");
+
+    data_fd = repair_open_data_root(&device);
+    assert(data_fd >= 0);
+    assert(!rmdir(home));
+    assert(!symlink(outside, home));
+    memset(&repair, 0, sizeof(repair));
+    repair.device = device;
+    result = repair_root(data_fd, "forever/home", 1, &repair);
+    check(result < 0 && repair.failed,
+          "startup repair refuses a symlinked fixed root");
+    assert(!unlink(home));
+    fixture_mkdirs(home);
+
+    {
+        char budget[1024], entry[1100];
+        snprintf(budget, sizeof(budget), "%s/budget", prefix);
+        fixture_mkdirs(budget);
+        for (unsigned i = 0; i < 40; i++)
+        {
+            snprintf(entry, sizeof(entry), "%s/link-%02u", budget, i);
+            assert(!symlink(outside, entry));
+        }
+        memset(&repair, 0, sizeof(repair));
+        repair.device = device;
+        result = repair_root(data_fd, "forever/prefix/budget", 1, &repair);
+        check(result == -E2BIG && repair.scanned == TEST_REPAIR_MAX_ENTRIES &&
+              repair.skipped,
+              "visited-entry budget is charged for skipped symlinks");
+    }
+
+    memset(&repair, 0, sizeof(repair));
+    repair.device = device;
+    inject_readdir_error = 1;
+    result = repair_root(data_fd, "forever/radv-shader-cache", 1, &repair);
+    check(result == -EIO && repair.failed,
+          "root readdir error is reported as repair failure");
+    memset(&repair, 0, sizeof(repair));
+    repair.device = device;
+    inject_closedir_error = 1;
+    result = repair_root(data_fd, "forever/radv-shader-cache", 1, &repair);
+    check(result == -EIO && repair.failed,
+          "root closedir error is reported as repair failure");
+
+    {
+        char deep[1024];
+        snprintf(deep, sizeof(deep), "%s/depth", home);
+        fixture_mkdirs(deep);
+        for (unsigned i = 0; i < TEST_REPAIR_MAX_DEPTH + 2; i++)
+        {
+            size_t used = strlen(deep);
+            assert(used + 3 < sizeof(deep));
+            memcpy(deep + used, "/d", 3);
+            fixture_mkdirs(deep);
+        }
+        memset(&repair, 0, sizeof(repair));
+        repair.device = device;
+        result = repair_root(data_fd, "forever/home", 1, &repair);
+        check(result == -E2BIG && repair.failed,
+              "startup repair stops at its production depth bound");
+    }
+    close(data_fd);
+
+    startup_order = 0;
+    check(!broker_prepare_startup() && startup_order == 2,
+          "production broker startup orders repair before token");
 }
 
 static void menu_removal_tests(void)
@@ -690,7 +932,7 @@ static void pool_tests(void)
 int main(void)
 {
     int fd;
-    assert(WB_VERSION == 5);
+    assert(WB_VERSION == 6);
     assert(mkdtemp(directory));
     snprintf(token_path, sizeof(token_path), "%s/token", directory);
     snprintf(writes_path, sizeof(writes_path), "%s/writes", directory);
@@ -701,6 +943,7 @@ int main(void)
     pool_tests();
     protocol_tests();
     menu_removal_tests();
+    permission_repair_tests();
     close_connections();
     client_tests();
     for (unsigned int i = 0; i < BOUNCE_SLOTS; i++)
@@ -711,6 +954,6 @@ int main(void)
         assert(!system(cleanup));
     }
     if (failures) return 1;
-    puts("write broker: concurrent writes/statfs and no-follow fixed-root recursive removal PASS");
+    puts("write broker: concurrent writes/statfs, no-follow removal, device-bounded startup permission repair PASS");
     return 0;
 }

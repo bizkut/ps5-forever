@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FAKE_PROBES 64
+#define FAKE_PROBES 256
 
 struct fake_broker
 {
@@ -110,6 +110,15 @@ int main(void)
     assert(fake.wait_count == 1 && fake.now == PW_WRITEBROKER_POLL_MS);
 
     fake = fresh_fake();
+    fake.probe_limit = 59;
+    fake.probe_results[0] = 0;
+    fake.probe_results[58] = 1;
+    outcome = pw_writebroker_autostart(&fake_ops, &fake);
+    assert(outcome.status == PW_WRITEBROKER_STARTED && !outcome.error);
+    assert(fake.send_count == 1 && fake.probe_count == 59);
+    assert(fake.wait_count == 57 && fake.now == 5700);
+
+    fake = fresh_fake();
     fake.probe_results[0] = 0;
     fake.send_result = PW_WRITEBROKER_SEND_ELFLDR_UNAVAILABLE;
     fake.send_error = ECONNREFUSED;
@@ -140,7 +149,7 @@ int main(void)
     outcome = pw_writebroker_autostart(&fake_ops, &fake);
     assert(outcome.status == PW_WRITEBROKER_TIMEOUT && outcome.error == ETIMEDOUT);
     assert(fake.now == PW_WRITEBROKER_START_MS);
-    assert(fake.probe_count == 31 && fake.wait_count == 30);
+    assert(fake.probe_count == 101 && fake.wait_count == 100);
 
     fake = fresh_fake();
     fake.probe_results[0] = 0;
@@ -149,12 +158,19 @@ int main(void)
     outcome = pw_writebroker_autostart(&fake_ops, &fake);
     assert(outcome.status == PW_WRITEBROKER_TIMEOUT && outcome.error == ETIMEDOUT);
     assert(fake.send_deadline == PW_WRITEBROKER_PROBE_MS + PW_WRITEBROKER_ELFLDR_MS);
-    assert(fake.now == PW_WRITEBROKER_TOTAL_MS);
-    assert(fake.probe_count == 29 && fake.wait_count == 28);
+    assert(fake.now == PW_WRITEBROKER_PROBE_MS + PW_WRITEBROKER_ELFLDR_MS +
+                       PW_WRITEBROKER_START_MS);
+    assert(fake.probe_count == 101 && fake.wait_count == 100);
+
+    {
+        atomic_int claimed = 0;
+        assert(!pw_writebroker_claim_repair_restart(&claimed));
+        assert(pw_writebroker_claim_repair_restart(&claimed) == -EALREADY);
+    }
 
     assert(!strcmp(pw_writebroker_status_name(PW_WRITEBROKER_STARTED), "started"));
     assert(!strcmp(pw_writebroker_status_name(PW_WRITEBROKER_ELFLDR_UNAVAILABLE),
                    "elfldr_unavailable"));
-    puts("write broker autostart: present/start/error, 3-second readiness and 4-second cap PASS");
+    puts("write broker autostart: present/start/error, delayed 5.7-second readiness and 10-second cap PASS");
     return 0;
 }

@@ -309,6 +309,28 @@ static void test_standard_folders(void)
     assert(text_is("blocked/prefix/drive_c/Program Files", "not a folder"));
 }
 
+static void test_permission_message(void)
+{
+    char message[512];
+    assert(forever_permission_error(-EACCES));
+    assert(forever_permission_error(-EPERM));
+    assert(!forever_permission_error(-ENOENT));
+    assert(forever_permission_message(
+               message, sizeof(message),
+               "/data/forever/prefix/drive_c/wineps5-fg.txt",
+               "/data/forever/prefix") > 0);
+    assert(!strcmp(message,
+        "Forever Launcher can't write to /data/forever/prefix/drive_c/wineps5-fg.txt "
+        "(permission denied).\n"
+        "On a PC, use FTP to set /data/forever/prefix and everything in it to permission 777,\n"
+        "then start Forever Launcher again."));
+    assert(!strcmp(forever_setting_permission_message(-EACCES),
+                   "Forever Launcher can't save this setting (permission denied).\n"
+                   "Close and start Forever Launcher again."));
+    assert(forever_setting_permission_message(-EPERM));
+    assert(!forever_setting_permission_message(-EIO));
+}
+
 int main(void)
 {
     snprintf(root, sizeof(root), "/tmp/forever-setup-test-%ld", (long)getpid());
@@ -318,6 +340,7 @@ int main(void)
     test_managed_sync();
     test_wow_config();
     test_standard_folders();
+    test_permission_message();
     char command[300];
     snprintf(command, sizeof(command), "rm -rf %s", root);
     if (system(command)) return 1;

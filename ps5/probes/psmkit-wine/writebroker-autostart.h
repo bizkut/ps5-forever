@@ -4,18 +4,19 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdatomic.h>
 
 #define PW_WRITEBROKER_PORT 9141
 #define PW_WRITEBROKER_ELFLDR_PORT 9021
 #define PW_WRITEBROKER_ELF_MAX_BYTES (1024u * 1024u)
 #define PW_WRITEBROKER_PROBE_MS 200
 #define PW_WRITEBROKER_ELFLDR_MS 1000
-/* Startup waits at most this long. The ELF loader took 3.1-5.7 s to start
- * the broker (runs 206a-207a); ntdll connects lazily and retries, so a later
- * start only sends the first writes through the local path. */
-#define PW_WRITEBROKER_START_MS 3000
+/* Startup waits for the full measured 3.1-5.7 s ELF-loader range, with
+ * margin for the broker's bounded permission traversal before it publishes
+ * its token and accepts clients. */
+#define PW_WRITEBROKER_START_MS 10000
 #define PW_WRITEBROKER_POLL_MS 100
-#define PW_WRITEBROKER_TOTAL_MS 4000
+#define PW_WRITEBROKER_TOTAL_MS 12000
 
 enum pw_writebroker_status
 {
@@ -48,6 +49,13 @@ struct pw_writebroker_outcome
     size_t sent;
     int error;
 };
+
+static inline int pw_writebroker_claim_repair_restart(atomic_int *claimed)
+{
+    int expected = 0;
+    if (!claimed) return -EINVAL;
+    return atomic_compare_exchange_strong(claimed, &expected, 1) ? 0 : -EALREADY;
+}
 
 static inline int64_t pw_writebroker_min_deadline(int64_t first, int64_t second)
 {

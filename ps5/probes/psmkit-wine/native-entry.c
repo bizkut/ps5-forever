@@ -403,6 +403,8 @@ static struct wine_ps5_title_runtime native_runtime = {
 
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE)
 extern int sceSystemServiceLoadExec(const char *, const char *const []);
+static atomic_int forever_broker_repair_restart_claimed;
+static int pw_title_writebroker_restart(void);
 #if !PW_RUNTIME_GPU
 static struct pw_game_wire game_wire;
 static pthread_mutex_t game_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -425,6 +427,9 @@ static atomic_int forever_menu_relaunch_pending;
 static int forever_prefix_init;
 static void forever_say(const char *text);
 static void b1_wait(void);
+static struct pw_writebroker_outcome pw_title_writebroker_autostart(void);
+static int pw_forever_restart_broker(const char *);
+static void pw_forever_permission_stop(const char *, const char *);
 #if !PW_RUNTIME_HEADLESS
 static int pw_writebroker_remove_path(const char *path);
 #endif
@@ -1490,9 +1495,19 @@ void __attribute__((noreturn)) pw_native_exit(int status)
         pw_maintenance_loadexec_game("shutdown complete");
     if (forever_prefix_init)
     {
-        int finished = forever_finish_init(FOREVER_PREFIX), ready = forever_prefix_ready(FOREVER_PREFIX);
-        io_log("forever: first-start prefix setup finished=%d ready=%d status=%d", finished, ready, status);
-        if (ready)
+        int finished = forever_finish_init(FOREVER_PREFIX);
+        int ready, permission_stopped = 0;
+        if (forever_permission_error(finished))
+        {
+            pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
+            permission_stopped = 1;
+        }
+        ready = forever_prefix_ready(FOREVER_PREFIX);
+        io_log("forever: first-start prefix setup finished=%d ready=%d status=%d",
+               finished, ready, status);
+        if (permission_stopped)
+            b1_wait();
+        else if (ready)
         {
             fflush(NULL);
             int result = sceSystemServiceLoadExec("/app0/eboot.bin", NULL);
@@ -1500,10 +1515,11 @@ void __attribute__((noreturn)) pw_native_exit(int status)
         }
         /* Native libc exit SIGSYS-traps on fw 5.50 (below): keep the reason
          * on screen until the user closes the app. */
-        forever_say(ready ? "Setup finished, but Forever Launcher could not restart itself.\n"
-                            "Close Forever Launcher and start it again."
-                          : "Setting up the Windows files did not finish.\n"
-                            "Close Forever Launcher and start it again.");
+        if (!permission_stopped)
+            forever_say(ready ? "Setup finished, but Forever Launcher could not restart itself.\n"
+                                "Close Forever Launcher and start it again."
+                              : "Setting up the Windows files did not finish.\n"
+                                "Close Forever Launcher and start it again.");
         b1_wait();
     }
 #endif
@@ -1704,6 +1720,26 @@ static void forever_say(const char *text)
 #endif
 }
 
+static int pw_forever_restart_broker(const char *failing_path)
+{
+    int result = pw_writebroker_claim_repair_restart(
+        &forever_broker_repair_restart_claimed);
+    if (!result) result = pw_title_writebroker_restart();
+    io_log("forever: permission repair restart path=%s result=%d", failing_path, result);
+    return result;
+}
+
+static void pw_forever_permission_stop(const char *failing_path, const char *repair_root)
+{
+    char message[512];
+    if (forever_permission_message(
+            message, sizeof(message), failing_path, repair_root) < 0)
+        snprintf(message, sizeof(message),
+                 "Forever Launcher can't write to %s (permission denied).",
+                 failing_path);
+    forever_say(message);
+}
+
 /* Every start, before Wine: put the user's data in /data/forever (moving an
  * older in-app prefix there once), write default settings files the user does
  * not have yet, bring the prefix files the app owns up to this version, and
@@ -1721,19 +1757,55 @@ static int pw_forever_start(void)
         { FOREVER_DRIVE_C "/wineps5-hud.txt", FOREVER_HUD_DEFAULT },
         { FOREVER_DRIVE_C "/wineps5-hdr-output.txt", FOREVER_HDR_OUTPUT_DEFAULT },
     };
-    char from[256] = "", message[320];
-    int result = forever_mkdirs(FOREVER_ROOT);
+    char from[256] = "", migration_failure[256] = "", message[512];
+    int broker_repaired = 0, repair, result = forever_mkdirs(FOREVER_ROOT);
 
+    if (forever_permission_error(result))
+    {
+        repair = pw_forever_restart_broker(FOREVER_ROOT);
+        if (!repair)
+        {
+            broker_repaired = 1;
+            result = forever_mkdirs(FOREVER_ROOT);
+        }
+        if (repair || forever_permission_error(result))
+        {
+            pw_forever_permission_stop(FOREVER_ROOT, FOREVER_ROOT);
+            return -1;
+        }
+    }
     if (result)
     {
-        snprintf(message, sizeof(message), "Forever Launcher cannot use " FOREVER_ROOT " (error %d).\n"
-                 "Update ShadowMountPlus to a version that lets apps use /data,\n"
-                 "then start Forever Launcher again.", -result);
+        if (result == -ENOENT || result == -EROFS)
+            snprintf(message, sizeof(message), "Forever Launcher cannot use " FOREVER_ROOT
+                     " (error %d).\nUpdate ShadowMountPlus to a version that lets apps use /data,\n"
+                     "then start Forever Launcher again.", -result);
+        else
+            snprintf(message, sizeof(message), "Could not create " FOREVER_ROOT " (error %d).",
+                     -result);
         forever_say(message);
         return -1;
     }
+
     result = forever_migrate(FOREVER_PREFIX, FOREVER_HOME, FOREVER_SHADER_CACHE, legacy,
                              sizeof(legacy) / sizeof(legacy[0]), from, sizeof(from));
+    if (forever_permission_error(result))
+    {
+        snprintf(migration_failure, sizeof(migration_failure), "%s",
+                 from[0] ? from : FOREVER_ROOT);
+        repair = pw_forever_restart_broker(migration_failure);
+        if (!repair)
+        {
+            broker_repaired = 1;
+            result = forever_migrate(FOREVER_PREFIX, FOREVER_HOME, FOREVER_SHADER_CACHE, legacy,
+                                     sizeof(legacy) / sizeof(legacy[0]), from, sizeof(from));
+        }
+        if (repair || forever_permission_error(result))
+        {
+            pw_forever_permission_stop(migration_failure, migration_failure);
+            return -1;
+        }
+    }
     io_log("forever: migration result=%d from=%s", result, result == 1 ? from : "-");
     if (result < 0)
     {
@@ -1742,13 +1814,37 @@ static int pw_forever_start(void)
         forever_say(message);
         return -1;
     }
-    for (size_t i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i)
-        if ((result = forever_mkdirs(directories[i])))
+    if (result == 1 && !broker_repaired)
+    {
+        repair = pw_forever_restart_broker(FOREVER_ROOT);
+        if (repair)
         {
-            snprintf(message, sizeof(message), "Could not create %s (error %d).", directories[i], -result);
+            pw_forever_permission_stop(FOREVER_ROOT, FOREVER_ROOT);
+            return -1;
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(directories) / sizeof(directories[0]); ++i)
+    {
+        result = forever_mkdirs(directories[i]);
+        if (forever_permission_error(result))
+        {
+            repair = pw_forever_restart_broker(directories[i]);
+            if (!repair) result = forever_mkdirs(directories[i]);
+            if (repair || forever_permission_error(result))
+            {
+                pw_forever_permission_stop(directories[i], FOREVER_ROOT);
+                return -1;
+            }
+        }
+        if (result)
+        {
+            snprintf(message, sizeof(message), "Could not create %s (error %d).",
+                     directories[i], -result);
             forever_say(message);
             return -1;
         }
+    }
 #if PW_RUNTIME_GPU
     if (setenv("MESA_SHADER_CACHE_DIR", FOREVER_SHADER_CACHE, 1)) return -1;
 #endif
@@ -1758,9 +1854,21 @@ static int pw_forever_start(void)
         io_log("forever: the game started without an initialized prefix");
         return -1;
 #else
-        if ((result = forever_begin_init(FOREVER_PREFIX)))
+        result = forever_begin_init(FOREVER_PREFIX);
+        if (forever_permission_error(result))
         {
-            snprintf(message, sizeof(message), "Could not prepare " FOREVER_PREFIX " (error %d).", -result);
+            repair = pw_forever_restart_broker(FOREVER_PREFIX);
+            if (!repair) result = forever_begin_init(FOREVER_PREFIX);
+            if (repair || forever_permission_error(result))
+            {
+                pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
+                return -1;
+            }
+        }
+        if (result)
+        {
+            snprintf(message, sizeof(message), "Could not prepare " FOREVER_PREFIX " (error %d).",
+                     -result);
             forever_say(message);
             return -1;
         }
@@ -1770,32 +1878,94 @@ static int pw_forever_start(void)
         return 0;
 #endif
     }
+
     result = forever_standard_folders(FOREVER_PREFIX);
+    if (forever_permission_error(result))
+    {
+        repair = pw_forever_restart_broker(FOREVER_DRIVE_C);
+        if (!repair) result = forever_standard_folders(FOREVER_PREFIX);
+        if (repair || forever_permission_error(result))
+        {
+            pw_forever_permission_stop(FOREVER_DRIVE_C, FOREVER_PREFIX);
+            return -1;
+        }
+    }
     io_log("forever: standard folders result=%d", result);
     if (result < 0)
     {
-        snprintf(message, sizeof(message), "Could not create the Program Files folders in " FOREVER_DRIVE_C
-                 " (error %d).", -result);
+        snprintf(message, sizeof(message), "Could not create the Program Files folders in "
+                 FOREVER_DRIVE_C " (error %d).", -result);
         forever_say(message);
         return -1;
     }
+
     for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); ++i)
     {
         result = forever_write_if_absent(defaults[i][0], defaults[i][1]);
+        if (forever_permission_error(result))
+        {
+            repair = pw_forever_restart_broker(defaults[i][0]);
+            if (!repair) result = forever_write_if_absent(defaults[i][0], defaults[i][1]);
+            if (repair || forever_permission_error(result))
+            {
+                pw_forever_permission_stop(defaults[i][0], FOREVER_PREFIX);
+                return -1;
+            }
+        }
         io_log("forever: default %s result=%d", defaults[i][0], result);
+        if (result < 0)
+        {
+            snprintf(message, sizeof(message), "Could not write %s (error %d).",
+                     defaults[i][0], -result);
+            forever_say(message);
+            return -1;
+        }
     }
-    result = forever_sync_managed(FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX);
+
+    result = forever_sync_managed(
+        FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX);
+    if (forever_permission_error(result))
+    {
+        repair = pw_forever_restart_broker(FOREVER_PREFIX);
+        if (!repair)
+            result = forever_sync_managed(
+                FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX);
+        if (repair || forever_permission_error(result))
+        {
+            pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
+            return -1;
+        }
+    }
     io_log("forever: app-owned prefix files result=%d", result);
     if (result < 0)
     {
-        snprintf(message, sizeof(message), "Could not update the app's Windows files in " FOREVER_PREFIX
-                 " (error %d).", -result);
+        snprintf(message, sizeof(message), "Could not update the app's Windows files in "
+                 FOREVER_PREFIX " (error %d).", -result);
         forever_say(message);
         return -1;
     }
+
     result = forever_install_wow_config(FOREVER_APP_SHARE, FOREVER_PREFIX);
+    if (forever_permission_error(result))
+    {
+        repair = pw_forever_restart_broker(FOREVER_PREFIX);
+        if (!repair)
+            result = forever_install_wow_config(FOREVER_APP_SHARE, FOREVER_PREFIX);
+        if (repair || forever_permission_error(result))
+        {
+            pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
+            return -1;
+        }
+    }
     io_log("forever: WoW preset Config.wtf %s=%d",
            result < 0 ? "error" : "installed", result < 0 ? -result : result);
+    if (result < 0)
+    {
+        snprintf(message, sizeof(message), "Could not install WoW's Config.wtf in "
+                 FOREVER_PREFIX " (error %d).", -result);
+        forever_say(message);
+        return -1;
+    }
     return 0;
 }
 
@@ -2298,46 +2468,52 @@ static void *pw_forever_menu_remove(void *argument)
 
 int forever_title_menu_action(enum forever_menu_command command, int enabled)
 {
+    const char *permission_message;
     int result;
     pthread_t thread;
     switch (command)
     {
     case FOREVER_MENU_COMMAND_SET_FRAME_GENERATION:
+        result = forever_menu_rewrite_switch(
+            FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
+        permission_message = forever_setting_permission_message(result);
+        if (permission_message) forever_say(permission_message);
 #ifdef FOREVER_MENU_DIAG
-        result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
-        io_log("menu diag action file=" FOREVER_DRIVE_C "/wineps5-fg.txt value=fg=%s result=%d",
+        io_log("menu diag action file=" FOREVER_DRIVE_C
+               "/wineps5-fg.txt value=fg=%s result=%d",
                enabled ? "on" : "off", result);
-        return result;
-#else
-        return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
 #endif
+        return result;
     case FOREVER_MENU_COMMAND_SET_HUD:
+        result = forever_menu_rewrite_switch(
+            FOREVER_DRIVE_C "/wineps5-hud.txt", "hud", enabled);
+        permission_message = forever_setting_permission_message(result);
+        if (permission_message) forever_say(permission_message);
 #ifdef FOREVER_MENU_DIAG
-        result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-hud.txt", "hud", enabled);
-        io_log("menu diag action file=" FOREVER_DRIVE_C "/wineps5-hud.txt value=hud=%s result=%d",
+        io_log("menu diag action file=" FOREVER_DRIVE_C
+               "/wineps5-hud.txt value=hud=%s result=%d",
                enabled ? "on" : "off", result);
-        return result;
-#else
-        return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-hud.txt", "hud", enabled);
 #endif
+        return result;
     case FOREVER_MENU_COMMAND_SET_HDR:
         result = forever_menu_set_wow_hdr(FOREVER_APP_SHARE, FOREVER_PREFIX, enabled);
+        permission_message = forever_setting_permission_message(result);
+        if (permission_message) forever_say(permission_message);
 #ifdef FOREVER_MENU_DIAG
         io_log("menu diag action configs=Config.wtf value=HDROutput=%d result=%d",
                !!enabled, result);
 #endif
         if (result < 0) return result;
-#ifdef FOREVER_MENU_DIAG
         result = forever_menu_rewrite_switch(
             FOREVER_DRIVE_C "/wineps5-hdr-output.txt", "hdr", enabled);
+        permission_message = forever_setting_permission_message(result);
+        if (permission_message) forever_say(permission_message);
+#ifdef FOREVER_MENU_DIAG
         io_log("menu diag action file=" FOREVER_DRIVE_C
                "/wineps5-hdr-output.txt value=hdr=%s result=%d",
                enabled ? "on" : "off", result);
-        return result;
-#else
-        return forever_menu_rewrite_switch(
-            FOREVER_DRIVE_C "/wineps5-hdr-output.txt", "hdr", enabled);
 #endif
+        return result;
     case FOREVER_MENU_COMMAND_REINSTALL:
     case FOREVER_MENU_COMMAND_UNINSTALL:
         if ((result = forever_title_menu_begin_lifetime())) return result;
@@ -2441,6 +2617,63 @@ static int pw_writebroker_transfer(int fd, void *data, size_t size, int sending,
     return 0;
 }
 
+static int pw_writebroker_request_quit(void)
+{
+    struct wb_hello hello = {.magic = WB_MAGIC, .version = WB_VERSION};
+    struct wb_write request = {.magic = WB_QUIT_MAGIC};
+    struct wb_reply reply = {0};
+    int64_t deadline = io_now_ms() + 2000;
+    int fd = -1, token_fd, result = -EIO;
+
+    if ((fd = pw_writebroker_connect_port(PW_WRITEBROKER_PORT, deadline)) < 0)
+        return -errno;
+    token_fd = open(WB_TOKEN_FILE, O_RDONLY);
+    if (token_fd < 0) { result = -errno; goto done; }
+    if (read(token_fd, hello.token, sizeof(hello.token)) != (ssize_t)sizeof(hello.token))
+    {
+        result = -(errno ? errno : EIO);
+        close(token_fd);
+        goto done;
+    }
+    close(token_fd);
+    if (pw_writebroker_transfer(fd, &hello, sizeof(hello), 1, deadline) ||
+        pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline) ||
+        reply.magic != WB_MAGIC || reply.result)
+    {
+        result = reply.magic == WB_MAGIC && reply.result < 0 ? reply.result : -EPROTO;
+        goto done;
+    }
+    result = pw_writebroker_transfer(fd, &request, sizeof(request), 1, deadline) ?
+        -EIO : 0;
+done:
+    if (fd >= 0) close(fd);
+    return result;
+}
+
+static int pw_writebroker_wait_stopped(void)
+{
+    int64_t deadline = io_now_ms() + 2000;
+
+    for (;;)
+    {
+        int64_t now = io_now_ms();
+        int fd;
+        if (now < 0) return -(errno ? errno : EIO);
+        if (now >= deadline) return -ETIMEDOUT;
+        fd = pw_writebroker_connect_port(
+            PW_WRITEBROKER_PORT,
+            pw_writebroker_min_deadline(now + PW_WRITEBROKER_PROBE_MS, deadline));
+        if (fd < 0)
+        {
+            if (errno == ECONNREFUSED) return 0;
+            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE)
+                return -(errno ? errno : EIO);
+        }
+        else close(fd);
+        usleep(PW_WRITEBROKER_POLL_MS * 1000);
+    }
+}
+
 #if !PW_RUNTIME_GPU && !PW_RUNTIME_HEADLESS
 static int pw_writebroker_remove_path(const char *path)
 {
@@ -2504,7 +2737,7 @@ static int pw_writebroker_probe(void *context, int64_t deadline, int *error)
     static int reported;
     struct wb_hello hello = {.magic = WB_MAGIC, .version = WB_VERSION};
     struct wb_reply reply, capabilities;
-    struct wb_write request = {.magic = WB_MENU_CAPS_MAGIC};
+    struct wb_write menu_request = {.magic = WB_MENU_CAPS_MAGIC};
     int fd, token_fd, have_token;
 
     (void)context;
@@ -2522,7 +2755,7 @@ static int pw_writebroker_probe(void *context, int64_t deadline, int *error)
         !pw_writebroker_transfer(fd, &reply, sizeof(reply), 0, deadline))
     {
         if (reply.magic == WB_MAGIC && !reply.result &&
-            !pw_writebroker_transfer(fd, &request, sizeof(request), 1, deadline) &&
+            !pw_writebroker_transfer(fd, &menu_request, sizeof(menu_request), 1, deadline) &&
             !pw_writebroker_transfer(fd, &capabilities, sizeof(capabilities), 0, deadline) &&
             capabilities.magic == WB_MAGIC &&
             capabilities.result == WB_MENU_CAPS_REMOVE)
@@ -2654,7 +2887,7 @@ static int64_t pw_writebroker_now(void *context)
     return io_now_ms();
 }
 
-static void pw_title_writebroker_autostart(void)
+static struct pw_writebroker_outcome pw_title_writebroker_autostart(void)
 {
     static const struct pw_writebroker_ops ops = {
         .now_ms = pw_writebroker_now,
@@ -2662,12 +2895,47 @@ static void pw_title_writebroker_autostart(void)
         .send_elf = pw_writebroker_send_elf,
         .wait_until = pw_writebroker_wait_until,
     };
+    static int identity_reported;
     struct pw_writebroker_outcome outcome = pw_writebroker_autostart(&ops, NULL);
+    if (!identity_reported++)
+        io_log("title write broker client identity=%u:%u effective=%u:%u",
+               (unsigned)getuid(), (unsigned)getgid(),
+               (unsigned)geteuid(), (unsigned)getegid());
     if (outcome.status == PW_WRITEBROKER_PRESENT)
         io_log("title write broker present");
     else
         io_log("title write broker autostart sent=%zu result=%s errno=%d",
                outcome.sent, pw_writebroker_status_name(outcome.status), outcome.error);
+    return outcome;
+}
+
+static int pw_title_writebroker_restart(void)
+{
+    struct pw_writebroker_outcome outcome;
+    int quit = pw_writebroker_request_quit();
+
+    if (!quit)
+    {
+        int stopped = pw_writebroker_wait_stopped();
+        if (stopped)
+        {
+            io_log("title write broker restart stop result=%d", stopped);
+            return stopped;
+        }
+    }
+    else if (quit != -ENOENT && quit != -ECONNREFUSED && quit != -EPIPE &&
+             quit != -ECONNRESET && quit != -EPROTONOSUPPORT && quit != -EPROTO)
+    {
+        io_log("title write broker restart quit result=%d", quit);
+        return quit;
+    }
+    outcome = pw_title_writebroker_autostart();
+    io_log("title write broker restart quit=%d sent=%zu result=%s errno=%d",
+           quit, outcome.sent, pw_writebroker_status_name(outcome.status), outcome.error);
+    if (outcome.status == PW_WRITEBROKER_PRESENT ||
+        outcome.status == PW_WRITEBROKER_STARTED)
+        return 0;
+    return -(outcome.error ? outcome.error : EIO);
 }
 
 #if !PW_RUNTIME_GPU
@@ -2884,6 +3152,14 @@ int main(int argc, char **argv)
            prefix!=NULL,prefix_matches,prefix ? prefix : "(unset)");
     if (!prefix_matches) return 1;
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE)
+    {
+        struct stat user_root;
+        /* An existing stale tree may be unwriteable, so its privileged
+         * repair broker must be available before setup first touches it. */
+        errno = 0;
+        if (!stat(FOREVER_ROOT, &user_root) || errno != ENOENT)
+            pw_title_writebroker_autostart();
+    }
     if (pw_forever_start())
     {
 #if !PW_RUNTIME_GPU
@@ -2891,7 +3167,7 @@ int main(int argc, char **argv)
 #endif
         return 1;
     }
-    /* The broker keeps its token in the user data folder made just above. */
+    /* If this was a genuinely new root, setup made it after the early probe. */
     pw_title_writebroker_autostart();
 #if !PW_RUNTIME_GPU
     pw_title_icon_start();

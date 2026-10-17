@@ -26,6 +26,31 @@
 /* written by the title's wineboot -i as its last step (WINEPS5_PREFIX_INIT=1) */
 #define FOREVER_WINEBOOT_DONE ".wineboot-init-done"
 
+static inline int forever_permission_error(int result)
+{
+    return result == -EACCES || result == -EPERM;
+}
+
+static inline int forever_permission_message(
+    char *message, size_t size, const char *path, const char *repair_root)
+{
+    int length = snprintf(
+        message, size,
+        "Forever Launcher can't write to %s (permission denied).\n"
+        "On a PC, use FTP to set %s and everything in it to permission 777,\n"
+        "then start Forever Launcher again.",
+        path, repair_root);
+    if (length < 0) return -EIO;
+    return (size_t)length < size ? length : -ENAMETOOLONG;
+}
+
+static inline const char *forever_setting_permission_message(int result)
+{
+    return forever_permission_error(result) ?
+        "Forever Launcher can't save this setting (permission denied).\n"
+        "Close and start Forever Launcher again." : NULL;
+}
+
 static inline int forever_exists(const char *path)
 {
     struct stat st;
@@ -54,7 +79,11 @@ static inline int forever_mkdirs(const char *path)
         if (!saved) break;
         *p = saved;
     }
-    return forever_is_dir(path) ? 0 : -ENOTDIR;
+    {
+        struct stat status;
+        if (stat(path, &status)) return -errno;
+        return S_ISDIR(status.st_mode) ? 0 : -ENOTDIR;
+    }
 }
 
 /* The Program Files folders wineboot makes in a new prefix. A prefix whose
@@ -68,12 +97,18 @@ static inline int forever_standard_folders(const char *prefix)
     int made = 0;
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
     {
+        struct stat status;
         if (snprintf(path, sizeof(path), "%s/drive_c/%s", prefix, names[i]) >= (int)sizeof(path))
             return -ENAMETOOLONG;
-        if (forever_is_dir(path)) continue;
-        if (forever_exists(path)) return -ENOTDIR;
+        if (!stat(path, &status))
+        {
+            if (S_ISDIR(status.st_mode)) continue;
+            return -ENOTDIR;
+        }
+        if (errno != ENOENT) return -errno;
         if (mkdir(path, 0777) && errno != EEXIST) return -errno;
-        if (!forever_is_dir(path)) return -ENOTDIR;
+        if (stat(path, &status)) return -errno;
+        if (!S_ISDIR(status.st_mode)) return -ENOTDIR;
         ++made;
     }
     return made;
@@ -105,7 +140,9 @@ static inline int forever_write_file(const char *path, const void *data, size_t 
 /* 1 written, 0 already there, -errno failure: the user's own file always wins. */
 static inline int forever_write_if_absent(const char *path, const char *text)
 {
-    if (forever_exists(path)) return 0;
+    struct stat status;
+    if (!stat(path, &status)) return 0;
+    if (errno != ENOENT) return -errno;
     int error = forever_write_file(path, text, strlen(text));
     return error ? error : 1;
 }
@@ -250,8 +287,12 @@ static inline int forever_migrate(const char *prefix, const char *home, const ch
                                   char *from, size_t from_size)
 {
     char legacy_prefix[1024], legacy_home[1024], legacy_cache[1024], probe[1100];
-    if (snprintf(probe, sizeof(probe), "%s/system.reg", prefix) >= (int)sizeof(probe)) return -ENAMETOOLONG;
-    if (forever_exists(probe)) return 0;
+    struct stat status;
+    if (from && from_size) from[0] = 0;
+    if (snprintf(probe, sizeof(probe), "%s/system.reg", prefix) >= (int)sizeof(probe))
+        return -ENAMETOOLONG;
+    if (!stat(probe, &status)) return 0;
+    if (errno != ENOENT) return -errno;
     for (size_t i = 0; i < legacy_count; ++i)
     {
         const char *slash = strrchr(legacy_roots[i], '/');
@@ -259,15 +300,23 @@ static inline int forever_migrate(const char *prefix, const char *home, const ch
         snprintf(legacy_home, sizeof(legacy_home), "%s/home", legacy_roots[i]);
         snprintf(legacy_cache, sizeof(legacy_cache), "%.*s/radv-shader-cache",
                  slash ? (int)(slash - legacy_roots[i]) : 0, legacy_roots[i]);
+        if (from) snprintf(from, from_size, "%s", legacy_roots[i]);
         snprintf(probe, sizeof(probe), "%s/system.reg", legacy_prefix);
-        if (!forever_exists(probe)) continue;
+        if (stat(probe, &status))
+        {
+            if (errno == ENOENT) { if (from && from_size) from[0] = 0; continue; }
+            return -errno;
+        }
+        /* Move the prefix last: system.reg is the completion marker checked
+         * above, so a permission failure moving HOME/cache remains retryable. */
+        if (forever_is_dir(legacy_cache) && rename(legacy_cache, cache) &&
+            errno != ENOTEMPTY && errno != EEXIST)
+            return -errno;
+        if (forever_is_dir(legacy_home) && rename(legacy_home, home) &&
+            errno != ENOTEMPTY && errno != EEXIST)
+            return -errno;
         /* rename() replaces an empty destination directory left by a failed start. */
         if (rename(legacy_prefix, prefix)) return -errno;
-        if (forever_is_dir(legacy_home) && rename(legacy_home, home) && errno != ENOTEMPTY && errno != EEXIST)
-            return -errno;
-        if (forever_is_dir(legacy_cache) && rename(legacy_cache, cache) && errno != ENOTEMPTY && errno != EEXIST)
-            return -errno;
-        if (from) snprintf(from, from_size, "%s", legacy_roots[i]);
         return 1;
     }
     return 0;
@@ -424,7 +473,11 @@ static inline int forever_install_wow_config(const char *share, const char *pref
             length >= (int)sizeof(wtf)) return -ENAMETOOLONG;
         if ((length = snprintf(config, sizeof(config), "%s/Config.wtf", wtf)) < 0 ||
             length >= (int)sizeof(config)) return -ENAMETOOLONG;
-        if (forever_exists(config)) continue;
+        {
+            struct stat status;
+            if (!stat(config, &status)) continue;
+            if (errno != ENOENT) return -errno;
+        }
         if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
             length >= (int)sizeof(source)) return -ENAMETOOLONG;
         error = forever_mkdirs(wtf);

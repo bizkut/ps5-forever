@@ -52,6 +52,10 @@ client = args.wine / 'dlls/ntdll/unix/file.c'
 server_names = ('transfer', 'discard', 'menu_remove_index', 'menu_remove_path_allowed',
                 'menu_open_child_directory', 'menu_open_prefix_root', 'menu_open_remove_parent',
                 'menu_remove_at', 'menu_remove_tree', 'serve_menu_remove', 'serve_write',
+                'repair_open_data_root', 'repair_open_relative_directory',
+                'repair_apply_mode', 'repair_scan_directory', 'repair_entry_at',
+                'repair_root', 'repair_all',
+                'broker_prepare_startup',
                 'read_whole', 'install_icon', 'serve_statfs', 'serve')
 client_names = ('bounce_acquire', 'bounce_release', 'broker_transfer', 'broker_connect',
                 'broker_get_connection', 'broker_query_fs', 'broker_request', 'broker_pwrite',
@@ -60,6 +64,11 @@ args.output.parent.mkdir(parents=True, exist_ok=True)
 for filename, path, names in (('writebroker-server.inc', broker, server_names),
                               ('writebroker-client.inc', client, client_names)):
     functions = '\n\n'.join(definition(path, name) for name in names) + '\n'
+    if path == broker:
+        source = path.read_text()
+        repair_start = source.index('struct wb_permission_repair\n{')
+        repair_end = source.index('static int write_token', repair_start)
+        functions = source[repair_start:repair_end] + functions
     if path == client:
         source = path.read_text()
         bounce_start = source.index('#define BOUNCE_SIZE')

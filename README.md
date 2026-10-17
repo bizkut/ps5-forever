@@ -22,6 +22,13 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
+## Changes in 01.000.013
+
+- The write broker now repairs stale root-owned permissions in
+  `/data/forever` and older install locations before it starts serving the
+  launcher. Repair is limited to fixed launcher-data roots and does not follow
+  symbolic links or change hard-linked files.
+
 ## Changes in 01.000.012
 
 - Fixes WoW freezing on the loading screen about half the time at start (a
@@ -238,7 +245,14 @@ delete `/data/forever` to remove Battle.net, WoW and your settings.
 
 ## Troubleshooting
 
-- **"Forever Launcher cannot use /data"**: update ShadowMountPlus to a version that lets apps use `/data`.
+- **"Forever Launcher can't write to ..." (permission denied)**: 01.000.013
+  restarts the write broker once so it can repair the fixed launcher-data
+  trees, waits for it to become ready, then retries the failed step once. If
+  the message remains, close the app and, on a PC, use FTP to set
+  `/data/forever` and everything in it to permission `777`; then start Forever
+  Launcher again.
+- **"Forever Launcher cannot use /data" (error 2 or 30)**: `/data` is missing
+  or read-only. Update ShadowMountPlus to a version that lets apps use `/data`.
 - **Battle.net sign-in fails**: use the email code and make sure an authenticator is
   enabled on your account. Third-party sign-in is not supported.
 - **Battle.net reports only about 17 GB free**: Windows disk-space queries use the
