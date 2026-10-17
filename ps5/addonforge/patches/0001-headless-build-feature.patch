@@ -1,0 +1,125 @@
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 4582f2d..c88c62a 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -5,28 +5,51 @@ description = "Lightweight, telemetry-free addon manager for WoW: Forever"
+ authors = ["Pocket Forge Studios"]
+ edition = "2021"
+ 
++[features]
++default = ["gui"]
++gui = [
++    "dep:base64",
++    "dep:image",
++    "dep:image-blp",
++    "dep:tauri",
++    "dep:tauri-build",
++    "dep:tauri-plugin-dialog",
++    "dep:tauri-plugin-opener",
++]
++headless = []
++
++[[bin]]
++name = "addonforge"
++path = "src/main.rs"
++required-features = ["gui"]
++
++[[bin]]
++name = "addonforge-core"
++path = "src/bin/addonforge-core.rs"
++required-features = ["headless"]
++
+ [lib]
+ name = "addonforge_lib"
+ crate-type = ["staticlib", "cdylib", "rlib"]
+ 
+ [build-dependencies]
+-tauri-build = { version = "2", features = [] }
++tauri-build = { version = "2", features = [], optional = true }
+ 
+ [dependencies]
+-tauri = { version = "2", features = [] }
+-tauri-plugin-opener = "2"
+-tauri-plugin-dialog = "2"
++tauri = { version = "2", features = [], optional = true }
++tauri-plugin-opener = { version = "2", optional = true }
++tauri-plugin-dialog = { version = "2", optional = true }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "io-util"] }
++tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "io-util", "net", "time"] }
+ futures-util = "0.3"
+ zip = { version = "2", default-features = false, features = ["deflate"] }
+ dirs = "5"
+ anyhow = "1"
+-image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "gif"] }
+-image-blp = "1"
+-base64 = "0.22"
++image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "gif"], optional = true }
++image-blp = { version = "1", optional = true }
++base64 = { version = "0.22", optional = true }
+ 
+ [profile.release]
+ opt-level = "s"
+diff --git a/src-tauri/build.rs b/src-tauri/build.rs
+index 1d3796f..ab2cd29 100644
+--- a/src-tauri/build.rs
++++ b/src-tauri/build.rs
+@@ -1,6 +1,9 @@
+ fn main() {
+-    // Refresh the embedded Windows resources when only the artwork changes.
+-    println!("cargo:rerun-if-changed=icons/icon.ico");
+-    println!("cargo:rerun-if-changed=icons/icon.png");
+-    tauri_build::build()
++    #[cfg(feature = "gui")]
++    {
++        // Refresh the embedded Windows resources when only the artwork changes.
++        println!("cargo:rerun-if-changed=icons/icon.ico");
++        println!("cargo:rerun-if-changed=icons/icon.png");
++        tauri_build::build()
++    }
+ }
+diff --git a/src-tauri/src/sources/wago.rs b/src-tauri/src/sources/wago.rs
+index 0c8407b..8f1dda1 100644
+--- a/src-tauri/src/sources/wago.rs
++++ b/src-tauri/src/sources/wago.rs
+@@ -7,6 +7,7 @@
+ use super::Remote;
+ use serde_json::Value;
+ 
++#[cfg(feature = "gui")]
+ pub const KEY_URL: &str = "https://addons.wago.io/account/apikeys";
+ 
+ pub async fn resolve(
+@@ -29,7 +30,11 @@ pub async fn resolve(
+     let v: Value = resp.error_for_status()?.json().await?;
+     let recent = &v["recent_release"];
+     // Stable first unless the user allows beta builds; alpha only as a last resort.
+-    let order: &[&str] = if prerelease { &["beta", "stable", "alpha"] } else { &["stable", "beta", "alpha"] };
++    let order: &[&str] = if prerelease {
++        &["beta", "stable", "alpha"]
++    } else {
++        &["stable", "beta", "alpha"]
++    };
+     let (channel, rel) = order
+         .iter()
+         .map(|s| (*s, &recent[*s]))
+@@ -46,8 +51,15 @@ pub async fn resolve(
+         .ok_or_else(|| anyhow::anyhow!("Wago release has no download link"))?
+         .to_string();
+     let patch = rel["patch"].as_str().unwrap_or("");
+-    let forever = if patch.is_empty() { None } else { Some(patch.starts_with("1.60")) };
+-    let safe: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
++    let forever = if patch.is_empty() {
++        None
++    } else {
++        Some(patch.starts_with("1.60"))
++    };
++    let safe: String = version
++        .chars()
++        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
++        .collect();
+     Ok(Remote {
+         version,
+         download_url,

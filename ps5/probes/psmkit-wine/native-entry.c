@@ -14,6 +14,8 @@
 #include "forever-paths.h"
 #include "forever-setup.h"
 #include "forever-menu-settings.h"
+#include "../../title/addonforge-client.h"
+#include "../../title/addonforge-security.h"
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
 #include "title-icon.h"
@@ -1831,6 +1833,401 @@ int forever_title_menu_load(struct forever_menu_values *values)
         &values->frame_generation, &values->hdr, &values->hud);
 }
 
+void title_desktop_addons_snapshot(const struct forever_addon_snapshot *);
+void title_desktop_addons_error(const char *);
+static int pw_writebroker_connect_port(unsigned int, int64_t);
+
+struct forever_addons_request
+{
+    unsigned generation;
+    enum forever_menu_command command;
+    enum forever_addon_channel channel;
+    enum forever_addon_tab tab;
+    char key[FOREVER_ADDON_KEY_BYTES];
+};
+
+static struct
+{
+    pthread_mutex_t lock;
+    pthread_mutex_t lifecycle_lock;
+    struct forever_addons_request request;
+    struct forever_addon_snapshot snapshot;
+    char response[ADDONFORGE_RESPONSE_BYTES];
+    char token[65];
+    char control_token[65];
+    unsigned generation;
+    int open, busy, stopping, available;
+} forever_addons = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+    .lifecycle_lock = PTHREAD_MUTEX_INITIALIZER,
+};
+
+static int forever_addons_urandom(uint8_t *buffer, size_t bytes)
+{
+    size_t used = 0;
+    int fd, result = 0;
+    if ((fd = open("/dev/urandom", O_RDONLY)) < 0)
+        return errno ? -errno : -EIO;
+    while (used < bytes)
+    {
+        ssize_t count = read(fd, buffer + used, bytes - used);
+        if (count > 0) used += (size_t)count;
+        else if (count < 0 && errno == EINTR) continue;
+        else
+        {
+            result = count < 0 && errno ? -errno : -EIO;
+            break;
+        }
+    }
+    close(fd);
+    return result;
+}
+
+static int forever_addons_new_secret(char output[65])
+{
+    return forever_entropy_hex(output, 65, 32, forever_addons_urandom);
+}
+
+static int forever_addons_control_secret_init(void)
+{
+    int error = forever_addons_new_secret(forever_addons.control_token);
+    if (error) return error;
+    if (setenv("FOREVER_ADDONS_CONTROL_TOKEN", forever_addons.control_token, 1))
+    {
+        memset(forever_addons.control_token, 0, sizeof(forever_addons.control_token));
+        return -errno;
+    }
+    return 0;
+}
+
+static int forever_addons_control(const char *command)
+{
+    char response[32] = {0}, wire[256];
+    size_t used = 0;
+    int fd = -1, error = 0, length;
+    int64_t deadline;
+    unsigned timeout_ms = !strncmp(command, "STOP", 4) ? 750000 : 10000;
+    length = snprintf(wire, sizeof(wire), "AUTH %s %s\n",
+                      forever_addons.control_token, command);
+    if (length < 0 || (size_t)length >= sizeof(wire)) return -EFBIG;
+    for (unsigned attempt = 0; attempt < 100; attempt++)
+    {
+        deadline = io_now_ms() + 1000;
+        fd = pw_writebroker_connect_port(ADDONFORGE_CONTROL_PORT, deadline);
+        if (fd >= 0) break;
+        error = errno ? errno : ECONNREFUSED;
+        usleep(100000);
+    }
+    if (fd < 0) return -error;
+    deadline = io_now_ms() + timeout_ms;
+    if (io_transfer(fd, wire, (size_t)length, 1, deadline))
+    {
+        error = errno ? errno : EIO;
+        close(fd);
+        return -error;
+    }
+    while (used < sizeof(response) - 1)
+    {
+        struct pollfd wait = {.fd = fd, .events = POLLIN};
+        int64_t remaining = deadline - io_now_ms();
+        int ready;
+        ssize_t count;
+        if (remaining <= 0) { error = ETIMEDOUT; break; }
+        ready = poll(&wait, 1, remaining > INT_MAX ? INT_MAX : (int)remaining);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready <= 0) { error = ready ? errno : ETIMEDOUT; break; }
+        count = recv(fd, response + used, sizeof(response) - 1 - used, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { if (count < 0) error = errno; break; }
+        used += (size_t)count;
+        if (memchr(response, '\n', used)) break;
+    }
+    close(fd);
+    response[used] = 0;
+    if (error) return -error;
+    if (strcmp(response, "OK\n")) return -EIO;
+    return 0;
+}
+
+static int forever_addons_current(unsigned generation)
+{
+    int current;
+    pthread_mutex_lock(&forever_addons.lock);
+    current = forever_addons.open && forever_addons.generation == generation;
+    pthread_mutex_unlock(&forever_addons.lock);
+    return current;
+}
+
+static void forever_addons_publish_error(unsigned generation, int error, const char *detail)
+{
+    char message[FOREVER_MENU_STATUS_BYTES];
+    if (!forever_addons_current(generation)) return;
+    if (detail && *detail)
+        snprintf(message, sizeof(message), "%s", detail);
+    else if (error == -ETIMEDOUT)
+        snprintf(message, sizeof(message), "The add-on service did not answer in time.");
+    else
+        snprintf(message, sizeof(message), "Could not reach the add-on service (error %d).",
+                 error < 0 ? -error : error);
+    io_log("forever addons error generation=%u result=%d detail=%.160s",
+           generation, error, detail ? detail : "");
+    title_desktop_addons_error(message);
+}
+
+static int forever_addons_command(
+    struct addonforge_client *client, const char *command, const char *arguments,
+    unsigned timeout_ms, char *plain, size_t plain_size)
+{
+    int error;
+    client->timeout_ms = timeout_ms;
+    error = addonforge_http_command(client, command, arguments,
+                                    forever_addons.response, sizeof(forever_addons.response));
+    if (error) return error;
+    return addonforge_response_error(forever_addons.response, plain, plain_size);
+}
+
+static int forever_addons_select_channel(
+    struct addonforge_client *client, enum forever_addon_channel channel,
+    char *plain, size_t plain_size)
+{
+    const char *arguments = channel == FOREVER_ADDON_FINAL ?
+        "{\"path\":\"C:\\\\Program Files (x86)\\\\World of Warcraft\\\\_forever_\"}" :
+        "{\"path\":\"C:\\\\Program Files (x86)\\\\World of Warcraft\\\\_classic_beta_\"}";
+    return forever_addons_command(client, "set_install_path", arguments, 15000,
+                                  plain, plain_size);
+}
+
+static int forever_addons_refresh(
+    struct addonforge_client *client, enum forever_addon_tab tab,
+    char *plain, size_t plain_size)
+{
+    static const struct
+    {
+        const char *command, *arguments;
+        unsigned timeout_ms;
+    } requests[FOREVER_ADDON_TAB_COUNT] = {
+        {"check_updates", "{}", 180000},
+        {"check_updates", "{}", 180000},
+        {"catalog_list", "{\"refresh\":false}", 30000},
+        {"bundles", "{}", 30000},
+    };
+    int error = forever_addons_command(
+        client, requests[tab].command, requests[tab].arguments,
+        requests[tab].timeout_ms, plain, plain_size);
+    if (error) return error;
+    return addonforge_parse_snapshot(tab, forever_addons.response,
+                                     &forever_addons.snapshot, plain, plain_size);
+}
+
+static int forever_addons_safe_key(const char *key)
+{
+    size_t length;
+    if (!key || !(length = strnlen(key, FOREVER_ADDON_KEY_BYTES)) ||
+        length == FOREVER_ADDON_KEY_BYTES) return 0;
+    for (size_t i = 0; i < length; i++)
+        if (!((key[i] >= 'a' && key[i] <= 'z') ||
+              (key[i] >= 'A' && key[i] <= 'Z') ||
+              (key[i] >= '0' && key[i] <= '9') ||
+              strchr("._-:/", key[i]))) return 0;
+    return 1;
+}
+
+static int forever_addons_mutate(
+    struct addonforge_client *client, const struct forever_addons_request *request,
+    char *plain, size_t plain_size)
+{
+    char arguments[FOREVER_ADDON_KEY_BYTES + 64];
+    const char *command, *key = request->key;
+    int length;
+    if (request->command == FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL)
+        return forever_addons_command(client, "update_all", "{}", 600000, plain, plain_size);
+    if (!forever_addons_safe_key(key)) return -EINVAL;
+    switch (request->command)
+    {
+    case FOREVER_MENU_COMMAND_ADDONS_INSTALL:
+        if (strncmp(key, "cat:", 4)) return -EINVAL;
+        command = "install_catalog";
+        length = snprintf(arguments, sizeof(arguments), "{\"id\":\"%s\"}", key + 4);
+        break;
+    case FOREVER_MENU_COMMAND_ADDONS_UPDATE:
+        command = "update_package";
+        length = snprintf(arguments, sizeof(arguments), "{\"key\":\"%s\"}", key);
+        break;
+    case FOREVER_MENU_COMMAND_ADDONS_REMOVE:
+        command = "remove_package";
+        length = snprintf(arguments, sizeof(arguments), "{\"key\":\"%s\"}", key);
+        break;
+    case FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK:
+        if (strncmp(key, "starter:", 8)) return -EINVAL;
+        command = "install_bundle";
+        length = snprintf(arguments, sizeof(arguments), "{\"id\":\"%s\"}", key + 8);
+        break;
+    default:
+        return 0;
+    }
+    if (length < 0 || (size_t)length >= sizeof(arguments)) return -EFBIG;
+    return forever_addons_command(client, command, arguments, 600000, plain, plain_size);
+}
+
+static void *forever_addons_worker(void *unused)
+{
+    struct forever_addons_request request;
+    struct addonforge_client client = {
+        .port = ADDONFORGE_CORE_PORT, .token = forever_addons.token, .timeout_ms = 1000};
+    char plain[FOREVER_MENU_STATUS_BYTES] = {0}, control[160];
+    int error = 0;
+    (void)unused;
+    pthread_mutex_lock(&forever_addons.lock);
+    request = forever_addons.request;
+    pthread_mutex_unlock(&forever_addons.lock);
+
+    if (request.command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
+    {
+        snprintf(control, sizeof(control), "START %s", forever_addons.token);
+        pthread_mutex_lock(&forever_addons.lifecycle_lock);
+        if (!forever_addons_current(request.generation))
+            error = -ECANCELED;
+        else
+            error = forever_addons_control(control);
+        if (!error && !forever_addons_current(request.generation))
+        {
+            int stop_error = forever_addons_control("STOP");
+            error = stop_error ? stop_error : -ECANCELED;
+        }
+        pthread_mutex_unlock(&forever_addons.lifecycle_lock);
+        if (error) goto done;
+        for (unsigned attempt = 0; attempt < 60; attempt++)
+        {
+            if (!forever_addons_current(request.generation))
+            {
+                pthread_mutex_lock(&forever_addons.lifecycle_lock);
+                error = forever_addons_control("STOP");
+                pthread_mutex_unlock(&forever_addons.lifecycle_lock);
+                if (!error) error = -ECANCELED;
+                goto done;
+            }
+            if (!(error = addonforge_http_health(&client))) break;
+            usleep(250000);
+        }
+        if (error) goto done;
+        io_log("forever addons core ready generation=%u port=%u",
+               request.generation, ADDONFORGE_CORE_PORT);
+    }
+    if ((error = forever_addons_select_channel(
+             &client, request.channel, plain, sizeof(plain)))) goto done;
+    if (request.command != FOREVER_MENU_COMMAND_ADDONS_OPEN &&
+        request.command != FOREVER_MENU_COMMAND_ADDONS_REFRESH &&
+        (error = forever_addons_mutate(&client, &request, plain, sizeof(plain))))
+        goto done;
+    if ((error = forever_addons_refresh(&client, request.tab, plain, sizeof(plain)))) goto done;
+    if (forever_addons_current(request.generation))
+    {
+        title_desktop_addons_snapshot(&forever_addons.snapshot);
+        io_log("forever addons result generation=%u command=%d channel=%d tab=%d rows=%zu",
+               request.generation, request.command, request.channel, request.tab,
+               forever_addons.snapshot.count);
+    }
+done:
+    if (error && error != -ECANCELED)
+        forever_addons_publish_error(request.generation, error, plain);
+    pthread_mutex_lock(&forever_addons.lock);
+    forever_addons.busy = 0;
+    pthread_mutex_unlock(&forever_addons.lock);
+    return NULL;
+}
+
+static void *forever_addons_stop_worker(void *unused)
+{
+    int error;
+    (void)unused;
+    pthread_mutex_lock(&forever_addons.lifecycle_lock);
+    error = forever_addons_control("STOP");
+    pthread_mutex_unlock(&forever_addons.lifecycle_lock);
+    io_log("forever addons core stop result=%d", error);
+    pthread_mutex_lock(&forever_addons.lock);
+    memset(forever_addons.token, 0, sizeof(forever_addons.token));
+    forever_addons.stopping = 0;
+    pthread_mutex_unlock(&forever_addons.lock);
+    return NULL;
+}
+
+int forever_title_addons_action(
+    enum forever_menu_command command, enum forever_addon_channel channel,
+    enum forever_addon_tab tab, const char *key)
+{
+    pthread_t thread;
+    int result;
+    if (!forever_addons.available)
+    {
+        if (command == FOREVER_MENU_COMMAND_ADDONS_CLOSE) return 0;
+        title_desktop_addons_error("Add-ons are unavailable on this console");
+        return -ENOTSUP;
+    }
+    if (command == FOREVER_MENU_COMMAND_ADDONS_CLOSE)
+    {
+        pthread_mutex_lock(&forever_addons.lock);
+        forever_addons.open = 0;
+        forever_addons.generation++;
+        if (forever_addons.stopping)
+        {
+            pthread_mutex_unlock(&forever_addons.lock);
+            return 0;
+        }
+        forever_addons.stopping = 1;
+        pthread_mutex_unlock(&forever_addons.lock);
+        result = pthread_create(&thread, NULL, forever_addons_stop_worker, NULL);
+        if (result)
+        {
+            pthread_mutex_lock(&forever_addons.lock);
+            forever_addons.stopping = 0;
+            pthread_mutex_unlock(&forever_addons.lock);
+            return -result;
+        }
+        pthread_detach(thread);
+        return 0;
+    }
+    if (tab < FOREVER_ADDON_INSTALLED || tab >= FOREVER_ADDON_TAB_COUNT ||
+        channel < FOREVER_ADDON_CLASSIC_BETA || channel > FOREVER_ADDON_FINAL)
+        return -EINVAL;
+    pthread_mutex_lock(&forever_addons.lock);
+    if (forever_addons.busy || forever_addons.stopping)
+    {
+        pthread_mutex_unlock(&forever_addons.lock);
+        return -EBUSY;
+    }
+    if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
+    {
+        result = forever_addons_new_secret(forever_addons.token);
+        if (result)
+        {
+            pthread_mutex_unlock(&forever_addons.lock);
+            return result;
+        }
+        forever_addons.open = 1;
+        forever_addons.generation++;
+    }
+    else if (!forever_addons.open)
+    {
+        pthread_mutex_unlock(&forever_addons.lock);
+        return -ESRCH;
+    }
+    forever_addons.request = (struct forever_addons_request){
+        .generation = forever_addons.generation,
+        .command = command, .channel = channel, .tab = tab};
+    if (key) snprintf(forever_addons.request.key, sizeof(forever_addons.request.key), "%s", key);
+    forever_addons.busy = 1;
+    result = pthread_create(&thread, NULL, forever_addons_worker, NULL);
+    if (result)
+    {
+        forever_addons.busy = 0;
+        if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN) forever_addons.open = 0;
+    }
+    pthread_mutex_unlock(&forever_addons.lock);
+    if (result) return -result;
+    pthread_detach(thread);
+    return 0;
+}
+
 static void *pw_forever_menu_remove(void *argument)
 {
     enum forever_menu_command command = (enum forever_menu_command)(uintptr_t)argument;
@@ -2506,6 +2903,14 @@ int main(int argc, char **argv)
     installer = !forever_prefix_init && stat(PW_RUNTIME_LAUNCHER_UNIX, &startup_file) != 0;
     if (installer && stat(PW_RUNTIME_INSTALLER_UNIX, &startup_file) && b1_download_installer())
         b1_wait();
+#if !PW_RUNTIME_HEADLESS
+    if (!forever_prefix_init && !installer)
+    {
+        result = forever_addons_control_secret_init();
+        forever_addons.available = !result;
+        io_log("forever addons control entropy result=%d source=urandom", result);
+    }
+#endif
 #endif
     errno=0; result=pw_duplicate_bridge_init(duplicate_channel); saved_errno=errno;
     io_log("psmkit-wine startup stage=dup_bridge result=%d errno=%d send_fd=%d receive_fd=%d",

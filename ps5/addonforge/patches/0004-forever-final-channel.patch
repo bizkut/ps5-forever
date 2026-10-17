@@ -1,0 +1,209 @@
+diff --git a/src-tauri/src/wow.rs b/src-tauri/src/wow.rs
+index b8fc785..8c1a112 100644
+--- a/src-tauri/src/wow.rs
++++ b/src-tauri/src/wow.rs
+@@ -28,6 +28,7 @@ pub struct WowInstall {
+ pub fn product_flavor(product: &str) -> (&'static str, String) {
+     match product {
+         "wow_classic_beta" => ("forever", "WoW: Forever (beta)".into()),
++        "wowf" => ("forever", "WoW: Forever".into()),
+         "wow" => ("other", "Retail".into()),
+         "wow_classic_era" => ("other", "Classic Era".into()),
+         "wow_anniversary" => ("other", "Anniversary".into()),
+@@ -39,9 +40,13 @@ pub fn product_flavor(product: &str) -> (&'static str, String) {
+ fn read_flavor_info(product_dir: &Path) -> Option<String> {
+     let text = fs::read_to_string(product_dir.join(".flavor.info")).ok()?;
+     // Format: "Product Flavor!STRING:0\nwow_classic_beta\n"
+-    text.lines().nth(1).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
++    text.lines()
++        .nth(1)
++        .map(|s| s.trim().to_string())
++        .filter(|s| !s.is_empty())
+ }
+ 
++#[cfg(any(feature = "gui", test))]
+ /// True when ForeverSVFix (a beta SavedVariables workaround tool) is set up
+ /// on this install: it keeps `WTF\ForeverSVFix\` and puts a `ForeverSVFixData`
+ /// link inside each addon it patched. Updating an addon replaces its folder,
+@@ -97,24 +102,17 @@ const ROOT_PATTERNS: &[&str] = &[
+     "Battle.net\\World of Warcraft",
+ ];
+ 
+-/// Scan the usual places for `World of Warcraft\_*_` product folders.
+-pub fn find_installs() -> Vec<WowInstall> {
++/// Scan supplied `World of Warcraft` roots for product folders.
++pub fn find_installs_in_roots(roots: &[PathBuf]) -> Vec<WowInstall> {
+     let mut found = Vec::new();
+-    for letter in b'C'..=b'Z' {
+-        let drive = format!("{}:\\", letter as char);
+-        if !Path::new(&drive).is_dir() {
+-            continue;
+-        }
+-        for pat in ROOT_PATTERNS {
+-            let root = PathBuf::from(&drive).join(pat);
+-            let Ok(rd) = fs::read_dir(&root) else { continue };
+-            for entry in rd.flatten() {
+-                let p = entry.path();
+-                let name = entry.file_name().to_string_lossy().to_string();
+-                if p.is_dir() && name.starts_with('_') && name.ends_with('_') {
+-                    if let Some(i) = describe_install(&p) {
+-                        found.push(i);
+-                    }
++    for root in roots {
++        let Ok(rd) = fs::read_dir(root) else { continue };
++        for entry in rd.flatten() {
++            let p = entry.path();
++            let name = entry.file_name().to_string_lossy().to_string();
++            if p.is_dir() && name.starts_with('_') && name.ends_with('_') {
++                if let Some(i) = describe_install(&p) {
++                    found.push(i);
+                 }
+             }
+         }
+@@ -129,6 +127,23 @@ pub fn find_installs() -> Vec<WowInstall> {
+     found
+ }
+ 
++/// Scan the usual places for `World of Warcraft\_*_` product folders.
++pub fn find_installs() -> Vec<WowInstall> {
++    let mut roots = Vec::new();
++    for letter in b'C'..=b'Z' {
++        let drive = format!("{}:\\", letter as char);
++        if !Path::new(&drive).is_dir() {
++            continue;
++        }
++        roots.extend(
++            ROOT_PATTERNS
++                .iter()
++                .map(|pat| PathBuf::from(&drive).join(pat)),
++        );
++    }
++    find_installs_in_roots(&roots)
++}
++
+ #[derive(Serialize, Clone, Debug, Default)]
+ pub struct AddonFolder {
+     pub folder: String,
+@@ -200,13 +215,19 @@ pub fn clean_title(raw: &str) -> String {
+ }
+ 
+ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+-    let Ok(bytes) = fs::read(path) else { return false };
++    let Ok(bytes) = fs::read(path) else {
++        return false;
++    };
+     let text = String::from_utf8_lossy(&bytes);
+     let text = text.trim_start_matches('\u{feff}');
+     for line in text.lines() {
+         let line = line.trim();
+-        let Some(rest) = line.strip_prefix("##") else { continue };
+-        let Some((k, v)) = rest.split_once(':') else { continue };
++        let Some(rest) = line.strip_prefix("##") else {
++            continue;
++        };
++        let Some((k, v)) = rest.split_once(':') else {
++            continue;
++        };
+         let key = k.trim().to_ascii_lowercase();
+         let val = v.trim();
+         if val.is_empty() {
+@@ -284,7 +305,9 @@ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+ /// Scan `<install>\Interface\AddOns` and parse each folder's TOC.
+ pub fn scan_addons(install: &Path) -> Vec<AddonFolder> {
+     let addons = install.join("Interface").join("AddOns");
+-    let Ok(rd) = fs::read_dir(&addons) else { return Vec::new() };
++    let Ok(rd) = fs::read_dir(&addons) else {
++        return Vec::new();
++    };
+     let mut out = Vec::new();
+     for entry in rd.flatten() {
+         let p = entry.path();
+@@ -295,7 +318,10 @@ pub fn scan_addons(install: &Path) -> Vec<AddonFolder> {
+         if name.starts_with('.') || name.starts_with("Blizzard_") {
+             continue;
+         }
+-        let mut af = AddonFolder { folder: name.clone(), ..Default::default() };
++        let mut af = AddonFolder {
++            folder: name.clone(),
++            ..Default::default()
++        };
+         // Forever-specific TOC first so its Interface/Version win.
+         for suf in FOREVER_TOC_SUFFIXES {
+             let candidate = p.join(format!("{name}{suf}.toc"));
+@@ -330,10 +356,17 @@ pub fn scan_addons(install: &Path) -> Vec<AddonFolder> {
+         if af.title.is_empty() {
+             af.title = name.clone();
+         }
+-        af.forever_interface = af.interfaces.iter().any(|n| FOREVER_INTERFACE_RANGE.contains(n));
++        af.forever_interface = af
++            .interfaces
++            .iter()
++            .any(|n| FOREVER_INTERFACE_RANGE.contains(n));
+         out.push(af);
+     }
+-    out.sort_by(|a, b| a.folder.to_ascii_lowercase().cmp(&b.folder.to_ascii_lowercase()));
++    out.sort_by(|a, b| {
++        a.folder
++            .to_ascii_lowercase()
++            .cmp(&b.folder.to_ascii_lowercase())
++    });
+     out
+ }
+ 
+@@ -347,7 +380,13 @@ mod tests {
+         let _ = std::fs::remove_dir_all(&root);
+         std::fs::create_dir_all(root.join("Interface").join("AddOns").join("Plain")).unwrap();
+         assert!(!svfix_present(&root));
+-        std::fs::create_dir_all(root.join("Interface").join("AddOns").join("Plain").join("ForeverSVFixData")).unwrap();
++        std::fs::create_dir_all(
++            root.join("Interface")
++                .join("AddOns")
++                .join("Plain")
++                .join("ForeverSVFixData"),
++        )
++        .unwrap();
+         assert!(svfix_present(&root));
+         let _ = std::fs::remove_dir_all(&root);
+         std::fs::create_dir_all(root.join("WTF").join("ForeverSVFix")).unwrap();
+@@ -355,9 +394,40 @@ mod tests {
+         let _ = std::fs::remove_dir_all(&root);
+     }
+ 
++    #[test]
++    fn classic_beta_and_final_forever_products_are_discovered() {
++        let root = std::env::temp_dir().join(format!("af-installs-{}", std::process::id()));
++        let world = root.join("World of Warcraft");
++        let beta = world.join("_classic_beta_");
++        let final_product = world.join("_forever_");
++        for (dir, product) in [(&beta, "wow_classic_beta"), (&final_product, "wowf")] {
++            std::fs::create_dir_all(dir.join("Interface").join("AddOns")).unwrap();
++            std::fs::write(
++                dir.join(".flavor.info"),
++                format!("Product Flavor!STRING:0\n{product}\n"),
++            )
++            .unwrap();
++        }
++
++        let found = find_installs_in_roots(&[world]);
++        assert_eq!(found.len(), 2);
++        assert!(found.iter().all(|install| install.flavor == "forever"));
++        assert_eq!(
++            found
++                .iter()
++                .find(|install| install.product == "wowf")
++                .map(|install| install.label.as_str()),
++            Some("WoW: Forever")
++        );
++        let _ = std::fs::remove_dir_all(root);
++    }
++
+     #[test]
+     fn strips_colour_codes() {
+-        assert_eq!(clean_title("|cff33ff99BigWigs|r Boss Mods"), "BigWigs Boss Mods");
++        assert_eq!(
++            clean_title("|cff33ff99BigWigs|r Boss Mods"),
++            "BigWigs Boss Mods"
++        );
+         assert_eq!(clean_title("Plain"), "Plain");
+         assert_eq!(clean_title("|TInterface\\Icons\\x:16|t Name"), "Name");
+     }

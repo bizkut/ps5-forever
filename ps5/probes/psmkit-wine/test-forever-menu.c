@@ -140,6 +140,7 @@ static void test_state_machine(void)
 {
     struct forever_menu_state menu;
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
+    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND};
     struct forever_menu_result result;
     char text[FOREVER_MENU_TEXT_BYTES];
 
@@ -154,17 +155,121 @@ static void test_state_machine(void)
     forever_menu_move(&menu, 1);
     forever_menu_move(&menu, 1);
     forever_menu_move(&menu, 1);
-    assert(menu.selected == FOREVER_MENU_REINSTALL); /* disabled Add-ons is skipped */
+    assert(menu.selected == FOREVER_MENU_ADDONS);
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_OPEN);
+    assert(menu.page == FOREVER_MENU_ADDON_PAGE && menu.addon_loading);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Add-ons — WoW: Forever (beta)"));
+    assert(strstr(text, "[Installed]"));
+    snapshot.tab = FOREVER_ADDON_INSTALLED;
+    snapshot.count = 0;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_RIGHT);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_REFRESH);
+    assert(result.tab == FOREVER_ADDON_UPDATES);
+    snapshot.tab = FOREVER_ADDON_UPDATES;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_R1);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_REFRESH);
+    assert(result.channel == FOREVER_ADDON_FINAL);
+    snapshot.tab = FOREVER_ADDON_UPDATES;
+    snapshot.count = 0;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_RIGHT);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_REFRESH);
+    assert(result.tab == FOREVER_ADDON_FIND);
+    snapshot.tab = FOREVER_ADDON_FIND;
+    snapshot.count = 0;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(!strstr(text, " Source\t") && !strstr(text, " Last update\t"));
+
+    snapshot.tab = FOREVER_ADDON_FIND;
+    snapshot.count = 2;
+    snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "cat:alpha");
+    snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "Alpha");
+    snprintf(snapshot.rows[0].description, sizeof(snapshot.rows[0].description), "A useful addon.");
+    snprintf(snapshot.rows[0].source, sizeof(snapshot.rows[0].source), "GitHub");
+    snapshot.rows[0].installable = 1;
+    snapshot.rows[0].downloads = 7;
+    snprintf(snapshot.rows[1].key, sizeof(snapshot.rows[1].key), "cat:curse");
+    snprintf(snapshot.rows[1].name, sizeof(snapshot.rows[1].name), "Curse Example");
+    snprintf(snapshot.rows[1].description, sizeof(snapshot.rows[1].description), "Link only.");
+    snprintf(snapshot.rows[1].source, sizeof(snapshot.rows[1].source), "CurseForge");
+    snapshot.rows[1].curse_only = 1;
+    snapshot.rows[1].downloads = 42;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, " Last update\tUnknown"));
+    assert(menu.addon_tab == FOREVER_ADDON_FIND && menu.addon_count == 2);
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.addon_sort_downloads);
+    assert(!strcmp(menu.addon_rows[0].name, "Curse Example"));
+    forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE);
+    assert(!menu.addon_sort_downloads && !strcmp(menu.addon_rows[0].name, "Alpha"));
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_INSTALL);
+    assert(!strcmp(result.key, "cat:alpha"));
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    forever_menu_move(&menu, 1);
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    assert(menu.addon_selected == 1);
     result = forever_menu_select(&menu);
     assert(result.command == FOREVER_MENU_COMMAND_NONE);
-    assert(menu.page == FOREVER_MENU_CONFIRM_REINSTALL && menu.confirmation_selected == 0);
+    assert(strstr(menu.status, "Available on CurseForge only"));
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Curse Example"));
+    assert(strstr(text, "Available on CurseForge only"));
+
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_RIGHT);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_REFRESH);
+    assert(result.tab == FOREVER_ADDON_STARTER_PACKS);
+    snapshot.tab = FOREVER_ADDON_STARTER_PACKS;
+    snapshot.count = 1;
+    memset(&snapshot.rows[0], 0, sizeof(snapshot.rows[0]));
+    snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "starter:essentials");
+    snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "Forever Essentials");
+    snapshot.rows[0].installable = 1;
+    forever_menu_addon_snapshot(&menu, &snapshot);
     result = forever_menu_select(&menu);
-    assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.page == FOREVER_MENU_MAIN);
-    assert(menu.selected == FOREVER_MENU_REINSTALL);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_ADDON_CONFIRM && !menu.confirmation_selected);
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.page == FOREVER_MENU_ADDON_PAGE);
     forever_menu_select(&menu);
     forever_menu_move(&menu, 1);
     result = forever_menu_select(&menu);
-    assert(result.command == FOREVER_MENU_COMMAND_REINSTALL);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK);
+    assert(!strcmp(result.key, "starter:essentials"));
+
+    menu.page = FOREVER_MENU_ADDON_PAGE;
+    menu.addon_tab = FOREVER_ADDON_INSTALLED;
+    menu.addon_loading = 0;
+    snapshot.tab = FOREVER_ADDON_INSTALLED;
+    snapshot.count = 1;
+    memset(&snapshot.rows[0], 0, sizeof(snapshot.rows[0]));
+    snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "cat:alpha");
+    snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "Alpha");
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    result = forever_menu_addon_button(&menu, FOREVER_ADDON_R3);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_ADDON_CONFIRM && !menu.confirmation_selected);
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE);
+    forever_menu_addon_button(&menu, FOREVER_ADDON_R3);
+    forever_menu_move(&menu, 1);
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_REMOVE);
+
+    menu.page = FOREVER_MENU_ADDON_PAGE;
+    result = forever_menu_back(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_CLOSE);
+    assert(menu.page == FOREVER_MENU_MAIN && menu.selected == FOREVER_MENU_ADDONS);
+    assert(strstr(menu.status, "Finishing add-on changes"));
+    result = forever_menu_back(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_CLOSE);
 
     forever_menu_open(&menu, &values);
     result = forever_menu_click_line(&menu, FOREVER_MENU_LINE_UNINSTALL);
@@ -173,17 +278,13 @@ static void test_state_machine(void)
     result = forever_menu_back(&menu);
     assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.page == FOREVER_MENU_MAIN);
     result = forever_menu_click_line(&menu, FOREVER_MENU_LINE_ADDONS);
-    assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.page == FOREVER_MENU_MAIN);
-    forever_menu_render(&menu, text, sizeof(text));
-    assert(strstr(text, "Add-ons…\tComing soon"));
-    assert(strstr(text, "Frame generation\tAuto"));
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_OPEN);
 
+    forever_menu_open(&menu, &values);
     result = forever_menu_click_line(&menu, FOREVER_MENU_LINE_FRAME_GENERATION);
     assert(result.command == FOREVER_MENU_COMMAND_SET_FRAME_GENERATION && !result.enabled);
     forever_menu_commit(&menu, result.command, result.enabled);
     assert(menu.values.frame_generation == FOREVER_FG_OFF);
-    result = forever_menu_back(&menu);
-    assert(result.command == FOREVER_MENU_COMMAND_CLOSE);
 }
 
 int main(void)

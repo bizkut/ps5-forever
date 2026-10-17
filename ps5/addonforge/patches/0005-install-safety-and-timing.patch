@@ -1,0 +1,457 @@
+diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
+index 16eda62..7b0dcff 100644
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -21,8 +21,8 @@ pub const TMP_DIR: &str = ".addonforge-tmp";
+ /// File types that have no business inside a WoW addon.
+ const FORBIDDEN_EXT: &[&str] = &[
+     "exe", "dll", "sys", "scr", "com", "pif", "cpl", "msi", "msp", "bat", "cmd", "ps1", "psm1",
+-    "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "jar", "py", "sh", "lnk", "reg", "inf",
+-    "ocx", "drv", "app", "dmg", "apk",
++    "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "jar", "py", "sh", "lnk", "reg", "inf", "ocx",
++    "drv", "app", "dmg", "apk",
+ ];
+ 
+ fn unique() -> String {
+@@ -33,9 +33,108 @@ fn unique() -> String {
+     format!("{n:x}")
+ }
+ 
+-/// Remove stale temp work from a previous crash.
+-pub fn clean_tmp(addons_dir: &Path) {
+-    let _ = fs::remove_dir_all(addons_dir.join(TMP_DIR));
++fn link_or_reparse(metadata: &fs::Metadata) -> bool {
++    if metadata.file_type().is_symlink() {
++        return true;
++    }
++    #[cfg(windows)]
++    {
++        use std::os::windows::fs::MetadataExt;
++        return metadata.file_attributes() & 0x400 != 0; // FILE_ATTRIBUTE_REPARSE_POINT
++    }
++    #[cfg(not(windows))]
++    false
++}
++
++fn unlink_link_or_reparse(path: &Path, _metadata: &fs::Metadata) -> std::io::Result<()> {
++    #[cfg(windows)]
++    {
++        use std::os::windows::fs::FileTypeExt;
++        if _metadata.is_dir() || _metadata.file_type().is_symlink_dir() {
++            return fs::remove_dir(path);
++        }
++    }
++    fs::remove_file(path)
++}
++
++fn remove_no_follow(path: &Path) -> anyhow::Result<()> {
++    let metadata = match fs::symlink_metadata(path) {
++        Ok(metadata) => metadata,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(error) => return Err(error.into()),
++    };
++    if link_or_reparse(&metadata) {
++        unlink_link_or_reparse(path, &metadata)?;
++    } else if metadata.is_dir() {
++        for entry in fs::read_dir(path)?.flatten() {
++            remove_no_follow(&entry.path())?;
++        }
++        fs::remove_dir(path)?;
++    } else {
++        fs::remove_file(path)?;
++    }
++    Ok(())
++}
++
++/// Recover folders moved aside by an interrupted replacement without following links.
++pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
++    let temp = addons_dir.join(TMP_DIR);
++    let metadata = match fs::symlink_metadata(&temp) {
++        Ok(metadata) => metadata,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(error) => return Err(error.into()),
++    };
++    if link_or_reparse(&metadata) || !metadata.is_dir() {
++        return remove_no_follow(&temp);
++    }
++    for entry in fs::read_dir(&temp)?.flatten() {
++        let work = entry.path();
++        let metadata = fs::symlink_metadata(&work)?;
++        if link_or_reparse(&metadata) || !metadata.is_dir() {
++            remove_no_follow(&work)?;
++            continue;
++        }
++        let old = work.join("old");
++        match fs::symlink_metadata(&old) {
++            Ok(metadata) if !link_or_reparse(&metadata) && metadata.is_dir() => {
++                for entry in fs::read_dir(&old)?.flatten() {
++                    let backup = entry.path();
++                    let metadata = fs::symlink_metadata(&backup)?;
++                    if link_or_reparse(&metadata) || !metadata.is_dir() {
++                        remove_no_follow(&backup)?;
++                        continue;
++                    }
++                    let name = backup.file_name().and_then(|name| name.to_str())
++                        .ok_or_else(|| anyhow!("invalid interrupted backup name"))?;
++                    if name.is_empty() || name.starts_with('.') || name.contains("..") ||
++                        name.contains(['/', '\\']) {
++                        anyhow::bail!("refusing suspicious interrupted backup {name}");
++                    }
++                    let target = addons_dir.join(name);
++                    if fs::symlink_metadata(&target).is_ok() {
++                        remove_no_follow(&backup)?;
++                    } else {
++                        fs::rename(&backup, &target)
++                            .with_context(|| format!("restore interrupted addon {name}"))?;
++                    }
++                }
++            }
++            Ok(_) => remove_no_follow(&old)?,
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
++            Err(error) => return Err(error.into()),
++        }
++        remove_no_follow(&work)?;
++    }
++    remove_no_follow(&temp)
++}
++
++fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
++    let _ = remove_no_follow(work);
++    let _ = fs::remove_file(zip_path);
++    if let Some(downloads) = zip_path.parent() {
++        let _ = fs::remove_dir(downloads);
++    }
++    let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
+ }
+ 
+ pub async fn download(
+@@ -47,37 +146,60 @@ pub async fn download(
+     fs::create_dir_all(dest_dir)?;
+     let safe: String = filename
+         .chars()
+-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
++        .map(|c| {
++            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
++                c
++            } else {
++                '_'
++            }
++        })
+         .collect();
+-    let safe = if safe.to_ascii_lowercase().ends_with(".zip") { safe } else { format!("{safe}.zip") };
++    let safe = if safe.to_ascii_lowercase().ends_with(".zip") {
++        safe
++    } else {
++        format!("{safe}.zip")
++    };
+     let path = dest_dir.join(format!("{}-{}", unique(), safe));
+-    let resp = client
+-        .get(url)
+-        .send()
+-        .await
+-        .with_context(|| format!("download failed: {url}"))?
+-        .error_for_status()
+-        .with_context(|| format!("download refused: {url}"))?;
+-    let mut file = fs::File::create(&path)?;
+-    let mut stream = resp.bytes_stream();
+-    let mut total: u64 = 0;
+-    while let Some(chunk) = stream.next().await {
+-        let chunk = chunk?;
+-        total += chunk.len() as u64;
+-        if total > 512 * 1024 * 1024 {
+-            anyhow::bail!("download exceeded 512 MB; refusing");
++    let result = async {
++        let resp = client
++            .get(url)
++            .send()
++            .await
++            .with_context(|| format!("download failed: {url}"))?
++            .error_for_status()
++            .with_context(|| format!("download refused: {url}"))?;
++        let mut file = fs::File::create(&path)?;
++        let mut stream = resp.bytes_stream();
++        let mut total: u64 = 0;
++        while let Some(chunk) = stream.next().await {
++            let chunk = chunk?;
++            total += chunk.len() as u64;
++            if total > 512 * 1024 * 1024 {
++                anyhow::bail!("download exceeded 512 MB; refusing");
++            }
++            file.write_all(&chunk)?;
+         }
+-        file.write_all(&chunk)?;
++        file.flush()?;
++        Ok::<(), anyhow::Error>(())
++    }
++    .await;
++    if let Err(error) = result {
++        let _ = fs::remove_file(&path);
++        let _ = fs::remove_dir(dest_dir);
++        return Err(error);
+     }
+-    file.flush()?;
+     Ok(path)
+ }
+ 
+ fn has_toc(dir: &Path) -> bool {
+     fs::read_dir(dir)
+         .map(|rd| {
+-            rd.flatten()
+-                .any(|e| e.file_name().to_string_lossy().to_ascii_lowercase().ends_with(".toc"))
++            rd.flatten().any(|e| {
++                e.file_name()
++                    .to_string_lossy()
++                    .to_ascii_lowercase()
++                    .ends_with(".toc")
++            })
+         })
+         .unwrap_or(false)
+ }
+@@ -139,7 +261,29 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+                 );
+             }
+             // Windows also runs by "magic": check the first bytes of anything unusual.
+-            if !matches!(ext, "lua" | "xml" | "toc" | "tga" | "blp" | "png" | "jpg" | "jpeg" | "gif" | "ttf" | "otf" | "mp3" | "ogg" | "wav" | "txt" | "md" | "json" | "html" | "css" | "csv") {
++            if !matches!(
++                ext,
++                "lua"
++                    | "xml"
++                    | "toc"
++                    | "tga"
++                    | "blp"
++                    | "png"
++                    | "jpg"
++                    | "jpeg"
++                    | "gif"
++                    | "ttf"
++                    | "otf"
++                    | "mp3"
++                    | "ogg"
++                    | "wav"
++                    | "txt"
++                    | "md"
++                    | "json"
++                    | "html"
++                    | "css"
++                    | "csv"
++            ) {
+                 if let Ok(mut f) = fs::File::open(&p) {
+                     let mut head = [0u8; 4];
+                     use std::io::Read;
+@@ -159,24 +303,34 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+     Ok(count)
+ }
+ 
++#[derive(Clone, Debug)]
++pub struct PlaceResult {
++    pub folders: Vec<String>,
++    pub zip_ms: u128,
++    pub broker_move_ms: u128,
++}
++
+ /// Extract `zip_path` and move its addon folders into `addons_dir`,
+-/// replacing same-named folders. Returns the folder names installed.
+-pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>> {
++/// replacing same-named folders and recording the two local phases.
++pub fn place_timed(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<PlaceResult> {
+     fs::create_dir_all(addons_dir)?;
+     let work = addons_dir.join(TMP_DIR).join(unique());
+     let extract_dir = work.join("x");
+     let backup_dir = work.join("old");
+-    fs::create_dir_all(&extract_dir)?;
+-    fs::create_dir_all(&backup_dir)?;
+ 
+-    let result = (|| -> anyhow::Result<Vec<String>> {
++    let result = (|| -> anyhow::Result<PlaceResult> {
++        fs::create_dir_all(&extract_dir)?;
++        fs::create_dir_all(&backup_dir)?;
++        let zip_started = std::time::Instant::now();
+         let file = fs::File::open(zip_path)?;
+         let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
+         archive.extract(&extract_dir).context("extract failed")?;
+         let files = safety_scan(&extract_dir)?;
+         crate::logi!("zip ok: {} files, no executables", files);
+-
+         let sources = addon_dirs(&extract_dir)?;
++        let zip_ms = zip_started.elapsed().as_millis();
++
++        let write_started = std::time::Instant::now();
+         let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new(); // (target, backup)
+         let mut installed = Vec::new();
+ 
+@@ -201,7 +355,9 @@ pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>>
+             if target.exists() {
+                 if let Err(e) = fs::rename(&target, &backup) {
+                     restore(&moved);
+-                    return Err(anyhow!("could not move aside {name}: {e} (is WoW running?)"));
++                    return Err(anyhow!(
++                        "could not move aside {name}: {e} (is WoW running?)"
++                    ));
+                 }
+                 moved.push((target.clone(), backup));
+             } else {
+@@ -213,16 +369,23 @@ pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>>
+             }
+             installed.push(name);
+         }
+-        Ok(installed)
++        Ok(PlaceResult {
++            folders: installed,
++            zip_ms,
++            broker_move_ms: write_started.elapsed().as_millis(),
++        })
+     })();
+ 
+-    let _ = fs::remove_dir_all(&work);
+-    let _ = fs::remove_file(zip_path);
+-    // Leave the tmp root tidy if empty.
+-    let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
++    tidy_operation(addons_dir, &work, zip_path);
+     result
+ }
+ 
++#[cfg(test)]
++/// Extract and install an addon archive.
++pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>> {
++    place_timed(zip_path, addons_dir).map(|placed| placed.folders)
++}
++
+ /// Delete the given addon folders (used by "Remove").
+ pub fn remove_folders(addons_dir: &Path, folders: &[String]) -> anyhow::Result<Vec<String>> {
+     let mut gone = Vec::new();
+@@ -257,14 +420,30 @@ mod tests {
+         fs::create_dir_all(&addon).unwrap();
+         let link = addon.join("ForeverSVFixData");
+         let made = std::process::Command::new("cmd")
+-            .args(["/c", "mklink", "/J", &link.to_string_lossy(), &saved.to_string_lossy()])
++            .args([
++                "/c",
++                "mklink",
++                "/J",
++                &link.to_string_lossy(),
++                &saved.to_string_lossy(),
++            ])
+             .output()
+             .unwrap();
+-        assert!(made.status.success(), "mklink failed: {}", String::from_utf8_lossy(&made.stderr));
+-        assert!(link.join("Addon.lua").exists(), "junction should expose the file");
++        assert!(
++            made.status.success(),
++            "mklink failed: {}",
++            String::from_utf8_lossy(&made.stderr)
++        );
++        assert!(
++            link.join("Addon.lua").exists(),
++            "junction should expose the file"
++        );
+         fs::remove_dir_all(&addon).unwrap();
+         assert!(!addon.exists());
+-        assert!(saved.join("Addon.lua").exists(), "the linked SavedVariables file must survive");
++        assert!(
++            saved.join("Addon.lua").exists(),
++            "the linked SavedVariables file must survive"
++        );
+         let _ = fs::remove_dir_all(&root);
+     }
+ 
+@@ -285,4 +464,100 @@ mod tests {
+         assert!(safety_scan(&root).is_err());
+         let _ = fs::remove_dir_all(&root);
+     }
++
++    #[test]
++    fn place_refuses_a_zip_containing_an_executable() {
++        use std::io::Write;
++
++        let root = std::env::temp_dir().join(format!("af-evil-zip-{}", unique()));
++        let zip_path = root.join("evil.zip");
++        let addons = root.join("AddOns");
++        fs::create_dir_all(&root).unwrap();
++        let file = fs::File::create(&zip_path).unwrap();
++        let mut archive = zip::ZipWriter::new(file);
++        let options = zip::write::SimpleFileOptions::default();
++        archive.start_file("Evil/Evil.toc", options).unwrap();
++        archive.write_all(b"## Interface: 16001\n").unwrap();
++        archive.start_file("Evil/helper.exe", options).unwrap();
++        archive.write_all(b"MZ\x90\0").unwrap();
++        archive.finish().unwrap();
++
++        let error = place(&zip_path, &addons).unwrap_err().to_string();
++        assert!(error.contains("SAFETY"), "{error}");
++        assert!(!addons.join("Evil").exists());
++        assert!(!addons.join(TMP_DIR).exists(), "failed install must remove temp tree");
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    fn startup_recovers_each_interrupted_replacement_step() {
++        let root = std::env::temp_dir().join(format!("af-recover-{}", unique()));
++        let addons = root.join("AddOns");
++        let temp = addons.join(TMP_DIR);
++        fs::create_dir_all(&addons).unwrap();
++
++        // Before backup: the original target remains; extracted work is stale.
++        fs::create_dir_all(addons.join("BeforeBackup")).unwrap();
++        fs::write(addons.join("BeforeBackup/original"), b"keep").unwrap();
++        fs::create_dir_all(temp.join("one/x/BeforeBackup")).unwrap();
++
++        // After backup, before replacement: target is absent and must be restored.
++        fs::create_dir_all(temp.join("two/old/RestoreMe")).unwrap();
++        fs::write(temp.join("two/old/RestoreMe/original"), b"restore").unwrap();
++        fs::create_dir_all(temp.join("two/x/RestoreMe")).unwrap();
++
++        // After replacement: keep the new target and discard the old backup.
++        fs::create_dir_all(addons.join("KeepNew")).unwrap();
++        fs::write(addons.join("KeepNew/new"), b"new").unwrap();
++        fs::create_dir_all(temp.join("three/old/KeepNew")).unwrap();
++        fs::write(temp.join("three/old/KeepNew/old"), b"old").unwrap();
++
++        recover_tmp(&addons).unwrap();
++        assert!(addons.join("BeforeBackup/original").is_file());
++        assert!(addons.join("RestoreMe/original").is_file());
++        assert!(addons.join("KeepNew/new").is_file());
++        assert!(!addons.join("KeepNew/old").exists());
++        assert!(!temp.exists());
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    #[cfg(unix)]
++    fn recovery_never_follows_an_old_directory_symlink() {
++        use std::os::unix::fs::symlink;
++        let root = std::env::temp_dir().join(format!("af-recover-old-link-{}", unique()));
++        let addons = root.join("AddOns");
++        let outside = root.join("outside");
++        let work = addons.join(TMP_DIR).join("work");
++        fs::create_dir_all(&work).unwrap();
++        fs::create_dir_all(&outside).unwrap();
++        fs::write(outside.join("keep"), b"outside").unwrap();
++        symlink(&outside, work.join("old")).unwrap();
++
++        recover_tmp(&addons).unwrap();
++        assert_eq!(fs::read(outside.join("keep")).unwrap(), b"outside");
++        assert!(!addons.join("keep").exists());
++        assert!(!addons.join(TMP_DIR).exists());
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    #[cfg(unix)]
++    fn recovery_never_moves_an_old_entry_symlink() {
++        use std::os::unix::fs::symlink;
++        let root = std::env::temp_dir().join(format!("af-recover-entry-link-{}", unique()));
++        let addons = root.join("AddOns");
++        let outside = root.join("outside");
++        let old = addons.join(TMP_DIR).join("work/old");
++        fs::create_dir_all(&old).unwrap();
++        fs::create_dir_all(&outside).unwrap();
++        fs::write(outside.join("keep"), b"outside").unwrap();
++        symlink(&outside, old.join("LinkedAddon")).unwrap();
++
++        recover_tmp(&addons).unwrap();
++        assert_eq!(fs::read(outside.join("keep")).unwrap(), b"outside");
++        assert!(!addons.join("LinkedAddon").exists());
++        assert!(!addons.join(TMP_DIR).exists());
++        let _ = fs::remove_dir_all(root);
++    }
+ }

@@ -322,13 +322,40 @@ static void write_menu_preview(void)
     assert(!fclose(file));
 }
 
+static void write_addon_preview(const char *name)
+{
+    const char *directory = getenv("FOREVER_ADDONS_PREVIEW_DIR");
+    char path[1024];
+    FILE *file;
+    if (!directory || !*directory) return;
+    assert(snprintf(path, sizeof(path), "%s/addons-%s.ppm", directory, name) > 0);
+    file = fopen(path, "wb");
+    assert(file);
+    fprintf(file, "P6\n%d %d\n255\n", DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    for (size_t i = 0; i < DISPLAY_WIDTH * DISPLAY_HEIGHT; i++)
+    {
+        unsigned char rgb[] = {
+            (unsigned char)(image[i] >> 16),
+            (unsigned char)(image[i] >> 8),
+            (unsigned char)image[i],
+        };
+        assert(fwrite(rgb, 1, sizeof(rgb), file) == sizeof(rgb));
+    }
+    assert(!fclose(file));
+}
+
 static void test_menu_overlay(void)
 {
     struct forever_menu_state menu;
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
+    struct forever_addon_snapshot snapshot = {0};
     struct display_rect panel, title, selected, hdr, fg_value, hdr_value, hud_value, addons_value;
+    struct display_rect addon_row, addon_value;
     char text[FOREVER_MENU_TEXT_BYTES];
     unsigned antialiased = 0, title_pixels = 0;
+    check(compositor_menu_text_supported("\xe2\x80\x94 \xe2\x80\xa6 \xe2\x80\x99 "
+                                         "\xe2\x86\x92 \xe2\x97\x8b \xe2\x9c\x95"),
+          "all static non-ASCII menu characters have exact glyphs");
 
     forever_menu_init(&menu);
     forever_menu_open(&menu, &values);
@@ -369,6 +396,48 @@ static void test_menu_overlay(void)
     check(image[(size_t)panel.top * DISPLAY_WIDTH + panel.left - 1] == BACKGROUND,
           "menu drawing changes nothing outside its panel");
     write_menu_preview();
+    menu.selected = FOREVER_MENU_ADDONS;
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_ADDONS_OPEN);
+    for (int tab = 0; tab < FOREVER_ADDON_TAB_COUNT; tab++)
+    {
+        static const char *const names[] = {"installed", "updates", "find", "starter-packs"};
+        memset(&snapshot, 0, sizeof(snapshot));
+        snapshot.tab = (enum forever_addon_tab)tab;
+        snapshot.count = 1;
+        snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "%s",
+                 tab == FOREVER_ADDON_STARTER_PACKS ? "starter:essentials" : "cat:fixture");
+        snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "%s",
+                 tab == FOREVER_ADDON_STARTER_PACKS ? "Forever Essentials" : "Fixture Add-on");
+        snprintf(snapshot.rows[0].status, sizeof(snapshot.rows[0].status), "%s",
+                 tab == FOREVER_ADDON_UPDATES ? "update available" : "up to date");
+        snprintf(snapshot.rows[0].description, sizeof(snapshot.rows[0].description),
+                 "A small fixture used to verify the add-on page layout.");
+        snprintf(snapshot.rows[0].source, sizeof(snapshot.rows[0].source), "GitHub");
+        snprintf(snapshot.rows[0].updated, sizeof(snapshot.rows[0].updated), "2026-10-17");
+        snapshot.rows[0].installable = 1;
+        snapshot.rows[0].update_available = tab == FOREVER_ADDON_UPDATES;
+        menu.addon_tab = snapshot.tab;
+        forever_menu_addon_snapshot(&menu, &snapshot);
+        forever_menu_render(&menu, text, sizeof(text));
+        compositor_menu(text);
+        compositor_compose();
+        check(compositor_menu_text_supported(text),
+              "rendered add-on page has no fallback glyphs");
+        check(!compositor_menu_value_bounds(0, &addon_value),
+              "add-on title has no overlapping right-side hint");
+        check(compositor_menu_footer_fits(),
+              "active add-on footer fits inside the padded panel");
+        check(compositor_menu_line_bounds(FOREVER_MENU_LINE_ADDON_FIRST, &addon_row) &&
+              compositor_menu_value_bounds(FOREVER_MENU_LINE_ADDON_FIRST, &addon_value),
+              "add-on row publishes hit and right-aligned status geometry");
+        check(compositor_menu_line_at((addon_row.left + addon_row.right) / 2,
+                                      (addon_row.top + addon_row.bottom) / 2) ==
+              FOREVER_MENU_LINE_ADDON_FIRST,
+              "mouse hit testing follows the selected add-on row");
+        check(addon_value.right == addons_value.right,
+              "add-on statuses use the main menu's right-aligned value column");
+        write_addon_preview(names[tab]);
+    }
     forever_menu_notice(
         &menu,
         "Could not remove all Battle.net files (error 13). Your games were not touched.");

@@ -131,14 +131,23 @@ keyboard. Use the D-pad and Cross; press Circle or Options at the top level to
 close, or click with a mouse. The menu can:
 
 - turn frame generation, HDR and the performance overlay on or off;
+- browse, install, update and remove add-ons for Forever beta and final;
+- install a curated starter pack;
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
 
-**Add-ons** is shown as coming soon. If frame generation currently uses
-`fg=auto`, selecting it turns it off; selecting it again turns it on. Frame
-generation and the performance overlay use their live settings files; HDR
-applies the next time WoW starts. After removing Battle.net, close and start
-Forever Launcher to install it again.
+Open **Add-ons** before pressing Play. L1/R1 switches between installed beta
+(`_classic_beta_`) and final (`_forever_`); Left/Right switches Installed,
+Updates, Find and Starter packs. Cross opens or installs, Square updates the
+selected add-on, Triangle updates all, and R3 removes after a confirmation whose
+default is Cancel. CurseForge-only rows say so and cannot be installed. GitHub,
+WoWInterface and TukUI entries work without a key. Changes load the next time
+WoW starts, or after typing `/reload` in WoW.
+
+If frame generation currently uses `fg=auto`, selecting it turns it off;
+selecting it again turns it on. Frame generation and the performance overlay
+use their live settings files; HDR applies the next time WoW starts. After
+removing Battle.net, close and start Forever Launcher to install it again.
 
 ## Frame generation
 

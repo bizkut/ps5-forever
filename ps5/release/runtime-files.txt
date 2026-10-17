@@ -11,6 +11,11 @@ sce_sys/icon0.png
 sce_sys/param.json
 sce_sys/pic0.dds
 sce_sys/pic1.dds
+wine-title/addonforge/ADDONFORGE-LICENSE.txt
+wine-title/addonforge/THIRD-PARTY-NOTICES.txt
+wine-title/addonforge/addonforge-core.exe
+wine-title/addonforge/build-receipt.json
+wine-title/addonforge/forever-maintenance.exe
 wine-title/bin/wineserver.so
 wine-title/lib/libfreetype.so
 wine-title/lib/libgnutls.so

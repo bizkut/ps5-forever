@@ -46,11 +46,15 @@ static int message_pending;
 #ifdef PS5_TITLE_EMBEDDED
 static struct forever_menu_state menu;
 static char pending_menu_status[FOREVER_MENU_STATUS_BYTES];
-static int pending_menu_status_kind, input_draining;
+static struct forever_addon_snapshot pending_addon_snapshot;
+static char pending_addon_error[FOREVER_MENU_STATUS_BYTES];
+static int pending_menu_status_kind, pending_addon_kind, input_draining;
 static uint8_t physical_keys[256], forwarded_keys[256];
 static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
 
 int forever_title_menu_load(struct forever_menu_values *);
+int forever_title_addons_action(enum forever_menu_command, enum forever_addon_channel,
+                                enum forever_addon_tab, const char *);
 #ifdef FOREVER_MENU_DIAG
 #define MENU_DIAG_SCRIPT "/data/homebrew/PPSA99030/wine/menu-script.txt"
 #define MENU_DIAG_DONE "/data/homebrew/PPSA99030/wine/menu-script.done"
@@ -83,6 +87,24 @@ void title_desktop_menu_status(const char *text, int notice)
     pthread_mutex_lock(&message_mutex);
     snprintf(pending_menu_status, sizeof(pending_menu_status), "%s", text ? text : "");
     pending_menu_status_kind = notice ? 2 : 1;
+    pthread_mutex_unlock(&message_mutex);
+}
+
+void title_desktop_addons_snapshot(const struct forever_addon_snapshot *snapshot)
+{
+    if (!snapshot) return;
+    pthread_mutex_lock(&message_mutex);
+    pending_addon_snapshot = *snapshot;
+    pending_addon_kind = 1;
+    pthread_mutex_unlock(&message_mutex);
+}
+
+void title_desktop_addons_error(const char *text)
+{
+    pthread_mutex_lock(&message_mutex);
+    snprintf(pending_addon_error, sizeof(pending_addon_error), "%s",
+             text ? text : "The add-on operation failed.");
+    pending_addon_kind = 2;
     pthread_mutex_unlock(&message_mutex);
 }
 #endif
@@ -382,6 +404,8 @@ static uint32_t mouse_button(uint32_t code)
 #define KEY_ENTER 0x28u
 #define KEY_ESCAPE 0x29u
 #define KEY_F12 0x45u
+#define KEY_RIGHT 0x4fu
+#define KEY_LEFT 0x50u
 #define KEY_DOWN 0x51u
 #define KEY_UP 0x52u
 static void render_menu(void);
@@ -519,6 +543,23 @@ static void on_input(const struct input_event *event, void *context)
         if (changed & physical_pad & (PAD_UP | PAD_DOWN))
             menu_diag_log_state("selection");
 #endif
+        if (menu.page == FOREVER_MENU_ADDON_PAGE)
+        {
+            if (changed & physical_pad & PAD_LEFT)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_LEFT));
+            else if (changed & physical_pad & PAD_RIGHT)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_RIGHT));
+            else if (changed & physical_pad & PAD_L1)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_L1));
+            else if (changed & physical_pad & PAD_R1)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_R1));
+            else if (changed & physical_pad & PAD_SQUARE)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE));
+            else if (changed & physical_pad & PAD_TRIANGLE)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_TRIANGLE));
+            else if (changed & physical_pad & PAD_R3)
+                apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_R3));
+        }
         if (changed & physical_pad & PAD_CROSS)
             apply_menu_result(forever_menu_select(&menu));
         else if (changed & physical_pad & PAD_CIRCLE)
@@ -652,6 +693,21 @@ static void menu_diag_step(uint64_t now)
             snprintf(menu_diag.dump_name, sizeof(menu_diag.dump_name), "%s", command.name);
             menu_diag.dump_pending = 1;
             return;
+        case FOREVER_MENU_DIAG_ADDON:
+        {
+            size_t selected;
+            for (selected = 0; selected < menu.addon_count; selected++)
+                if (!strcmp(menu.addon_rows[selected].key, command.name)) break;
+            if (selected < menu.addon_count)
+            {
+                menu.addon_selected = selected;
+                menu.addon_scroll = selected >= 5 ? selected - 4 : 0;
+                render_menu();
+            }
+            io_log("menu diag addon key=%.48s found=%d index=%zu",
+                   command.name, selected < menu.addon_count, selected);
+            break;
+        }
         }
     }
     menu_diag.active = 0;
@@ -744,6 +800,9 @@ static void release_forwarded_input(void)
 
 static void close_menu(void)
 {
+    if (menu.page == FOREVER_MENU_ADDON_PAGE || menu.page == FOREVER_MENU_ADDON_CONFIRM)
+        forever_title_addons_action(FOREVER_MENU_COMMAND_ADDONS_CLOSE,
+                                    menu.addon_channel, menu.addon_tab, NULL);
     release_forwarded_input();
     forever_menu_close(&menu);
     compositor_menu(NULL);
@@ -796,6 +855,25 @@ static void apply_menu_result(struct forever_menu_result result)
         close_menu();
         return;
     }
+    if (result.command >= FOREVER_MENU_COMMAND_ADDONS_OPEN &&
+        result.command <= FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK)
+    {
+        error = forever_title_addons_action(result.command, result.channel, result.tab,
+                                            result.key[0] ? result.key : NULL);
+#ifdef FOREVER_MENU_DIAG
+        io_log("menu diag addons command=%d channel=%d tab=%d key=%.80s result=%d",
+               result.command, result.channel, result.tab,
+               result.key[0] ? result.key : "(none)", error);
+#endif
+        if (error)
+        {
+            snprintf(status, sizeof(status), "Could not start the add-on operation (error %d).",
+                     -error);
+            forever_menu_addon_error(&menu, status);
+        }
+        render_menu();
+        return;
+    }
     if (result.command == FOREVER_MENU_COMMAND_REINSTALL ||
         result.command == FOREVER_MENU_COMMAND_UNINSTALL)
     {
@@ -832,6 +910,10 @@ static void menu_key(uint32_t usage)
 {
     if (usage == KEY_UP) forever_menu_move(&menu, -1);
     else if (usage == KEY_DOWN) forever_menu_move(&menu, 1);
+    else if (usage == KEY_LEFT)
+        apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_LEFT));
+    else if (usage == KEY_RIGHT)
+        apply_menu_result(forever_menu_addon_button(&menu, FOREVER_ADDON_RIGHT));
     else if (usage == KEY_ENTER) apply_menu_result(forever_menu_select(&menu));
     else if (usage == KEY_ESCAPE) apply_menu_result(forever_menu_back(&menu));
 #ifdef FOREVER_MENU_DIAG
@@ -912,7 +994,7 @@ static int desktop_open(void)
     memset(physical_keys, 0, sizeof(physical_keys));
     memset(forwarded_keys, 0, sizeof(forwarded_keys));
     physical_pad = menu_pad = physical_mouse = forwarded_mouse = 0;
-    input_draining = pending_menu_status_kind = 0;
+    input_draining = pending_menu_status_kind = pending_addon_kind = 0;
 #ifdef FOREVER_MENU_DIAG
     memset(&menu_diag, 0, sizeof(menu_diag));
 #endif
@@ -944,6 +1026,15 @@ static void desktop_frame(void)
         if (pending_menu_status_kind == 2) forever_menu_notice(&menu, pending_menu_status);
         else forever_menu_progress(&menu, pending_menu_status);
         pending_menu_status_kind = 0;
+        render_menu();
+    }
+    if (pending_addon_kind)
+    {
+        if (pending_addon_kind == 1)
+            forever_menu_addon_snapshot(&menu, &pending_addon_snapshot);
+        else
+            forever_menu_addon_error(&menu, pending_addon_error);
+        pending_addon_kind = 0;
         render_menu();
     }
 #endif

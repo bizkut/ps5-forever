@@ -36,6 +36,15 @@ RUN curl --fail --location \
     && mkdir /opt/llvm-mingw \
     && tar -xJf /tmp/llvm-mingw.tar.xz --strip-components=1 -C /opt/llvm-mingw \
     && rm /tmp/llvm-mingw.tar.xz
+RUN curl --fail --location \
+      https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+      --output /tmp/rustup-init \
+    && echo '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  /tmp/rustup-init' | sha256sum -c - \
+    && chmod 755 /tmp/rustup-init \
+    && CARGO_HOME=/opt/cargo RUSTUP_HOME=/opt/rustup /tmp/rustup-init -y \
+      --profile minimal --default-toolchain 1.99.1 \
+      --target x86_64-pc-windows-gnullvm \
+    && rm /tmp/rustup-init
 # llvm-mingw's as aliases use its generic compiler wrapper without -c.
 # Wine invokes them as standalone assemblers when creating import libraries.
 RUN set -eu; for arch in i686 x86_64; do \
@@ -44,7 +53,9 @@ RUN set -eu; for arch in i686 x86_64; do \
       printf '#!/bin/sh\nexec /opt/llvm-mingw/bin/%s-w64-mingw32-clang -x assembler -c "$@"\n' "$arch" > "$assembler"; \
       chmod 755 "$assembler"; \
     done
-ENV PATH=/opt/venv/bin:/usr/lib/llvm-19/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+ENV PATH=/opt/cargo/bin:/opt/venv/bin:/usr/lib/llvm-19/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    CARGO_HOME=/opt/cargo \
+    RUSTUP_HOME=/opt/rustup \
     LLVM_MINGW=/opt/llvm-mingw \
     LLVM_CONFIG=/usr/bin/llvm-config-19 \
     LLVM_BIN=/usr/lib/llvm-19/bin \

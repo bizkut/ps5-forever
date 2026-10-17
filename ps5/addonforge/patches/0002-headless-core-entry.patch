@@ -1,0 +1,10 @@
+diff --git a/src-tauri/src/bin/addonforge-core.rs b/src-tauri/src/bin/addonforge-core.rs
+new file mode 100644
+index 0000000..f93fcfc
+--- /dev/null
++++ b/src-tauri/src/bin/addonforge-core.rs
+@@ -0,0 +1,4 @@
++fn main() {
++    let args: Vec<String> = std::env::args().skip(1).collect();
++    std::process::exit(addonforge_lib::headless_main(&args));
++}

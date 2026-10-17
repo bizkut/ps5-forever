@@ -47,9 +47,10 @@ Source validation and the full host suite run before the SDK and runtime builds.
 
 The tag must equal the source `sce_sys/param.json` content version. This builds
 the Docker image, then builds the SDK, native title tooling/clean-room libc,
-patched RADV, FreeType, GnuTLS, Wine, vkd3d-proton, DXVK, both B1 roles, and the
-release archive. Generated Wine server headers are restored on exit. Use an
-empty source/output directory for a cold build; rerunning can reuse outputs.
+patched RADV, FreeType, GnuTLS, Wine, vkd3d-proton, DXVK, the patched
+AddonForge headless core, both B1 roles, and the release archive. Generated
+Wine server headers are restored on exit. Use an empty source/output directory
+for a cold build; rerunning can reuse outputs.
 
 Outputs under `ps5-wow/ps5/build/`:
 
@@ -61,9 +62,10 @@ Outputs under `ps5-wow/ps5/build/`:
 
 Linux release builds keep compiled outputs in `SOURCE_ROOT/.cache` so the
 self-hosted runner can reuse them even though checkout cleans
-`ps5-wow/ps5/build`. RADV, FreeType, GnuTLS, vkd3d-proton, and DXVK entries are
-keyed by their pinned sources and downloads, build recipes, container image ID,
-and relevant toolchain environment. Every restored entry is checked against a
+`ps5-wow/ps5/build`. RADV, FreeType, GnuTLS, vkd3d-proton, DXVK and
+AddonForge entries are keyed by their pinned sources and downloads, build
+recipes, container image ID, and relevant toolchain environment. Every restored
+entry is checked against a
 SHA-256 manifest; a mismatch is a cache miss and rebuilds that stage. Wine keeps
 its out-of-tree build and host-tool trees there for incremental `make`, but
 reconfigures from an empty tree when its configure key changes. Its compiler
@@ -183,16 +185,40 @@ remain in force.
   installer and restarts into the existing installer path; World of Warcraft
   paths are never deletion roots.
 
+## Add-ons source and packaging
+
+- `deps.json` pins AddonForge commit `0dc9ab28f207f86e33770e359f2345043ef19585`
+  and its tracked-content fingerprint. The numbered patches in
+  `ps5/addonforge/patches/` add the Tauri-free loopback core, per-session bearer
+  token, final-channel mapping and behavioural tests; the upstream checkout is
+  copied before patching and is never modified.
+- The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
+  `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
+  populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
+  and all later Cargo commands use `--offline --locked`.
+- The `addonforge` cache key covers the source pin, patches, `Cargo.lock`, Rust
+  toolchain and container image. A cache miss builds in two empty target
+  directories and refuses unequal `addonforge-core.exe` SHA-256 values. The
+  staged `build-receipt.json` records both hashes.
+- `wine-title/addonforge/addonforge-core.exe` and
+  `forever-maintenance.exe` are Windows PE executables run by Wine. The homebrew
+  catalog scan rejects payload ELF executables; it does not classify these PEs
+  as payloads, just as it does not classify Wine's other Windows PEs that way.
+- Add-on changes load the next time WoW starts, or after typing `/reload` in
+  WoW. The manager remains available only in the Battle.net maintenance role.
+
 ## Pinned inputs and limits
 
 `Dockerfile` pins the Ubuntu 24.04 image by digest and Ubuntu apt packages
 (including LLVM/Clang 18 and 19, SPIR-V translator/libclc 19, glslang, Python,
 bison, CMake and autotools) by the immutable 2026-10-01 archive snapshot.
 LLVM 19 builds native/title code and RADV's LLVM-dependent host tools.
-llvm-mingw 20260922/UCRT (LLVM 23.1.2) is SHA-256 checked; Python build packages
-have explicit versions. Ubuntu's fixed `ca-certificates=20240203` package
-is unpacked only to bootstrap HTTPS trust; no packages or dependencies are
-installed from the live Ubuntu archive before switching to the snapshot.
+llvm-mingw 20260922/UCRT (LLVM 23.1.2) and rustup-init 1.28.2 are SHA-256
+checked; Rust 1.99.1 and the `x86_64-pc-windows-gnullvm` target are exact
+toolchain pins. Python build packages have explicit versions. Ubuntu's fixed
+`ca-certificates=20240203` package is unpacked only to bootstrap HTTPS trust;
+no packages or dependencies are installed from the live Ubuntu archive before
+switching to the snapshot.
 The release container sets `SOURCE_DATE_EPOCH=0` and passes
 `PS5_PE_LDFLAGS=-Wl,--no-insert-timestamp` to Wine and both graphics builders.
 This requests zero timestamps from the PE linker; Wine-generated export and

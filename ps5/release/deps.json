@@ -16,6 +16,13 @@
       "path": "ps5-proton/ps5-wine"
     },
     {
+      "name": "AddonForge",
+      "url": "https://github.com/Topher121/AddonForge.git",
+      "commit": "0dc9ab28f207f86e33770e359f2345043ef19585",
+      "content_sha256": "c6985a4aea5504450278f00e2df3c3a6b033231d337910e820ef97f7006265d6",
+      "path": "AddonForge"
+    },
+    {
       "name": "PS5_Vulkan",
       "url": "https://github.com/bizkut/ps5-forever-vulkan.git",
       "commit": "2cf759774168c9f99e9af1b1d87934fb98d8229e",

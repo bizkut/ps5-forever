@@ -1,0 +1,1777 @@
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 33b94b6..f698be4 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,9 +1,11 @@
+ //! AddonForge core: Tauri commands the UI calls over IPC.
+ 
+ mod catalog;
++#[cfg(feature = "gui")]
+ mod icons;
+ mod install;
+ pub mod log;
++#[cfg(feature = "gui")]
+ mod selfupdate;
+ mod sources;
+ mod state;
+@@ -11,13 +13,15 @@ mod wow;
+ 
+ use catalog::{Catalog, CatalogEntry, Stats};
+ use serde::{Deserialize, Serialize};
++use serde_json::Value;
+ use sources::{normalize_version, ResolveOpts, Source};
+ use state::{AppState, Installed};
+ use std::collections::HashMap;
+ use std::path::{Path, PathBuf};
+-use std::sync::Arc;
++use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
++#[cfg(feature = "gui")]
+ use tauri::State;
+-use tokio::sync::{Mutex, Semaphore};
++use tokio::sync::{Mutex, Notify, Semaphore};
+ use wow::{AddonFolder, WowInstall};
+ 
+ pub const USER_AGENT: &str = concat!(
+@@ -33,12 +37,25 @@ struct App {
+     state: Mutex<AppState>,
+     catalog: Mutex<Option<(Catalog, &'static str)>>,
+     stats: Mutex<Option<Stats>>,
++    last_install_timing: Mutex<Option<InstallTiming>>,
++    mutation: Mutex<()>,
++    shutdown: Notify,
++    shutting_down: AtomicBool,
+     /// icon key -> data URL, for this run (disk cache underneath).
++    #[cfg(feature = "gui")]
+     icon_cache: Mutex<HashMap<String, Option<String>>>,
+ }
+ 
+ type Shared = Arc<App>;
+ 
++#[derive(Serialize, Clone, Debug, Default)]
++struct InstallTiming {
++    resolve_tls_ms: u128,
++    download_ms: u128,
++    zip_ms: u128,
++    broker_write_ms: u128,
++}
++
+ fn err(e: impl std::fmt::Display) -> String {
+     e.to_string()
+ }
+@@ -65,6 +82,7 @@ pub struct Package {
+     pub source_url: Option<String>,
+     pub curse_id: Option<u64>,
+     pub catalog_id: Option<String>,
++    pub updated_at: Option<String>,
+     /// Catalogue `notice` for this addon, shown on its row.
+     pub notice: Option<String>,
+     pub supports_forever: bool,
+@@ -163,8 +181,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+             managed_folder.insert(f.to_ascii_lowercase(), key.as_str());
+         }
+     }
+-    let on_disk: HashMap<String, &AddonFolder> =
+-        folders.iter().map(|f| (f.folder.to_ascii_lowercase(), f)).collect();
++    let on_disk: HashMap<String, &AddonFolder> = folders
++        .iter()
++        .map(|f| (f.folder.to_ascii_lowercase(), f))
++        .collect();
+ 
+     // First pass: direct keys (managed / catalogue / ids / standalone).
+     let direct_key = |f: &AddonFolder| -> (String, Option<&CatalogEntry>) {
+@@ -197,7 +217,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+ 
+     // Does `f` look like a module of `parent` (e.g. BigWigs_Sporefall -> BigWigs,
+     // DBM-GUI -> DBM-Core)? Needs a declared dependency and a shared name prefix.
+-    fn module_of<'a>(f: &AddonFolder, on_disk: &HashMap<String, &'a AddonFolder>) -> Option<&'a AddonFolder> {
++    fn module_of<'a>(
++        f: &AddonFolder,
++        on_disk: &HashMap<String, &'a AddonFolder>,
++    ) -> Option<&'a AddonFolder> {
+         if let Some(p) = &f.part_of {
+             if let Some(parent) = on_disk.get(&p.to_ascii_lowercase()) {
+                 return Some(parent);
+@@ -215,7 +238,8 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+         None
+     }
+ 
+-    let mut keyed: Vec<(String, Option<&CatalogEntry>, &AddonFolder)> = Vec::with_capacity(folders.len());
++    let mut keyed: Vec<(String, Option<&CatalogEntry>, &AddonFolder)> =
++        Vec::with_capacity(folders.len());
+     for f in folders {
+         let (k, e) = direct_key(f);
+         keyed.push((k, e, f));
+@@ -266,8 +290,13 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+     for (key, entry, fs) in groups {
+         let in_group: Vec<String> = fs.iter().map(|f| f.folder.to_ascii_lowercase()).collect();
+         let is_root = |f: &AddonFolder| {
+-            !f.dependencies.iter().any(|d| in_group.contains(&d.to_ascii_lowercase()))
+-                && f.part_of.as_ref().map(|p| !in_group.contains(&p.to_ascii_lowercase())).unwrap_or(true)
++            !f.dependencies
++                .iter()
++                .any(|d| in_group.contains(&d.to_ascii_lowercase()))
++                && f.part_of
++                    .as_ref()
++                    .map(|p| !in_group.contains(&p.to_ascii_lowercase()))
++                    .unwrap_or(true)
+         };
+         let primary = fs
+             .iter()
+@@ -284,7 +313,9 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+             .filter(|v| !v.is_empty() && !v.starts_with('@'));
+         let source = pick_source(entry, primary, has_wago, managed)
+             .or_else(|| fs.iter().find_map(|f| pick_source(None, f, has_wago, None)));
+-        let curse_id = entry.and_then(|e| e.curse).or_else(|| fs.iter().find_map(|f| f.curse));
++        let curse_id = entry
++            .and_then(|e| e.curse)
++            .or_else(|| fs.iter().find_map(|f| f.curse));
+         let supports_forever = fs.iter().any(|f| f.supports_forever());
+ 
+         // Required dependencies that are not on disk at all.
+@@ -292,7 +323,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+         for f in &fs {
+             for d in &f.dependencies {
+                 let dl = d.to_ascii_lowercase();
+-                if dl.starts_with("blizzard_") || on_disk.contains_key(&dl) || in_group.contains(&dl) {
++                if dl.starts_with("blizzard_")
++                    || on_disk.contains_key(&dl)
++                    || in_group.contains(&dl)
++                {
+                     continue;
+                 }
+                 if missing.iter().any(|m| m.folder.eq_ignore_ascii_case(d)) {
+@@ -317,7 +351,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+                 "curse-only".to_string(),
+                 "Only on CurseForge: AddonForge can't update it, but the link works".to_string(),
+             ),
+-            None => ("no-source".to_string(), "No update source found in its files".to_string()),
++            None => (
++                "no-source".to_string(),
++                "No update source found in its files".to_string(),
++            ),
+         };
+         let mut folder_names: Vec<String> = fs.iter().map(|f| f.folder.clone()).collect();
+         folder_names.sort();
+@@ -329,7 +366,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+             folders: folder_names,
+             installed_version,
+             author: primary.author.clone(),
+-            notes: entry.map(|e| e.desc.clone()).filter(|d| !d.is_empty()).or_else(|| primary.notes.clone()),
++            notes: entry
++                .map(|e| e.desc.clone())
++                .filter(|d| !d.is_empty())
++                .or_else(|| primary.notes.clone()),
+             source_label: source.as_ref().map(|s| s.label()).unwrap_or_default(),
+             source_url: source
+                 .as_ref()
+@@ -339,7 +379,10 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+             source,
+             curse_id,
+             catalog_id: entry.map(|e| e.id.clone()),
+-            notice: entry.and_then(|e| e.notice.clone()).filter(|n| !n.trim().is_empty()),
++            updated_at: None,
++            notice: entry
++                .and_then(|e| e.notice.clone())
++                .filter(|n| !n.trim().is_empty()),
+             supports_forever,
+             managed: managed.is_some(),
+             missing_deps: missing,
+@@ -354,7 +397,11 @@ fn build_packages(st: &AppState, cat: &Catalog, folders: &[AddonFolder]) -> Vec<
+             note,
+         });
+     }
+-    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
++    out.sort_by(|a, b| {
++        a.name
++            .to_ascii_lowercase()
++            .cmp(&b.name.to_ascii_lowercase())
++    });
+     out
+ }
+ 
+@@ -362,7 +409,11 @@ async fn catalog_cached(app: &App) -> Catalog {
+     let mut guard = app.catalog.lock().await;
+     if guard.is_none() {
+         let loaded = catalog::load(&app.client).await;
+-        logi!("catalogue loaded: {} entries ({})", loaded.0.addons.len(), loaded.1);
++        logi!(
++            "catalogue loaded: {} entries ({})",
++            loaded.0.addons.len(),
++            loaded.1
++        );
+         *guard = Some(loaded);
+     }
+     guard.as_ref().unwrap().0.clone()
+@@ -372,14 +423,27 @@ async fn stats_cached(app: &App) -> Stats {
+     let mut guard = app.stats.lock().await;
+     if guard.is_none() {
+         let s = catalog::load_stats(&app.client).await;
+-        logi!("stats loaded: {} entries ({})", s.entries.len(), if s.updated.is_empty() { "none" } else { s.updated.as_str() });
++        logi!(
++            "stats loaded: {} entries ({})",
++            s.entries.len(),
++            if s.updated.is_empty() {
++                "none"
++            } else {
++                s.updated.as_str()
++            }
++        );
+         *guard = Some(s);
+     }
+     guard.as_ref().unwrap().clone()
+ }
+ 
+ /// Icon for one thing, via the run cache: `local:<install>|<texture>` or `url:<https>`.
+-async fn icon_cached(app: &App, cache_key: String, produce: impl std::future::Future<Output = Option<String>>) -> Option<String> {
++#[cfg(feature = "gui")]
++async fn icon_cached(
++    app: &App,
++    cache_key: String,
++    produce: impl std::future::Future<Output = Option<String>>,
++) -> Option<String> {
+     if let Some(v) = app.icon_cache.lock().await.get(&cache_key) {
+         return v.clone();
+     }
+@@ -393,11 +457,16 @@ fn entry_hint(cat: &Catalog, pkg: &Package) -> (Option<String>, Option<bool>) {
+         .catalog_id
+         .as_ref()
+         .and_then(|id| cat.addons.iter().find(|e| &e.id == id));
+-    (entry.and_then(|e| e.asset_hint.clone()), entry.and_then(|e| e.forever))
++    (
++        entry.and_then(|e| e.asset_hint.clone()),
++        entry.and_then(|e| e.forever),
++    )
+ }
+ 
+ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
+-    let Some(src) = pkg.source.clone() else { return };
++    let Some(src) = pkg.source.clone() else {
++        return;
++    };
+     let st = app.state.lock().await.clone();
+     if matches!(src, Source::Wago(_)) && !st.has_wago_key() {
+         return;
+@@ -462,6 +531,7 @@ async fn check_all(app: Shared, pkgs: &mut [Package], cat: &Catalog) {
+ 
+ // ---------------------------------------------------------------- commands
+ 
++#[cfg(feature = "gui")]
+ #[derive(Serialize)]
+ struct Settings {
+     version: String,
+@@ -485,10 +555,14 @@ struct Settings {
+     svfix: bool,
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn get_settings(app: State<'_, Shared>) -> Result<Settings, String> {
+     let st = app.state.lock().await.clone();
+-    let install = st.install_path.as_deref().and_then(|p| wow::describe_install(Path::new(p)));
++    let install = st
++        .install_path
++        .as_deref()
++        .and_then(|p| wow::describe_install(Path::new(p)));
+     let cat = app.catalog.lock().await.clone();
+     Ok(Settings {
+         version: selfupdate::version().into(),
+@@ -506,14 +580,21 @@ async fn get_settings(app: State<'_, Shared>) -> Result<Settings, String> {
+         wago_key_url: sources::wago::KEY_URL.into(),
+         repo_url: REPO_URL.into(),
+         support_email: SUPPORT_EMAIL.into(),
+-        start_tab: std::env::var("ADDONFORGE_TAB").ok().filter(|t| !t.is_empty()),
+-        svfix: st.install_path.as_deref().map(|p| wow::svfix_present(Path::new(p))).unwrap_or(false),
++        start_tab: std::env::var("ADDONFORGE_TAB")
++            .ok()
++            .filter(|t| !t.is_empty()),
++        svfix: st
++            .install_path
++            .as_deref()
++            .map(|p| wow::svfix_present(Path::new(p)))
++            .unwrap_or(false),
+     })
+ }
+ 
+-#[tauri::command]
+-async fn find_installs(app: State<'_, Shared>) -> Result<Vec<WowInstall>, String> {
+-    let found = tokio::task::spawn_blocking(wow::find_installs).await.map_err(err)?;
++async fn find_installs_impl(app: &App) -> Result<Vec<WowInstall>, String> {
++    let found = tokio::task::spawn_blocking(wow::find_installs)
++        .await
++        .map_err(err)?;
+     let mut st = app.state.lock().await;
+     if st.install_path.is_none() {
+         if let Some(f) = found.iter().find(|i| i.flavor == "forever") {
+@@ -525,8 +606,13 @@ async fn find_installs(app: State<'_, Shared>) -> Result<Vec<WowInstall>, String
+     Ok(found)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+-async fn set_install_path(app: State<'_, Shared>, path: String) -> Result<WowInstall, String> {
++async fn find_installs(app: State<'_, Shared>) -> Result<Vec<WowInstall>, String> {
++    find_installs_impl(&app).await
++}
++
++async fn set_install_path_impl(app: &App, path: String) -> Result<WowInstall, String> {
+     let p = PathBuf::from(path.trim());
+     let info = wow::describe_install(&p)
+         .ok_or_else(|| "That folder doesn't look like a WoW product folder (expected e.g. ...\\_classic_beta_ with Interface\\AddOns inside)".to_string())?;
+@@ -537,6 +623,13 @@ async fn set_install_path(app: State<'_, Shared>, path: String) -> Result<WowIns
+     Ok(info)
+ }
+ 
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn set_install_path(app: State<'_, Shared>, path: String) -> Result<WowInstall, String> {
++    set_install_path_impl(&app, path).await
++}
++
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn set_wago_key(app: State<'_, Shared>, key: String) -> Result<bool, String> {
+     let mut st = app.state.lock().await;
+@@ -546,6 +639,7 @@ async fn set_wago_key(app: State<'_, Shared>, key: String) -> Result<bool, Strin
+     Ok(st.wago_key.is_some())
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn set_prefs(app: State<'_, Shared>, allow_prerelease: Option<bool>) -> Result<(), String> {
+     let mut st = app.state.lock().await;
+@@ -556,6 +650,7 @@ async fn set_prefs(app: State<'_, Shared>, allow_prerelease: Option<bool>) -> Re
+     st.save().map_err(err)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn set_pin(app: State<'_, Shared>, key: String, pinned: bool) -> Result<(), String> {
+     let mut st = app.state.lock().await;
+@@ -567,6 +662,7 @@ async fn set_pin(app: State<'_, Shared>, key: String, pinned: bool) -> Result<()
+     st.save().map_err(err)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn set_ignore(app: State<'_, Shared>, key: String, ignored: bool) -> Result<(), String> {
+     let mut st = app.state.lock().await;
+@@ -592,24 +688,82 @@ async fn scan_packages(app: &App) -> Result<Vec<Package>, String> {
+         .await
+         .map_err(err)?;
+     let st = app.state.lock().await.clone();
+-    Ok(build_packages(&st, &cat, &folders))
++    let stats = stats_cached(app).await;
++    let mut packages = build_packages(&st, &cat, &folders);
++    for package in &mut packages {
++        package.updated_at = package
++            .catalog_id
++            .as_ref()
++            .and_then(|id| stats.entries.get(id))
++            .and_then(|entry| entry.updated_at.clone());
++    }
++    Ok(packages)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn scan(app: State<'_, Shared>) -> Result<Vec<Package>, String> {
+     scan_packages(&app).await
+ }
+ 
+-#[tauri::command]
+-async fn check_updates(app: State<'_, Shared>) -> Result<Vec<Package>, String> {
++async fn check_updates_impl(app: Shared) -> Result<Vec<Package>, String> {
+     let mut pkgs = scan_packages(&app).await?;
+     let cat = catalog_cached(&app).await;
+-    check_all(app.inner().clone(), &mut pkgs, &cat).await;
++    check_all(app, &mut pkgs, &cat).await;
+     let n = pkgs.iter().filter(|p| p.status == "update").count();
+     logi!("check: {} packages, {} updates", pkgs.len(), n);
+     Ok(pkgs)
+ }
+ 
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn check_updates(app: State<'_, Shared>) -> Result<Vec<Package>, String> {
++    check_updates_impl(app.inner().clone()).await
++}
++
++async fn record_install(
++    app: &App,
++    key: &str,
++    src: &Source,
++    version: &str,
++    folders: Vec<String>,
++) -> Result<Installed, String> {
++    let rec = Installed {
++        source: src.kind().into(),
++        source_id: src.id(),
++        version: version.to_string(),
++        folders,
++        installed_at: state::now_secs(),
++    };
++    let mut st = app.state.lock().await;
++    st.installed.insert(key.to_string(), rec.clone());
++    st.save().map_err(err)?;
++    logi!(
++        "installed {key} {} ({} folders)",
++        rec.version,
++        rec.folders.len()
++    );
++    Ok(rec)
++}
++
++#[cfg(test)]
++async fn install_local_archive(
++    app: &App,
++    key: &str,
++    src: &Source,
++    version: &str,
++    zip_path: &Path,
++) -> Result<Installed, String> {
++    let install = current_install(app).await?;
++    let addons = addons_dir(&install);
++    let zip = zip_path.to_path_buf();
++    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons))
++        .await
++        .map_err(err)?
++        .map_err(err)?;
++    record_install(app, key, src, version, placed.folders).await
++}
++
+ async fn install_from(
+     app: &App,
+     key: &str,
+@@ -625,7 +779,11 @@ async fn install_from(
+         wago_key: st.wago_key.as_deref(),
+         prerelease: st.allow_prerelease,
+     };
+-    let remote = sources::resolve(&app.client, src, opts).await.map_err(err)?;
++    let resolve_started = std::time::Instant::now();
++    let remote = sources::resolve(&app.client, src, opts)
++        .await
++        .map_err(err)?;
++    let resolve_tls_ms = resolve_started.elapsed().as_millis();
+     let vouched = match key.strip_prefix("cat:") {
+         Some(id) => catalog_cached(app)
+             .await
+@@ -638,33 +796,37 @@ async fn install_from(
+     if remote.forever == Some(false) && !allow_non_forever && vouched != Some(true) {
+         return Err("NOT_FOREVER".into());
+     }
+-    logi!("install {key} from {} {} -> {}", src.label(), remote.version, remote.download_url);
++    logi!(
++        "install {key} from {} {} -> {}",
++        src.label(),
++        remote.version,
++        remote.download_url
++    );
+     let tmp = addons.join(install::TMP_DIR).join("dl");
++    let download_started = std::time::Instant::now();
+     let zip = install::download(&app.client, &remote.download_url, &tmp, &remote.filename)
+         .await
+         .map_err(|e| {
+             loge!("download {key}: {e}");
+             e.to_string()
+         })?;
++    let download_ms = download_started.elapsed().as_millis();
+     let addons2 = addons.clone();
+-    let folders = tokio::task::spawn_blocking(move || install::place(&zip, &addons2))
++    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons2))
+         .await
+         .map_err(err)?
+         .map_err(|e| {
+             loge!("place {key}: {e}");
+             e.to_string()
+         })?;
+-    let rec = Installed {
+-        source: src.kind().into(),
+-        source_id: src.id(),
+-        version: remote.version.clone(),
+-        folders,
+-        installed_at: state::now_secs(),
++    let timing = InstallTiming {
++        resolve_tls_ms,
++        download_ms,
++        zip_ms: placed.zip_ms,
++        broker_write_ms: placed.broker_move_ms,
+     };
+-    let mut st = app.state.lock().await;
+-    st.installed.insert(key.to_string(), rec.clone());
+-    st.save().map_err(err)?;
+-    logi!("installed {key} {} ({} folders)", rec.version, rec.folders.len());
++    let rec = record_install(app, key, src, &remote.version, placed.folders).await?;
++    *app.last_install_timing.lock().await = Some(timing);
+     Ok(rec)
+ }
+ 
+@@ -679,22 +841,41 @@ async fn refreshed(app: &App, key: &str) -> Result<Package, String> {
+     Ok(p)
+ }
+ 
+-#[tauri::command]
+-async fn update_package(
+-    app: State<'_, Shared>,
++async fn update_package_impl(
++    app: &App,
+     key: String,
+     allow_non_forever: Option<bool>,
+ ) -> Result<Package, String> {
+-    let pkgs = scan_packages(&app).await?;
++    let pkgs = scan_packages(app).await?;
+     let pkg = pkgs
+         .into_iter()
+         .find(|p| p.key == key)
+         .ok_or_else(|| "Addon not found on disk any more".to_string())?;
+-    let src = pkg.source.clone().ok_or_else(|| "This addon has no update source".to_string())?;
+-    let cat = catalog_cached(&app).await;
++    let src = pkg
++        .source
++        .clone()
++        .ok_or_else(|| "This addon has no update source".to_string())?;
++    let cat = catalog_cached(app).await;
+     let (hint, _) = entry_hint(&cat, &pkg);
+-    install_from(&app, &key, &src, hint.as_deref(), allow_non_forever.unwrap_or(false)).await?;
+-    refreshed(&app, &key).await
++    install_from(
++        app,
++        &key,
++        &src,
++        hint.as_deref(),
++        allow_non_forever.unwrap_or(false),
++    )
++    .await?;
++    refreshed(app, &key).await
++}
++
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn update_package(
++    app: State<'_, Shared>,
++    key: String,
++    allow_non_forever: Option<bool>,
++) -> Result<Package, String> {
++    update_package_impl(&app, key, allow_non_forever).await
+ }
+ 
+ #[derive(Serialize, Clone)]
+@@ -708,15 +889,14 @@ struct CatalogRow {
+     stat_source: Option<String>,
+ }
+ 
+-#[tauri::command]
+-async fn catalog_list(app: State<'_, Shared>, refresh: Option<bool>) -> Result<Vec<CatalogRow>, String> {
++async fn catalog_list_impl(app: &App, refresh: Option<bool>) -> Result<Vec<CatalogRow>, String> {
+     if refresh.unwrap_or(false) {
+         *app.catalog.lock().await = None;
+         *app.stats.lock().await = None;
+     }
+-    let cat = catalog_cached(&app).await;
+-    let stats = stats_cached(&app).await;
+-    let installed_keys: Vec<String> = match scan_packages(&app).await {
++    let cat = catalog_cached(app).await;
++    let stats = stats_cached(app).await;
++    let installed_keys: Vec<String> = match scan_packages(app).await {
+         Ok(p) => p.into_iter().map(|p| p.key).collect(),
+         Err(_) => Vec::new(),
+     };
+@@ -738,6 +918,15 @@ async fn catalog_list(app: State<'_, Shared>, refresh: Option<bool>) -> Result<V
+         .collect())
+ }
+ 
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn catalog_list(
++    app: State<'_, Shared>,
++    refresh: Option<bool>,
++) -> Result<Vec<CatalogRow>, String> {
++    catalog_list_impl(&app, refresh).await
++}
++
+ #[derive(Serialize, Clone)]
+ struct BundleAddon {
+     id: String,
+@@ -759,16 +948,16 @@ struct BundleView {
+ }
+ 
+ /// The catalogue's featured list, raw. The UI picks what applies today.
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn catalog_featured(app: State<'_, Shared>) -> Result<Vec<catalog::Featured>, String> {
+     Ok(catalog_cached(&app).await.featured)
+ }
+ 
+-#[tauri::command]
+-async fn bundles(app: State<'_, Shared>) -> Result<Vec<BundleView>, String> {
+-    let cat = catalog_cached(&app).await;
++async fn bundles_impl(app: &App) -> Result<Vec<BundleView>, String> {
++    let cat = catalog_cached(app).await;
+     let has_wago = app.state.lock().await.has_wago_key();
+-    let installed_keys: Vec<String> = match scan_packages(&app).await {
++    let installed_keys: Vec<String> = match scan_packages(app).await {
+         Ok(p) => p.into_iter().map(|p| p.key).collect(),
+         Err(_) => Vec::new(),
+     };
+@@ -801,9 +990,19 @@ async fn bundles(app: State<'_, Shared>) -> Result<Vec<BundleView>, String> {
+         .collect())
+ }
+ 
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn bundles(app: State<'_, Shared>) -> Result<Vec<BundleView>, String> {
++    bundles_impl(&app).await
++}
++
+ /// Icons for installed packages: own icon file, else GitHub avatar, else none.
++#[cfg(feature = "gui")]
+ #[tauri::command]
+-async fn package_icons(app: State<'_, Shared>, keys: Vec<String>) -> Result<HashMap<String, String>, String> {
++async fn package_icons(
++    app: State<'_, Shared>,
++    keys: Vec<String>,
++) -> Result<HashMap<String, String>, String> {
+     let install = current_install(&app).await?;
+     let pkgs = scan_packages(&app).await?;
+     let mut out = HashMap::new();
+@@ -812,7 +1011,10 @@ async fn package_icons(app: State<'_, Shared>, keys: Vec<String>) -> Result<Hash
+         if let Some(tex) = &p.icon_texture {
+             let (inst, tex2) = (install.clone(), tex.clone());
+             icon = icon_cached(&app, format!("local:{inst}|{tex2}"), async move {
+-                tokio::task::spawn_blocking(move || icons::local_icon(Path::new(&inst), &tex2)).await.ok().flatten()
++                tokio::task::spawn_blocking(move || icons::local_icon(Path::new(&inst), &tex2))
++                    .await
++                    .ok()
++                    .flatten()
+             })
+             .await;
+         }
+@@ -820,7 +1022,10 @@ async fn package_icons(app: State<'_, Shared>, keys: Vec<String>) -> Result<Hash
+             if let Some(Source::Github(repo)) = &p.source {
+                 if let Some(url) = icons::github_avatar_url(repo) {
+                     let (c, u) = (app.client.clone(), url.clone());
+-                    icon = icon_cached(&app, format!("url:{url}"), async move { icons::remote_icon(&c, &u).await }).await;
++                    icon = icon_cached(&app, format!("url:{url}"), async move {
++                        icons::remote_icon(&c, &u).await
++                    })
++                    .await;
+                 }
+             }
+         }
+@@ -832,8 +1037,12 @@ async fn package_icons(app: State<'_, Shared>, keys: Vec<String>) -> Result<Hash
+ }
+ 
+ /// Icons for catalogue entries: explicit `icon` URL, else GitHub avatar.
++#[cfg(feature = "gui")]
+ #[tauri::command]
+-async fn catalog_icons(app: State<'_, Shared>, ids: Vec<String>) -> Result<HashMap<String, String>, String> {
++async fn catalog_icons(
++    app: State<'_, Shared>,
++    ids: Vec<String>,
++) -> Result<HashMap<String, String>, String> {
+     let cat = catalog_cached(&app).await;
+     let mut out = HashMap::new();
+     for e in cat.addons.iter().filter(|e| ids.contains(&e.id)) {
+@@ -843,7 +1052,11 @@ async fn catalog_icons(app: State<'_, Shared>, ids: Vec<String>) -> Result<HashM
+             .or_else(|| e.github.as_deref().and_then(icons::github_avatar_url));
+         let Some(url) = url else { continue };
+         let (c, u) = (app.client.clone(), url.clone());
+-        if let Some(i) = icon_cached(&app, format!("url:{url}"), async move { icons::remote_icon(&c, &u).await }).await {
++        if let Some(i) = icon_cached(&app, format!("url:{url}"), async move {
++            icons::remote_icon(&c, &u).await
++        })
++        .await
++        {
+             out.insert(e.id.clone(), i);
+         }
+     }
+@@ -853,23 +1066,25 @@ async fn catalog_icons(app: State<'_, Shared>, ids: Vec<String>) -> Result<HashM
+ /// Longer description + preview image for the details window. GitHub only
+ /// for now (README excerpt and its first screenshot); other sources return
+ /// nothing and the UI shows the catalogue description and a link.
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn addon_details(app: State<'_, Shared>, id: String) -> Result<icons::Details, String> {
+     let cat = catalog_cached(&app).await;
+-    let Some(e) = cat.addons.iter().find(|e| e.id == id) else { return Ok(icons::Details::default()) };
++    let Some(e) = cat.addons.iter().find(|e| e.id == id) else {
++        return Ok(icons::Details::default());
++    };
+     match &e.github {
+         Some(repo) => Ok(icons::github_details(&app.client, repo).await),
+         None => Ok(icons::Details::default()),
+     }
+ }
+ 
+-#[tauri::command]
+-async fn install_catalog(
+-    app: State<'_, Shared>,
++async fn install_catalog_impl(
++    app: &App,
+     id: String,
+     allow_non_forever: Option<bool>,
+ ) -> Result<Package, String> {
+-    let cat = catalog_cached(&app).await;
++    let cat = catalog_cached(app).await;
+     let e = cat
+         .addons
+         .iter()
+@@ -884,11 +1099,29 @@ async fn install_catalog(
+         return Err("This addon is on Wago: add your free Wago API key in Settings first".into());
+     }
+     let key = format!("cat:{}", e.id);
+-    install_from(&app, &key, &src, e.asset_hint.as_deref(), allow_non_forever.unwrap_or(false)).await?;
+-    refreshed(&app, &key).await
++    install_from(
++        app,
++        &key,
++        &src,
++        e.asset_hint.as_deref(),
++        allow_non_forever.unwrap_or(false),
++    )
++    .await?;
++    refreshed(app, &key).await
++}
++
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn install_catalog(
++    app: State<'_, Shared>,
++    id: String,
++    allow_non_forever: Option<bool>,
++) -> Result<Package, String> {
++    install_catalog_impl(&app, id, allow_non_forever).await
+ }
+ 
+ /// Install straight from a source the user typed or imported.
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn install_source(
+     app: State<'_, Shared>,
+@@ -897,10 +1130,18 @@ async fn install_source(
+     allow_non_forever: Option<bool>,
+ ) -> Result<Package, String> {
+     let key = key.unwrap_or_else(|| format!("{}:{}", source.kind(), source.id()));
+-    install_from(&app, &key, &source, None, allow_non_forever.unwrap_or(false)).await?;
++    install_from(
++        &app,
++        &key,
++        &source,
++        None,
++        allow_non_forever.unwrap_or(false),
++    )
++    .await?;
+     refreshed(&app, &key).await
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn install_github(
+     app: State<'_, Shared>,
+@@ -914,7 +1155,12 @@ async fn install_github(
+     let key = cat
+         .addons
+         .iter()
+-        .find(|e| e.github.as_deref().map(|g| g.eq_ignore_ascii_case(&repo)).unwrap_or(false))
++        .find(|e| {
++            e.github
++                .as_deref()
++                .map(|g| g.eq_ignore_ascii_case(&repo))
++                .unwrap_or(false)
++        })
+         .map(|e| format!("cat:{}", e.id))
+         .unwrap_or_else(|| format!("github:{repo}"));
+     let src = Source::Github(repo);
+@@ -922,10 +1168,9 @@ async fn install_github(
+     refreshed(&app, &key).await
+ }
+ 
+-#[tauri::command]
+-async fn remove_package(app: State<'_, Shared>, key: String) -> Result<Vec<String>, String> {
+-    let install = current_install(&app).await?;
+-    let pkgs = scan_packages(&app).await?;
++async fn remove_package_impl(app: &App, key: String) -> Result<Vec<String>, String> {
++    let install = current_install(app).await?;
++    let pkgs = scan_packages(app).await?;
+     let pkg = pkgs
+         .into_iter()
+         .find(|p| p.key == key)
+@@ -944,14 +1189,25 @@ async fn remove_package(app: State<'_, Shared>, key: String) -> Result<Vec<Strin
+     Ok(gone)
+ }
+ 
++#[cfg(feature = "gui")]
++#[tauri::command]
++async fn remove_package(app: State<'_, Shared>, key: String) -> Result<Vec<String>, String> {
++    remove_package_impl(&app, key).await
++}
++
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn open_addons_folder(app: State<'_, Shared>) -> Result<String, String> {
+     let install = current_install(&app).await?;
+     let dir = addons_dir(&install);
+-    std::process::Command::new("explorer").arg(&dir).spawn().map_err(err)?;
++    std::process::Command::new("explorer")
++        .arg(&dir)
++        .spawn()
++        .map_err(err)?;
+     Ok(dir.to_string_lossy().to_string())
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn open_log() -> Result<String, String> {
+     let p = log::path();
+@@ -967,6 +1223,7 @@ async fn open_log() -> Result<String, String> {
+ 
+ // ---------------------------------------------------------------- import / export
+ 
++#[cfg(feature = "gui")]
+ #[derive(Serialize, Deserialize, Clone, Debug)]
+ struct ExportItem {
+     name: String,
+@@ -979,6 +1236,7 @@ struct ExportItem {
+     folders: Vec<String>,
+ }
+ 
++#[cfg(feature = "gui")]
+ #[derive(Serialize, Deserialize, Clone, Debug)]
+ struct ExportFile {
+     addonforge: u32,
+@@ -987,6 +1245,7 @@ struct ExportFile {
+     addons: Vec<ExportItem>,
+ }
+ 
++#[cfg(feature = "gui")]
+ async fn export_data(app: &App) -> Result<ExportFile, String> {
+     let pkgs = scan_packages(app).await?;
+     Ok(ExportFile {
+@@ -1007,6 +1266,7 @@ async fn export_data(app: &App) -> Result<ExportFile, String> {
+     })
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn export_list(app: State<'_, Shared>, path: String) -> Result<usize, String> {
+     let data = export_data(&app).await?;
+@@ -1016,6 +1276,7 @@ async fn export_list(app: State<'_, Shared>, path: String) -> Result<usize, Stri
+     Ok(n)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[derive(Serialize, Clone)]
+ struct ImportRow {
+     name: String,
+@@ -1026,11 +1287,17 @@ struct ImportRow {
+     why: String,
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn import_list(app: State<'_, Shared>, path: String) -> Result<Vec<ImportRow>, String> {
+     let bytes = std::fs::read(&path).map_err(err)?;
+-    let file: ExportFile = serde_json::from_slice(&bytes).map_err(|e| format!("not an AddonForge list: {e}"))?;
+-    let have: Vec<String> = scan_packages(&app).await?.into_iter().map(|p| p.key).collect();
++    let file: ExportFile =
++        serde_json::from_slice(&bytes).map_err(|e| format!("not an AddonForge list: {e}"))?;
++    let have: Vec<String> = scan_packages(&app)
++        .await?
++        .into_iter()
++        .map(|p| p.key)
++        .collect();
+     let has_wago = app.state.lock().await.has_wago_key();
+     Ok(file
+         .addons
+@@ -1038,17 +1305,28 @@ async fn import_list(app: State<'_, Shared>, path: String) -> Result<Vec<ImportR
+         .map(|it| {
+             let installed = have.contains(&it.key);
+             let (installable, why) = match &it.source {
+-                None => (false, "no source (probably CurseForge-only or a personal addon)".into()),
++                None => (
++                    false,
++                    "no source (probably CurseForge-only or a personal addon)".into(),
++                ),
+                 Some(Source::Wago(_)) if !has_wago => (false, "needs a Wago key".into()),
+                 Some(_) => (true, String::new()),
+             };
+-            ImportRow { name: it.name, key: it.key, source: it.source, installed, installable, why }
++            ImportRow {
++                name: it.name,
++                key: it.key,
++                source: it.source,
++                installed,
++                installable,
++                why,
++            }
+         })
+         .collect())
+ }
+ 
+ // ---------------------------------------------------------------- self-update
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn check_self_update(app: State<'_, Shared>) -> Result<selfupdate::SelfUpdate, String> {
+     let url = std::env::var("ADDONFORGE_UPDATE_URL").ok();
+@@ -1060,11 +1338,16 @@ async fn check_self_update(app: State<'_, Shared>) -> Result<selfupdate::SelfUpd
+     if let Some(e) = &r.error {
+         logi!("self-update check: {e}");
+     } else {
+-        logi!("self-update check: latest {} (available: {})", r.tag, r.available);
++        logi!(
++            "self-update check: latest {} (available: {})",
++            r.tag,
++            r.available
++        );
+     }
+     Ok(r)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn skip_self_update(app: State<'_, Shared>, tag: String) -> Result<(), String> {
+     let mut st = app.state.lock().await;
+@@ -1072,11 +1355,17 @@ async fn skip_self_update(app: State<'_, Shared>, tag: String) -> Result<(), Str
+     st.save().map_err(err)
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+-async fn apply_self_update(app: State<'_, Shared>, handle: tauri::AppHandle) -> Result<String, String> {
++async fn apply_self_update(
++    app: State<'_, Shared>,
++    handle: tauri::AppHandle,
++) -> Result<String, String> {
+     let url = std::env::var("ADDONFORGE_UPDATE_URL").ok();
+     let r = selfupdate::check(&app.client, url.as_deref()).await;
+-    let latest = r.latest.ok_or_else(|| r.error.unwrap_or_else(|| "no update info".into()))?;
++    let latest = r
++        .latest
++        .ok_or_else(|| r.error.unwrap_or_else(|| "no update info".into()))?;
+     if !r.available {
+         return Err("Already up to date".into());
+     }
+@@ -1094,6 +1383,7 @@ async fn apply_self_update(app: State<'_, Shared>, handle: tauri::AppHandle) ->
+ 
+ /// First launch of a newer build: return that build's release notes once.
+ /// Never on a fresh install (nothing to compare with), never for dev builds.
++#[cfg(feature = "gui")]
+ #[derive(Serialize)]
+ struct WhatsNew {
+     version: String,
+@@ -1101,6 +1391,7 @@ struct WhatsNew {
+     notes: String,
+ }
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn whats_new(app: State<'_, Shared>) -> Result<Option<WhatsNew>, String> {
+     let current = selfupdate::build();
+@@ -1125,7 +1416,11 @@ async fn whats_new(app: State<'_, Shared>) -> Result<Option<WhatsNew>, String> {
+         let r = selfupdate::check(&app.client, url.as_deref()).await;
+         if let Some(l) = r.latest {
+             if l.build == current && !l.notes.trim().is_empty() {
+-                result = Some(WhatsNew { version: l.version, build: l.build, notes: l.notes });
++                result = Some(WhatsNew {
++                    version: l.version,
++                    build: l.build,
++                    notes: l.notes,
++                });
+             }
+         }
+     }
+@@ -1137,17 +1432,37 @@ async fn whats_new(app: State<'_, Shared>) -> Result<Option<WhatsNew>, String> {
+ 
+ // ---------------------------------------------------------------- diagnostics
+ 
++#[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn diagnostics(app: State<'_, Shared>) -> Result<String, String> {
+     let st = app.state.lock().await.clone();
+-    let install = st.install_path.as_deref().and_then(|p| wow::describe_install(Path::new(p)));
++    let install = st
++        .install_path
++        .as_deref()
++        .and_then(|p| wow::describe_install(Path::new(p)));
+     let pkgs = scan_packages(&app).await.unwrap_or_default();
+     let mut s = String::new();
+-    s.push_str(&format!("AddonForge v{} build {}\n", selfupdate::version(), selfupdate::build()));
+-    s.push_str(&format!("OS: {} {}\n", std::env::consts::OS, std::env::consts::ARCH));
+-    s.push_str(&format!("Exe: {}\n", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()));
++    s.push_str(&format!(
++        "AddonForge v{} build {}\n",
++        selfupdate::version(),
++        selfupdate::build()
++    ));
++    s.push_str(&format!(
++        "OS: {} {}\n",
++        std::env::consts::OS,
++        std::env::consts::ARCH
++    ));
++    s.push_str(&format!(
++        "Exe: {}\n",
++        std::env::current_exe()
++            .map(|p| p.display().to_string())
++            .unwrap_or_default()
++    ));
+     match &install {
+-        Some(i) => s.push_str(&format!("Install: {} ({}, {})\n", i.path, i.product, i.label)),
++        Some(i) => s.push_str(&format!(
++            "Install: {} ({}, {})\n",
++            i.path, i.product, i.label
++        )),
+         None => s.push_str("Install: none selected\n"),
+     }
+     s.push_str(&format!(
+@@ -1183,19 +1498,509 @@ fn make_app() -> Shared {
+         .build()
+         .expect("http client");
+     let st = AppState::load();
++    for found in wow::find_installs() {
++        if let Err(error) = install::recover_tmp(&addons_dir(&found.path)) {
++            loge!("recover {}: {error}", found.path);
++        }
++    }
+     if let Some(p) = &st.install_path {
+-        install::clean_tmp(&addons_dir(p));
++        if let Err(error) = install::recover_tmp(&addons_dir(p)) {
++            loge!("recover {p}: {error}");
++        }
+     }
+     Arc::new(App {
+         client,
+         state: Mutex::new(st),
+         catalog: Mutex::new(None),
+         stats: Mutex::new(None),
++        last_install_timing: Mutex::new(None),
++        mutation: Mutex::new(()),
++        shutdown: Notify::new(),
++        shutting_down: AtomicBool::new(false),
++        #[cfg(feature = "gui")]
+         icon_cache: Mutex::new(HashMap::new()),
+     })
+ }
+ 
++#[derive(Deserialize)]
++struct HeadlessRequest {
++    command: String,
++    #[serde(default)]
++    args: Value,
++}
++
++fn string_arg(args: &Value, name: &str) -> Result<String, String> {
++    args.get(name)
++        .and_then(Value::as_str)
++        .map(str::to_owned)
++        .ok_or_else(|| format!("missing string argument: {name}"))
++}
++
++async fn update_all_impl(app: Shared) -> Result<Vec<Package>, String> {
++    let packages = check_updates_impl(app.clone()).await?;
++    let keys: Vec<String> = packages
++        .iter()
++        .filter(|package| package.update_available && !package.pinned)
++        .map(|package| package.key.clone())
++        .collect();
++    let mut updated = Vec::with_capacity(keys.len());
++    for key in keys {
++        updated.push(update_package_impl(&app, key, Some(false)).await?);
++    }
++    Ok(updated)
++}
++
++async fn install_bundle_impl(app: &App, id: String) -> Result<Vec<Package>, String> {
++    let catalog = catalog_cached(app).await;
++    let bundle = catalog
++        .bundles
++        .iter()
++        .find(|bundle| bundle.id == id)
++        .ok_or_else(|| "Starter pack not found".to_string())?;
++    let ids = bundle.addons.clone();
++    let mut installed = Vec::with_capacity(ids.len());
++    for addon_id in ids {
++        let entry = catalog
++            .addons
++            .iter()
++            .find(|entry| entry.id == addon_id)
++            .ok_or_else(|| format!("Starter pack entry not found: {addon_id}"))?;
++        if entry.github.is_none()
++            && entry.wowi.is_none()
++            && entry.tukui.is_none()
++            && entry.wago.is_none()
++        {
++            continue;
++        }
++        installed.push(install_catalog_impl(app, addon_id, Some(false)).await?);
++    }
++    Ok(installed)
++}
++
++async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Value, String> {
++    let _operation = app.mutation.lock().await;
++    if app.shutting_down.load(Ordering::Acquire) {
++        return Err("add-on service is shutting down".into());
++    }
++    if request.command == "shutdown" {
++        app.shutting_down.store(true, Ordering::Release);
++    }
++    let args = &request.args;
++    match request.command.as_str() {
++        "find_installs" => serde_json::to_value(find_installs_impl(&app).await?).map_err(err),
++        "set_install_path" => {
++            let path = string_arg(args, "path")?;
++            serde_json::to_value(set_install_path_impl(&app, path).await?).map_err(err)
++        }
++        "scan" => serde_json::to_value(scan_packages(&app).await?).map_err(err),
++        "check_updates" => serde_json::to_value(check_updates_impl(app.clone()).await?).map_err(err),
++        "update_all" => serde_json::to_value(update_all_impl(app.clone()).await?).map_err(err),
++        "catalog_list" => {
++            let refresh = args.get("refresh").and_then(Value::as_bool);
++            serde_json::to_value(catalog_list_impl(&app, refresh).await?).map_err(err)
++        }
++        "bundles" => serde_json::to_value(bundles_impl(&app).await?).map_err(err),
++        "install_catalog" => {
++            let id = string_arg(args, "id")?;
++            let allow = args.get("allow_non_forever").and_then(Value::as_bool);
++            serde_json::to_value(install_catalog_impl(&app, id, allow).await?).map_err(err)
++        }
++        "install_bundle" => {
++            let id = string_arg(args, "id")?;
++            serde_json::to_value(install_bundle_impl(&app, id).await?).map_err(err)
++        }
++        "remove_package" => {
++            let key = string_arg(args, "key")?;
++            serde_json::to_value(remove_package_impl(&app, key).await?).map_err(err)
++        }
++        "update_package" => {
++            let key = string_arg(args, "key")?;
++            let allow = args.get("allow_non_forever").and_then(Value::as_bool);
++            serde_json::to_value(update_package_impl(&app, key, allow).await?).map_err(err)
++        }
++        "shutdown" => Ok(Value::Null),
++        _ => Err(format!("unknown command: {}", request.command)),
++    }
++}
++
++fn header_end(bytes: &[u8]) -> Option<usize> {
++    bytes
++        .windows(4)
++        .position(|window| window == b"\r\n\r\n")
++        .map(|offset| offset + 4)
++}
++
++const MAX_HEADLESS_REQUEST: usize = 1024 * 1024;
++
++fn checked_request_total(header_bytes: usize, content_bytes: usize) -> Result<usize, String> {
++    if header_bytes > MAX_HEADLESS_REQUEST ||
++        content_bytes > MAX_HEADLESS_REQUEST - header_bytes {
++        return Err("HTTP request is too large".into());
++    }
++    Ok(header_bytes + content_bytes)
++}
++
++fn authorized(headers: &str, token: &str) -> bool {
++    headers.lines().filter_map(|line| line.split_once(':')).any(|(name, value)| {
++        name.eq_ignore_ascii_case("authorization")
++            && value.trim().strip_prefix("Bearer ") == Some(token)
++    })
++}
++
++fn finish_headless_response(
++    app: &App, notify_shutdown: bool, result: Result<(), String>
++) -> Result<(), String> {
++    if notify_shutdown {
++        app.shutdown.notify_one();
++    }
++    result
++}
++
++async fn handle_http_connection(
++    mut stream: tokio::net::TcpStream,
++    app: Shared,
++    token: Arc<String>,
++) -> Result<(), String> {
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++    let mut bytes = Vec::with_capacity(4096);
++    let (head_end, total) = loop {
++        if bytes.len() > MAX_HEADLESS_REQUEST {
++            return Err("HTTP request is too large".into());
++        }
++        if let Some(end) = header_end(&bytes) {
++            let head = std::str::from_utf8(&bytes[..end]).map_err(err)?;
++            let length = head
++                .lines()
++                .filter_map(|line| line.split_once(':'))
++                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
++                .map(|(_, value)| value.trim().parse::<usize>().map_err(err))
++                .transpose()?
++                .unwrap_or(0);
++            break (end, checked_request_total(end, length)?);
++        }
++        let read = stream.read_buf(&mut bytes).await.map_err(err)?;
++        if read == 0 {
++            return Err("HTTP connection closed before headers".into());
++        }
++    };
++    while bytes.len() < total {
++        if stream.read_buf(&mut bytes).await.map_err(err)? == 0 {
++            return Err("HTTP connection closed before body".into());
++        }
++        if bytes.len() > MAX_HEADLESS_REQUEST {
++            return Err("HTTP request is too large".into());
++        }
++    }
++
++    let head = std::str::from_utf8(&bytes[..head_end]).map_err(err)?;
++    let mut request_line = head
++        .lines()
++        .next()
++        .unwrap_or_default()
++        .split_ascii_whitespace();
++    let method = request_line.next().unwrap_or_default();
++    let path = request_line
++        .next()
++        .unwrap_or_default()
++        .split('?')
++        .next()
++        .unwrap_or_default();
++    let body = &bytes[head_end..total];
++    let mut notify_shutdown = false;
++
++    let (status, response) = if !authorized(head, &token) {
++        (
++            "401 Unauthorized",
++            serde_json::json!({"ok": false, "error": "unauthorized"}),
++        )
++    } else if method == "GET" && path == "/health" {
++        (
++            "200 OK",
++            serde_json::json!({"ok": true, "result": {"status": "ready"}}),
++        )
++    } else if method == "POST" {
++        let parsed = if path == "/" || path == "/command" {
++            serde_json::from_slice::<HeadlessRequest>(body).map_err(err)
++        } else {
++            let command = path.trim_matches('/').to_string();
++            let args = if body.is_empty() {
++                Value::Object(serde_json::Map::new())
++            } else {
++                serde_json::from_slice(body).map_err(err)?
++            };
++            Ok(HeadlessRequest { command, args })
++        };
++        match parsed {
++            Ok(request) => {
++                let requested_shutdown = request.command == "shutdown";
++                match dispatch_headless(app.clone(), request).await {
++                    Ok(result) => {
++                        notify_shutdown = requested_shutdown;
++                        ("200 OK", serde_json::json!({"ok": true, "result": result}))
++                    }
++                    Err(error) => ("200 OK", serde_json::json!({"ok": false, "error": error})),
++                }
++            }
++            Err(error) => (
++                "400 Bad Request",
++                serde_json::json!({"ok": false, "error": error}),
++            ),
++        }
++    } else {
++        (
++            "405 Method Not Allowed",
++            serde_json::json!({"ok": false, "error": "use POST, or GET /health"}),
++        )
++    };
++    let response_result: Result<(), String> = async {
++        let payload = serde_json::to_vec(&response).map_err(err)?;
++        let header = format!(
++            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
++            payload.len()
++        );
++        stream.write_all(header.as_bytes()).await.map_err(err)?;
++        stream.write_all(&payload).await.map_err(err)?;
++        stream.shutdown().await.map_err(err)
++    }
++    .await;
++    finish_headless_response(&app, notify_shutdown, response_result)
++}
++
++async fn serve_headless(port: u16, token: String) -> Result<(), String> {
++    if token.len() < 32
++        || token.len() > 128
++        || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
++    {
++        return Err("token must be 32 to 128 hexadecimal characters".into());
++    }
++    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
++        .await
++        .map_err(err)?;
++    let app = make_app();
++    let token = Arc::new(token);
++    println!("addonforge-core: serving http://127.0.0.1:{port}");
++    loop {
++        tokio::select! {
++            accepted = listener.accept() => {
++                let (stream, _) = accepted.map_err(err)?;
++                let app = app.clone();
++                let token = token.clone();
++                tokio::spawn(async move {
++                    if let Err(error) = handle_http_connection(stream, app, token).await {
++                        loge!("HTTP request: {error}");
++                    }
++                });
++            }
++            _ = app.shutdown.notified() => break,
++        }
++    }
++    Ok(())
++}
++
++fn selftest_line(message: impl std::fmt::Display) {
++    use std::io::Write;
++
++    let mut stdout = std::io::stdout().lock();
++    let _ = writeln!(stdout, "addonforge-selftest: {message}");
++    let _ = stdout.flush();
++}
++
++async fn selftest_inner(app: Shared, product_dir: String) -> Result<(), String> {
++    const TEST_ID: &str = "target-percent";
++    let started = std::time::Instant::now();
++    let found = find_installs_impl(&app).await?;
++    let discovery_ms = started.elapsed().as_millis();
++    let target_found = found
++        .iter()
++        .any(|install| install.path.eq_ignore_ascii_case(&product_dir));
++    selftest_line(format!(
++        "find installs count={} target_found={} ms={discovery_ms}",
++        found.len(),
++        target_found as u8
++    ));
++
++    let selected = set_install_path_impl(&app, product_dir.clone()).await?;
++    if selected.flavor != "forever" {
++        return Err(format!(
++            "selected product is not Forever: {}",
++            selected.product
++        ));
++    }
++    selftest_line(format!(
++        "select product={} flavor={} path={}",
++        selected.product, selected.flavor, selected.path
++    ));
++
++    let started = std::time::Instant::now();
++    let packages = scan_packages(&app).await?;
++    selftest_line(format!(
++        "scan count={} ms={}",
++        packages.len(),
++        started.elapsed().as_millis()
++    ));
++
++    let started = std::time::Instant::now();
++    let rows = catalog_list_impl(&app, Some(true)).await?;
++    let source = app
++        .catalog
++        .lock()
++        .await
++        .as_ref()
++        .map(|entry| entry.1)
++        .unwrap_or("unknown");
++    selftest_line(format!(
++        "catalog fetch count={} source={} network_tls_ms={}",
++        rows.len(),
++        source,
++        started.elapsed().as_millis()
++    ));
++    if !rows
++        .iter()
++        .any(|row| row.entry.id == TEST_ID && row.entry.github.is_some())
++    {
++        return Err(format!(
++            "small GitHub catalogue addon {TEST_ID} is unavailable"
++        ));
++    }
++    let bundles = bundles_impl(&app).await?;
++    selftest_line(format!("bundles count={}", bundles.len()));
++
++    let install_started = std::time::Instant::now();
++    let installed = install_catalog_impl(&app, TEST_ID.into(), Some(false)).await?;
++    let timing = app
++        .last_install_timing
++        .lock()
++        .await
++        .clone()
++        .unwrap_or_default();
++    selftest_line(format!(
++        "install id={} folders={} total_ms={} resolve_tls_ms={} download_ms={} zip_ms={} broker_write_ms={}",
++        TEST_ID,
++        installed.folders.len(),
++        install_started.elapsed().as_millis(),
++        timing.resolve_tls_ms,
++        timing.download_ms,
++        timing.zip_ms,
++        timing.broker_write_ms
++    ));
++
++    let addons = addons_dir(&product_dir);
++    let present = installed
++        .folders
++        .iter()
++        .all(|folder| addons.join(folder).is_dir());
++    selftest_line(format!(
++        "verify installed folders={} ok={}",
++        installed.folders.len(),
++        present as u8
++    ));
++    if !present {
++        return Err("one or more installed addon folders are missing".into());
++    }
++
++    let started = std::time::Instant::now();
++    let checked = check_updates_impl(app.clone()).await?;
++    let updates = checked
++        .iter()
++        .filter(|package| package.update_available)
++        .count();
++    selftest_line(format!(
++        "check updates packages={} updates={} network_tls_ms={}",
++        checked.len(),
++        updates,
++        started.elapsed().as_millis()
++    ));
++
++    let started = std::time::Instant::now();
++    let removed = remove_package_impl(&app, format!("cat:{TEST_ID}")).await?;
++    selftest_line(format!(
++        "remove folders={} broker_write_ms={}",
++        removed.len(),
++        started.elapsed().as_millis()
++    ));
++    let gone = installed
++        .folders
++        .iter()
++        .all(|folder| !addons.join(folder).exists());
++    selftest_line(format!(
++        "verify removed folders={} ok={}",
++        installed.folders.len(),
++        gone as u8
++    ));
++    if !gone {
++        return Err("one or more removed addon folders still exist".into());
++    }
++    Ok(())
++}
++
++async fn selftest(product_dir: String) -> Result<(), String> {
++    const TEST_KEY: &str = "cat:target-percent";
++    let app = make_app();
++    selftest_line(format!("start product={product_dir}"));
++    let result = selftest_inner(app.clone(), product_dir).await;
++    if result.is_err() && app.state.lock().await.installed.contains_key(TEST_KEY) {
++        match remove_package_impl(&app, TEST_KEY.into()).await {
++            Ok(removed) => selftest_line(format!("cleanup removed folders={}", removed.len())),
++            Err(error) => selftest_line(format!("cleanup failed error={error}")),
++        }
++    }
++    result
++}
++
++/// Entry point for the Tauri-free core binary. Self-update is intentionally absent.
++pub fn headless_main(args: &[String]) -> i32 {
++    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
++    let result = match args.first().map(String::as_str) {
++        Some("serve") => {
++            let port = args
++                .windows(2)
++                .find(|pair| pair[0] == "--port")
++                .and_then(|pair| pair[1].parse::<u16>().ok())
++                .ok_or_else(|| {
++                    "usage: addonforge-core serve --port N --token HEX".to_string()
++                });
++            let token = args
++                .windows(2)
++                .find(|pair| pair[0] == "--token")
++                .map(|pair| pair[1].clone())
++                .ok_or_else(|| {
++                    "usage: addonforge-core serve --port N --token HEX".to_string()
++                });
++            match (port, token) {
++                (Ok(port), Ok(token)) => runtime.block_on(serve_headless(port, token)),
++                (Err(error), _) | (_, Err(error)) => Err(error),
++            }
++        }
++        Some("selftest") => match args.get(1) {
++            Some(product_dir) => runtime.block_on(selftest(product_dir.clone())),
++            None => Err("usage: addonforge-core selftest <product dir>".into()),
++        },
++        _ => Err(
++            "usage: addonforge-core serve --port N --token HEX | selftest <product dir>".into(),
++        ),
++    };
++    match result {
++        Ok(()) => {
++            if args.first().map(String::as_str) == Some("selftest") {
++                selftest_line("done ok=1");
++            }
++            0
++        }
++        Err(error) => {
++            if args.first().map(String::as_str) == Some("selftest") {
++                selftest_line(format!("error {error}"));
++                selftest_line("done ok=0");
++            } else {
++                eprintln!("addonforge-core: {error}");
++            }
++            1
++        }
++    }
++}
++
+ /// Headless mode: prints JSON, returns a process exit code.
++#[cfg(feature = "gui")]
+ pub fn cli(args: &[String]) -> i32 {
+     let rt = tokio::runtime::Runtime::new().expect("tokio");
+     let app = make_app();
+@@ -1382,8 +2187,13 @@ pub fn cli(args: &[String]) -> i32 {
+     }
+ }
+ 
++#[cfg(feature = "gui")]
+ pub fn run() {
+-    logi!("AddonForge v{} build {} starting", selfupdate::version(), selfupdate::build());
++    logi!(
++        "AddonForge v{} build {} starting",
++        selfupdate::version(),
++        selfupdate::build()
++    );
+     let app = make_app();
+ 
+     tauri::Builder::default()
+@@ -1425,6 +2235,7 @@ pub fn run() {
+         .expect("error while running AddonForge");
+ }
+ 
++#[cfg(feature = "gui")]
+ pub fn finish_replace(old: &Path) {
+     selfupdate::finish_replace(old);
+ }
+@@ -1463,7 +2274,10 @@ mod tests {
+             folder("ModuleX", &[], Some("Plater")),
+         ];
+         let pkgs = build_packages(&st, &cat, &folders);
+-        let names: Vec<(String, usize)> = pkgs.iter().map(|p| (p.name.clone(), p.folders.len())).collect();
++        let names: Vec<(String, usize)> = pkgs
++            .iter()
++            .map(|p| (p.name.clone(), p.folders.len()))
++            .collect();
+         assert!(names.contains(&("DBM-Core".into(), 3)), "{names:?}");
+         assert!(names.contains(&("BigWigs".into(), 3)), "{names:?}");
+         assert!(names.contains(&("Plater".into(), 2)), "{names:?}");
+@@ -1477,10 +2291,19 @@ mod tests {
+         let mut st = AppState::default();
+         st.installed.insert(
+             "cat:bigwigs".into(),
+-            Installed { source: "github".into(), source_id: "x".into(), version: "v1".into(), folders: vec!["BigWigs".into(), "BigWigs_Zone".into()], installed_at: 0 },
++            Installed {
++                source: "github".into(),
++                source_id: "x".into(),
++                version: "v1".into(),
++                folders: vec!["BigWigs".into(), "BigWigs_Zone".into()],
++                installed_at: 0,
++            },
+         );
+         let cat: Catalog = serde_json::from_str(r#"{"addons":[{"id":"bigwigs","name":"BigWigs","github":"a/b","folders":["BigWigs"]}]}"#).unwrap();
+-        let folders = vec![folder("BigWigs", &[], None), folder("BigWigs_Zone", &[], None)];
++        let folders = vec![
++            folder("BigWigs", &[], None),
++            folder("BigWigs_Zone", &[], None),
++        ];
+         let pkgs = build_packages(&st, &cat, &folders);
+         assert_eq!(pkgs.len(), 1);
+         assert_eq!(pkgs[0].folders.len(), 2);
+@@ -1493,7 +2316,11 @@ mod tests {
+         let st = AppState::default();
+         let cat: Catalog = serde_json::from_str(r#"{"addons":[{"id":"titan","name":"Titan Panel","github":"a/b","folders":["Titan"]}]}"#).unwrap();
+         let folders = vec![
+-            folder("TitanReputation", &["Titan", "Blizzard_Foo", "!BugGrabber"], None),
++            folder(
++                "TitanReputation",
++                &["Titan", "Blizzard_Foo", "!BugGrabber"],
++                None,
++            ),
+             folder("BugSack", &["!BugGrabber"], None),
+         ];
+         let pkgs = build_packages(&st, &cat, &folders);
+@@ -1509,10 +2336,169 @@ mod tests {
+         let mut st = AppState::default();
+         st.installed.insert(
+             "github:someone/Thing".into(),
+-            Installed { source: "github".into(), source_id: "someone/Thing".into(), version: "2.0".into(), folders: vec!["Thing".into()], installed_at: 0 },
++            Installed {
++                source: "github".into(),
++                source_id: "someone/Thing".into(),
++                version: "2.0".into(),
++                folders: vec!["Thing".into()],
++                installed_at: 0,
++            },
+         );
+         let pkgs = build_packages(&st, &Catalog::default(), &[folder("Thing", &[], None)]);
+         assert_eq!(pkgs[0].key, "github:someone/Thing");
+         assert_eq!(pkgs[0].source, Some(Source::Github("someone/Thing".into())));
+     }
++
++    #[test]
++    fn headless_core_installs_and_removes_from_a_local_catalogue_archive() {
++        use std::io::Write;
++
++        let root = std::env::temp_dir().join(format!(
++            "af-core-local-{}-{}",
++            std::process::id(),
++            state::now_secs()
++        ));
++        let product = root.join("World of Warcraft").join("_forever_");
++        let addons = product.join("Interface").join("AddOns");
++        let state_dir = root.join("state");
++        std::fs::create_dir_all(&addons).unwrap();
++        std::fs::write(
++            product.join(".flavor.info"),
++            "Product Flavor!STRING:0\nwowf\n",
++        )
++        .unwrap();
++        std::env::set_var("ADDONFORGE_STATE_DIR", &state_dir);
++        let mut persisted = AppState::default();
++        persisted.install_path = Some(product.to_string_lossy().to_string());
++        persisted.save().unwrap();
++        std::fs::create_dir_all(addons.join(install::TMP_DIR).join("dl")).unwrap();
++        std::fs::write(
++            addons.join(install::TMP_DIR).join("dl").join("stale.zip"),
++            b"stale",
++        )
++        .unwrap();
++
++        let catalog: Catalog = serde_json::from_str(
++            r#"{"flavor":"forever","addons":[{"id":"fixture","name":"Fixture","github":"local/fixture","folders":["Fixture"],"forever":true}]}"#,
++        )
++        .unwrap();
++        let app = make_app();
++        assert!(!addons.join(install::TMP_DIR).exists(),
++                "core start must remove stale temp trees");
++        {
++            let mut st = app.state.blocking_lock();
++            st.install_path = Some(product.to_string_lossy().to_string());
++        }
++        *app.catalog.blocking_lock() = Some((catalog, "test"));
++        *app.stats.blocking_lock() = Some(
++            serde_json::from_str(
++                r#"{"entries":{"fixture":{"updated_at":"2026-09-29T12:00:00Z","source":"github"}}}"#,
++            )
++            .unwrap(),
++        );
++
++        let zip_path = root.join("fixture.zip");
++        let file = std::fs::File::create(&zip_path).unwrap();
++        let mut archive = zip::ZipWriter::new(file);
++        let options = zip::write::SimpleFileOptions::default();
++        archive.start_file("Fixture/Fixture.toc", options).unwrap();
++        archive
++            .write_all(b"## Interface: 16001\n## Title: Fixture\n## Version: 1.0\n")
++            .unwrap();
++        archive.start_file("Fixture/Fixture.lua", options).unwrap();
++        archive.write_all(b"print('fixture')\n").unwrap();
++        archive.finish().unwrap();
++
++        let runtime = tokio::runtime::Runtime::new().unwrap();
++        runtime.block_on(async {
++            install_local_archive(
++                &app,
++                "cat:fixture",
++                &Source::Github("local/fixture".into()),
++                "1.0",
++                &zip_path,
++            )
++            .await
++            .unwrap();
++            let packages = scan_packages(&app).await.unwrap();
++            assert_eq!(packages.len(), 1);
++            assert_eq!(packages[0].key, "cat:fixture");
++            assert_eq!(packages[0].updated_at.as_deref(), Some("2026-09-29T12:00:00Z"));
++            assert!(addons.join("Fixture").is_dir());
++            assert!(!addons.join(install::TMP_DIR).exists(),
++                    "successful install must remove temp tree");
++
++            let removed = remove_package_impl(&app, "cat:fixture".into())
++                .await
++                .unwrap();
++            assert_eq!(removed, vec!["Fixture"]);
++            assert!(!addons.join("Fixture").exists());
++        });
++
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++        let _ = std::fs::remove_dir_all(root);
++    }
++
++    #[test]
++    fn headless_http_requires_the_exact_bearer_token() {
++        let token = "0123456789abcdef0123456789abcdef";
++        assert!(authorized(
++            "POST /command HTTP/1.1\r\nAuthorization: Bearer 0123456789abcdef0123456789abcdef\r\n\r\n",
++            token
++        ));
++        assert!(!authorized(
++            "GET /health HTTP/1.1\r\nAuthorization: Bearer wrong\r\n\r\n",
++            token
++        ));
++        assert!(!authorized("GET /health HTTP/1.1\r\n\r\n", token));
++    }
++
++    #[test]
++    fn headless_content_length_never_wraps_or_exceeds_limit() {
++        assert_eq!(checked_request_total(128, 256).unwrap(), 384);
++        assert_eq!(
++            checked_request_total(128, MAX_HEADLESS_REQUEST - 128).unwrap(),
++            MAX_HEADLESS_REQUEST
++        );
++        assert!(checked_request_total(128, MAX_HEADLESS_REQUEST - 127).is_err());
++        assert!(checked_request_total(128, usize::MAX).is_err());
++        assert!(checked_request_total(usize::MAX, 0).is_err());
++    }
++
++    #[test]
++    fn shutdown_waits_for_the_active_mutation_boundary() {
++        let runtime = tokio::runtime::Runtime::new().unwrap();
++        runtime.block_on(async {
++            let app = make_app();
++            let mutation = app.mutation.lock().await;
++            let request = HeadlessRequest {
++                command: "shutdown".into(),
++                args: Value::Null,
++            };
++            let mut shutdown = tokio::spawn(dispatch_headless(app.clone(), request));
++            assert!(tokio::time::timeout(
++                std::time::Duration::from_millis(20), &mut shutdown
++            )
++            .await
++            .is_err());
++            drop(mutation);
++            assert!(shutdown.await.unwrap().is_ok());
++        });
++    }
++
++    #[test]
++    fn committed_shutdown_notifies_even_when_response_write_fails() {
++        let runtime = tokio::runtime::Runtime::new().unwrap();
++        runtime.block_on(async {
++            let app = make_app();
++            let notified = app.shutdown.notified();
++            assert!(finish_headless_response(
++                &app, true, Err("client disconnected".into())
++            )
++            .is_err());
++            tokio::time::timeout(std::time::Duration::from_millis(20), notified)
++                .await
++                .unwrap();
++        });
++    }
+ }

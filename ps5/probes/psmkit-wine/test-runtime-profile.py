@@ -37,9 +37,7 @@ b1 = profile('b1')
 p1w = profile('p1w')
 product = json.loads(Path(__file__).with_name('b1-product.json').read_text())
 assert product['debug'] == 'err+all,err-seh'
-assert product['argv'] == [
-    r'C:\windows\system32\explorer.exe', '/desktop',
-    r'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe', '--exec=launch_uid wow_classic_beta']
+assert product['argv'] == [r'C:\Forever\Addons\forever-maintenance.exe']
 game_config = json.loads(Path(__file__).with_name('b1-game-wow-forever.json').read_text())
 beta_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
 maintenance = profile('b1', product)

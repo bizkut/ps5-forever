@@ -14,6 +14,7 @@ enum forever_menu_diag_kind
     FOREVER_MENU_DIAG_CLICK,
     FOREVER_MENU_DIAG_WAIT,
     FOREVER_MENU_DIAG_DUMP,
+    FOREVER_MENU_DIAG_ADDON,
 };
 
 struct forever_menu_diag_command
@@ -41,7 +42,9 @@ static inline int forever_menu_diag_parse(
     static const struct { const char *name; uint32_t code; } pads[] = {
         {"OPTIONS", PAD_OPTIONS}, {"UP", PAD_UP}, {"DOWN", PAD_DOWN},
         {"LEFT", PAD_LEFT}, {"RIGHT", PAD_RIGHT}, {"CROSS", PAD_CROSS},
-        {"CIRCLE", PAD_CIRCLE}, {"L2", PAD_L2}, {"TRIANGLE", PAD_TRIANGLE},
+        {"CIRCLE", PAD_CIRCLE}, {"L1", PAD_L1}, {"R1", PAD_R1},
+        {"SQUARE", PAD_SQUARE}, {"TRIANGLE", PAD_TRIANGLE}, {"R3", PAD_R3},
+        {"L2", PAD_L2},
     };
     static const struct { const char *name; uint32_t code; } keys[] = {
         {"F12", 0x45}, {"ESCAPE", 0x29}, {"ENTER", 0x28},
@@ -97,6 +100,21 @@ static inline int forever_menu_diag_parse(
         if (forever_menu_diag_number(second, 0, 1079, &number)) return -EINVAL;
         command->y = (int)number;
         command->kind = FOREVER_MENU_DIAG_CLICK;
+        return 0;
+    }
+    if (!strcmp(verb, "addon"))
+    {
+        length = strlen(first);
+        if (!length || length >= sizeof(command->name) || strstr(first, "..") ||
+            first[0] == '/') return -EINVAL;
+        for (size_t i = 0; i < length; i++)
+            if (!((first[i] >= 'a' && first[i] <= 'z') ||
+                  (first[i] >= 'A' && first[i] <= 'Z') ||
+                  (first[i] >= '0' && first[i] <= '9') ||
+                  strchr(":._-/", first[i])))
+                return -EINVAL;
+        memcpy(command->name, first, length + 1);
+        command->kind = FOREVER_MENU_DIAG_ADDON;
         return 0;
     }
     if (!strcmp(verb, "dump"))

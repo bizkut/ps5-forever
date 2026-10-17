@@ -9,9 +9,9 @@
 #include <unistd.h>
 #include "compositor.h"
 #include "display.h"
+#include "forever-menu.h"
 #include "cursor-arrow.h"
 #include "menu-font.h"
-
 #define MAX_WINDOWS 128u
 #define MAX_DAMAGE 32u
 #define MAX_SURFACE_BYTES (64u * 1024u * 1024u)
@@ -72,7 +72,7 @@ static uint64_t cursor_owner = UINT64_MAX;
 #define MENU_SEPARATOR_HEIGHT 16
 #define MENU_BLANK_HEIGHT 14
 #define MENU_FOOTER_HEIGHT 58
-#define MENU_MAX_LINES 32
+#define MENU_MAX_LINES 40
 #define MENU_PANEL 0xff12151cu
 #define MENU_BORDER 0xff666a74u
 #define MENU_SELECTION 0xff34405cu
@@ -86,7 +86,7 @@ struct menu_layout_line
     int separator, blank, selected;
     unsigned rows;
 };
-static char menu_text[1024];
+static char menu_text[FOREVER_MENU_TEXT_BYTES];
 static struct display_rect menu_rect;
 static struct menu_layout_line menu_lines[MENU_MAX_LINES];
 static unsigned menu_line_count;
@@ -947,6 +947,44 @@ static int menu_text_width(const char *text, size_t length, int bold)
     return width;
 }
 
+static const char *menu_footer_text(void)
+{
+    static const char main_footer[] = "\xe2\x9c\x95 Select   \xe2\x97\x8b Back   OPTIONS Close";
+    static const char addon_footer[] =
+        "\xe2\x9c\x95 Details   \xe2\x96\xa1 Update   \xe2\x96\xb3 All   R3 Remove   \xe2\x97\x8b Back";
+    static const char find_footer[] =
+        "\xe2\x9c\x95 Install   \xe2\x96\xa1 Sort   L1/R1 Channel   \xe2\x97\x8b Back";
+    static const char packs_footer[] =
+        "\xe2\x9c\x95 Confirm   L1/R1 Channel   \xe2\x97\x8b Back";
+    if (!strstr(menu_text, " Add-ons ")) return main_footer;
+    if (strstr(menu_text, "[Find]")) return find_footer;
+    if (strstr(menu_text, "[Starter packs]")) return packs_footer;
+    return addon_footer;
+}
+
+int compositor_menu_text_supported(const char *text)
+{
+    const unsigned char *at = (const unsigned char *)(text ? text : "");
+    const unsigned char *end = at + strlen((const char *)at);
+    while (at < end)
+    {
+        uint32_t codepoint = menu_utf8(&at, end);
+        if (codepoint == '\n' || codepoint == '\r' || codepoint == '\t') continue;
+        const struct forever_raster_glyph *regular = menu_glyph(codepoint, 0);
+        const struct forever_raster_glyph *bold = menu_glyph(codepoint, 1);
+        if (!regular || regular->codepoint != codepoint ||
+            !bold || bold->codepoint != codepoint) return 0;
+    }
+    return 1;
+}
+
+int compositor_menu_footer_fits(void)
+{
+    const char *footer = menu_footer_text();
+    return menu_text_width(footer, strlen(footer), 0) <=
+        MENU_PANEL_WIDTH - 2 * MENU_PANEL_PADDING;
+}
+
 static size_t menu_wrap_length(const char *text, size_t length, int bold, int max_width)
 {
     const unsigned char *start = (const unsigned char *)text;
@@ -1053,7 +1091,8 @@ static int menu_line_contains(const struct menu_layout_line *line, const char *n
 
 static void draw_menu(const struct display_rect *damage, uint32_t *image)
 {
-    static const char footer[] = "\xe2\x9c\x95 Select   \xe2\x97\x8b Back   OPTIONS Close";
+    const char *footer = menu_footer_text();
+    size_t footer_length = strlen(footer);
     struct display_rect panel = menu_rect;
     if (!menu_text[0] || !intersect(&panel, damage)) return;
 
@@ -1097,7 +1136,8 @@ static void draw_menu(const struct display_rect *damage, uint32_t *image)
             length = (size_t)(tab - text);
         }
         int bold = i == 0;
-        uint32_t color = menu_line_contains(line, "Coming soon") ? MENU_MUTED : MENU_TEXT;
+        uint32_t color = menu_line_contains(line, "Coming soon") ||
+                         menu_line_contains(line, "CurseForge only") ? MENU_MUTED : MENU_TEXT;
         if (bold)
         {
             int baseline = line->rect.top +
@@ -1116,7 +1156,8 @@ static void draw_menu(const struct display_rect *damage, uint32_t *image)
             int baseline = bounds.top +
                 (MENU_ROW_HEIGHT - FOREVER_FONT_REGULAR_ASCENT -
                  FOREVER_FONT_REGULAR_DESCENT) / 2 + FOREVER_FONT_REGULAR_ASCENT;
-            uint32_t value_color = menu_line_contains(line, "Coming soon") ?
+            uint32_t value_color = menu_line_contains(line, "Coming soon") ||
+                                   menu_line_contains(line, "CurseForge only") ?
                 MENU_MUTED : MENU_ACCENT;
             draw_menu_text(value, value_length, 0, bounds.left, baseline,
                            value_color, damage, image);
@@ -1127,11 +1168,11 @@ static void draw_menu(const struct display_rect *damage, uint32_t *image)
         for (int x = menu_rect.left + MENU_PANEL_PADDING; x < menu_rect.right - MENU_PANEL_PADDING; x++)
             if (x >= damage->left && x < damage->right)
                 image[(size_t)footer_top * DISPLAY_WIDTH + x] = MENU_BORDER;
-    int footer_width = menu_text_width(footer, sizeof(footer) - 1, 0);
+    int footer_width = menu_text_width(footer, footer_length, 0);
     int footer_baseline = footer_top +
         (MENU_FOOTER_HEIGHT - FOREVER_FONT_REGULAR_ASCENT -
          FOREVER_FONT_REGULAR_DESCENT) / 2 + FOREVER_FONT_REGULAR_ASCENT;
-    draw_menu_text(footer, sizeof(footer) - 1, 0,
+    draw_menu_text(footer, footer_length, 0,
                    (menu_rect.left + menu_rect.right - footer_width) / 2,
                    footer_baseline, MENU_MUTED, damage, image);
 }

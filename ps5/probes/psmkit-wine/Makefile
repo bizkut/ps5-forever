@@ -34,7 +34,8 @@ B1_PROFILE_CONFIG ?=
 B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json
 B1_CONFIG_ARG := $(if $(B1_PROFILE_CONFIG),--profile-config "$(B1_PROFILE_CONFIG)",)
 TITLE_DESKTOP := ../../title/main.c ../../title/hub.c ../../title/compositor.c \
-	../../title/forever-menu.c ../../title/display.c ../../title/input.c ../../title/pointer.c ../../title/ime.c
+	../../title/forever-menu.c ../../title/addonforge-client.c ../../title/display.c \
+	../../title/input.c ../../title/pointer.c ../../title/ime.c
 
 .PHONY: all descriptor test test-startup-routing test-runtime-profile pe runtime runtime-b1 runtime-b1-dual runtime-child runtime-parent runtime-qualification test-staged
 all: descriptor pe
@@ -62,8 +63,10 @@ runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py
 		runtime-parent.h runtime-relaunch.h writebroker-autostart.h writebroker-menu.h \
 		forever-menu-settings.h forever-setup.h runtime-vulkan.c runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) \
-		../../title/forever-menu.h ../../title/menu-font.h ../../title/menu-diag.h \
-		../../title/tools/make-menu-font.py ../../title/cursor-arrow.h \
+		../../title/forever-menu.h ../../title/addonforge-client.h \
+		../../title/addonforge-security.h ../../title/menu-font.h \
+		../../title/menu-diag.h ../../title/tools/make-menu-font.py \
+		../../title/cursor-arrow.h \
 		$(PE_OUT)/audio-tone.exe $(WRITEBROKER_ELF)
 	# B1 installs Wine's PE tree (make install-lib), which runs the i686/x86_64
 	# mingw compilers configure chose; they live in llvm-mingw's bin.
@@ -117,8 +120,10 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-forever-menu \
-		$(HOST_OUT)/test-forever-menu-diag $(HOST_OUT)/test-title-icon \
-		$(HOST_OUT)/test-desktop-surface $(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
+		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-security \
+		$(HOST_OUT)/test-forever-menu-diag \
+		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
+		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
 		$(HOST_OUT)/test-cursor-peer $(HOST_OUT)/test-file-security \
 		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile \
 		../../tools/test-ps5-capture.py
@@ -140,6 +145,8 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-title-log
 	$(HOST_OUT)/test-forever-setup
 	$(HOST_OUT)/test-forever-menu
+	$(HOST_OUT)/test-addonforge-client
+	$(HOST_OUT)/test-addonforge-security
 	$(HOST_OUT)/test-forever-menu-diag
 	$(HOST_OUT)/test-title-icon
 	$(HOST_OUT)/test-desktop-surface
@@ -237,11 +244,22 @@ $(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h write
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-forever-menu.c \
 		../../title/forever-menu.c -o $@
 
+$(HOST_OUT)/test-addonforge-client: test-addonforge-client.c \
+		../../title/addonforge-client.c ../../title/addonforge-client.h ../../title/forever-menu.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread \
+		test-addonforge-client.c ../../title/addonforge-client.c -o $@
+
 $(HOST_OUT)/test-forever-menu-diag: test-forever-menu-diag.c ../../title/menu-diag.h \
 		../../title/input.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
+
+$(HOST_OUT)/test-addonforge-security: test-addonforge-security.c \
+		../../addonforge/addonforge-control.h ../../title/addonforge-security.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 $(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h third_party/stb/stb_image.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@ -lm
@@ -273,9 +291,12 @@ $(HOST_OUT)/test-title-ime: test-title-ime.c ../../title/ime.c ../../title/ime.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-$(HOST_OUT)/test-runtime-imports: test-runtime-imports.py runtime_imports.py runtime_profiles.py runtime-import-policy.json
+$(HOST_OUT)/test-runtime-imports: test-runtime-imports.py runtime_imports.py runtime_profiles.py \
+		runtime-import-policy.json Makefile
 	mkdir -p $(HOST_OUT)
-	printf '%s\n' '#!/bin/sh' 'exec python3 "$(CURDIR)/test-runtime-imports.py" --cc "$${HOST_CC:-$(HOST_CC)}"' > $@
+	printf '%s\n' '#!/bin/sh' \
+		'here=$$(CDPATH= cd -- "$$(dirname -- "$$0")" && pwd)' \
+		'exec python3 "$$here/../../probes/psmkit-wine/test-runtime-imports.py" --cc "$${HOST_CC:-$(HOST_CC)}"' > $@
 	chmod +x $@
 
 $(HOST_OUT)/test-protocol: test-protocol.c protocol.c protocol.h $(IO) ../localproc/psmkit-io.h

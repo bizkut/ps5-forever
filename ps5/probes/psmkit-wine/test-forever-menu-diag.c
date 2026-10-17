@@ -17,7 +17,9 @@ int main(void)
     static const struct { const char *line; unsigned code; } pads[] = {
         {"pad OPTIONS", PAD_OPTIONS}, {"pad UP", PAD_UP}, {"pad DOWN", PAD_DOWN},
         {"pad LEFT", PAD_LEFT}, {"pad RIGHT", PAD_RIGHT}, {"pad CROSS", PAD_CROSS},
-        {"pad CIRCLE", PAD_CIRCLE}, {"pad L2", PAD_L2}, {"pad TRIANGLE", PAD_TRIANGLE},
+        {"pad CIRCLE", PAD_CIRCLE}, {"pad L1", PAD_L1}, {"pad R1", PAD_R1},
+        {"pad SQUARE", PAD_SQUARE}, {"pad TRIANGLE", PAD_TRIANGLE}, {"pad R3", PAD_R3},
+        {"pad L2", PAD_L2},
     };
     for (size_t i = 0; i < sizeof(pads) / sizeof(pads[0]); i++)
     {
@@ -35,10 +37,13 @@ int main(void)
     assert(command.kind == FOREVER_MENU_DIAG_WAIT && command.milliseconds == 500);
     command = parse("dump main-menu_1");
     assert(command.kind == FOREVER_MENU_DIAG_DUMP && !strcmp(command.name, "main-menu_1"));
+    command = parse("addon cat:arc-lfg-filter");
+    assert(command.kind == FOREVER_MENU_DIAG_ADDON &&
+           !strcmp(command.name, "cat:arc-lfg-filter"));
     static const char *const invalid[] = {
         "pad R2", "pad options", "key A", "wait -1", "wait 60001",
         "click 1920 0", "click 0 1080", "click 1", "dump ../escape",
-        "dump has.dot", "dump ", "unknown value", "",
+        "dump has.dot", "dump ", "addon ../escape", "addon ", "unknown value", "",
     };
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
         assert(forever_menu_diag_parse(invalid[i], strlen(invalid[i]), &command) == -EINVAL);

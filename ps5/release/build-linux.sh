@@ -236,6 +236,15 @@ cache_key_dxvk() {
         --path "$wow/ps5/build-dxvk.sh" \
         --value "PS5_CPU_FLAGS=${PS5_CPU_FLAGS:-}"
 }
+cache_key_addonforge() {
+    cache_key_common addonforge \
+        --source AddonForge \
+        --path "$wow/ps5/addonforge" \
+        --path "$wow/ps5/release/Dockerfile" \
+        --value "rust-toolchain=1.99.1" \
+        --value "rust-target=x86_64-pc-windows-gnullvm" \
+        --value "rustflags=crt-static,debuginfo-0,no-insert-timestamp,remap-paths"
+}
 cache_key_wine() {
     local sdk_revision freetype_key gnutls_key vkd3d_key
     sdk_revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sdk_revision"])' "$here/deps.json")
@@ -365,6 +374,16 @@ build_dxvk_cached() {
         ps5-proton/ps5-wow/ps5/build/dxvk-64/dlls -- \
         bash ps5/build-dxvk.sh
 }
+build_addonforge_cached() {
+    local key
+    key=$(cache_key_addonforge)
+    cached_build addonforge "$key" \
+        ps5-proton/ps5-wow/ps5/build/addonforge -- \
+        python3 ps5/addonforge/build.py \
+            --source "$root/AddonForge" \
+            --output "$wow/ps5/build/addonforge" \
+            --cache "$FOREVER_BUILD_CACHE"
+}
 cleanup() {
     local status=$?
     restore_wine_headers || status=$?
@@ -374,6 +393,7 @@ cleanup() {
 trap cleanup EXIT
 stage inputs validate_sources
 stage host-tests make -s -C ps5/probes/psmkit-wine test \
+    HOST_CC=clang-19 \
     MINGW_CC="$LLVM_MINGW/bin/x86_64-w64-mingw32-clang" \
     MINGW32_CC="$LLVM_MINGW/bin/i686-w64-mingw32-clang"
 stage sdk build_sdk
@@ -387,6 +407,7 @@ stage winebuild-delayload make -s -C ps5/probes/psmkit-wine test-winebuild-delay
     LLVM_MINGW="$LLVM_MINGW"
 stage vkd3d-proton build_vkd3d_cached
 stage dxvk build_dxvk_cached
+stage addonforge build_addonforge_cached
 stage runtime-b1-dual make -s -C ps5/probes/psmkit-wine runtime-b1-dual
 stage package python3 ps5/release/package.py --tag "$tag"
 python3 "$cache_helper" prune --cache "$FOREVER_BUILD_CACHE" --keep 2

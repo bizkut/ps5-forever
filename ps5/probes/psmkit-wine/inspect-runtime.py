@@ -793,7 +793,7 @@ if args.profile == 'b1':
             'B1 native desktop selection differs from the profile')
     expected_desktop_sources = {
         'title-desktop.c', 'title-hub.c', 'compositor.c', 'forever-menu.c',
-        'display.c', 'input.c', 'pointer.c', 'ime.c',
+        'addonforge-client.c', 'display.c', 'input.c', 'pointer.c', 'ime.c',
     } if not selected['headless'] else set()
     require({Path(path).name for path in desktop.get('sources', [])} == expected_desktop_sources,
             'B1 native desktop source inventory drift')

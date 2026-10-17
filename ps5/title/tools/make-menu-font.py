@@ -19,7 +19,8 @@ FONTS = {
     'symbols': (f'{ROOT}/NotoSansSymbols2/NotoSansSymbols2-Regular.ttf',
                 '630846d528dbe4c4981370a4d0a9475a1fd1491a129bb411f8e157cdb5de13c6', 30),
 }
-CODEPOINTS = [*range(32, 127), 0x2022, 0x2026, 0x2192, 0x25CB, 0x2715]
+CODEPOINTS = [*range(32, 127), 0x2014, 0x2019, 0x2022, 0x2026, 0x2192,
+              0x25A1, 0x25B3, 0x25CB, 0x2715]
 
 
 def checked_font(kind, supplied, temporary):
@@ -40,7 +41,7 @@ def rasterize(path, size, symbols_path):
     glyphs, coverage = [], bytearray()
     for codepoint in CODEPOINTS:
         character = chr(codepoint)
-        glyph_font = symbols if codepoint in (0x2192, 0x25CB, 0x2715) else font
+        glyph_font = symbols if codepoint in (0x2192, 0x25A1, 0x25B3, 0x25CB, 0x2715) else font
         left, top, right, bottom = glyph_font.getbbox(character, anchor='ls')
         width, height = max(0, right - left), max(0, bottom - top)
         offset = len(coverage)

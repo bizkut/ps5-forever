@@ -24,6 +24,8 @@ void compositor_menu(const char *text);
 int compositor_menu_line_at(int x, int y);
 int compositor_menu_line_bounds(int line, struct display_rect *rect);
 int compositor_menu_value_bounds(int line, struct display_rect *rect);
+int compositor_menu_text_supported(const char *text);
+int compositor_menu_footer_fits(void);
 /* Recompose dirty rectangles and report them to display_damage(). Presenting
  * and the vblank wait belong to the main loop. */
 void compositor_compose(void);

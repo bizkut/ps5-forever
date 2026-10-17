@@ -654,7 +654,8 @@ if args.profile == 'b1' and not selected['headless']:
         f'#include {json.dumps(str(title / "hub.c"))}\n')
     desktop_sources = [
         desktop_wrapper, hub_wrapper, title / 'compositor.c', title / 'forever-menu.c',
-        title / 'display.c', title / 'input.c', title / 'pointer.c', title / 'ime.c',
+        title / 'addonforge-client.c', title / 'display.c', title / 'input.c',
+        title / 'pointer.c', title / 'ime.c',
     ]
 gpu_sources = []
 if selected.get('gpu', False):
@@ -766,6 +767,18 @@ if args.profile == 'b1':
     # A protected application can restore system DLL code from its disk copy.
     # Every builtin PE must therefore match the image Wine actually loads.
     owned = {destination: source for source, destination in builtin_prefix_files(tree)}
+    addonforge = tree / 'addonforge'
+    addonforge.mkdir()
+    addonforge_build = here / '../../build/addonforge'
+    for name in ('addonforge-core.exe', 'forever-maintenance.exe',
+                 'ADDONFORGE-LICENSE.txt', 'THIRD-PARTY-NOTICES.txt',
+                 'build-receipt.json'):
+        source = addonforge_build / name
+        if not source.is_file():
+            raise SystemExit(f'missing AddonForge build output {source}')
+        shutil.copy2(source, addonforge / name)
+    owned['drive_c/Forever/Addons/addonforge-core.exe'] = 'addonforge/addonforge-core.exe'
+    owned['drive_c/Forever/Addons/forever-maintenance.exe'] = 'addonforge/forever-maintenance.exe'
     for source_dir, names in ((args.vkd3d_dlls, ('d3d12.dll', 'd3d12core.dll')),
                               (args.dxvk_dlls, ('dxgi.dll',))):
         for name in names:

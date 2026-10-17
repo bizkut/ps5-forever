@@ -3,8 +3,14 @@
 
 #include <stddef.h>
 
-#define FOREVER_MENU_TEXT_BYTES 1024
-#define FOREVER_MENU_STATUS_BYTES 192
+#define FOREVER_MENU_TEXT_BYTES 4096
+#define FOREVER_MENU_STATUS_BYTES 256
+#define FOREVER_ADDON_ROWS 128
+#define FOREVER_ADDON_KEY_BYTES 96
+#define FOREVER_ADDON_NAME_BYTES 96
+#define FOREVER_ADDON_DETAIL_BYTES 240
+#define FOREVER_ADDON_SOURCE_BYTES 80
+#define FOREVER_ADDON_DATE_BYTES 32
 
 /* Text rows used by the compositor and mouse hit testing. */
 #define FOREVER_MENU_LINE_FRAME_GENERATION 2
@@ -16,6 +22,9 @@
 #define FOREVER_MENU_LINE_CLOSE 11
 #define FOREVER_MENU_LINE_CANCEL 7
 #define FOREVER_MENU_LINE_CONFIRM 8
+#define FOREVER_MENU_LINE_ADDON_TABS 2
+#define FOREVER_MENU_LINE_ADDON_FIRST 4
+#define FOREVER_MENU_LINE_ADDON_LAST 8
 
 enum forever_menu_page
 {
@@ -25,6 +34,8 @@ enum forever_menu_page
     FOREVER_MENU_CONFIRM_UNINSTALL,
     FOREVER_MENU_PROGRESS,
     FOREVER_MENU_NOTICE,
+    FOREVER_MENU_ADDON_PAGE,
+    FOREVER_MENU_ADDON_CONFIRM,
 };
 
 enum forever_menu_item
@@ -47,6 +58,14 @@ enum forever_menu_command
     FOREVER_MENU_COMMAND_REINSTALL,
     FOREVER_MENU_COMMAND_UNINSTALL,
     FOREVER_MENU_COMMAND_CLOSE,
+    FOREVER_MENU_COMMAND_ADDONS_OPEN,
+    FOREVER_MENU_COMMAND_ADDONS_CLOSE,
+    FOREVER_MENU_COMMAND_ADDONS_REFRESH,
+    FOREVER_MENU_COMMAND_ADDONS_INSTALL,
+    FOREVER_MENU_COMMAND_ADDONS_UPDATE,
+    FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL,
+    FOREVER_MENU_COMMAND_ADDONS_REMOVE,
+    FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK,
 };
 
 enum forever_frame_generation
@@ -54,6 +73,54 @@ enum forever_frame_generation
     FOREVER_FG_OFF,
     FOREVER_FG_ON,
     FOREVER_FG_AUTO,
+};
+
+enum forever_addon_channel
+{
+    FOREVER_ADDON_CLASSIC_BETA,
+    FOREVER_ADDON_FINAL,
+};
+
+enum forever_addon_tab
+{
+    FOREVER_ADDON_INSTALLED,
+    FOREVER_ADDON_UPDATES,
+    FOREVER_ADDON_FIND,
+    FOREVER_ADDON_STARTER_PACKS,
+    FOREVER_ADDON_TAB_COUNT,
+};
+
+enum forever_addon_button
+{
+    FOREVER_ADDON_LEFT,
+    FOREVER_ADDON_RIGHT,
+    FOREVER_ADDON_L1,
+    FOREVER_ADDON_R1,
+    FOREVER_ADDON_SQUARE,
+    FOREVER_ADDON_TRIANGLE,
+    FOREVER_ADDON_R3,
+};
+
+struct forever_addon_row
+{
+    char key[FOREVER_ADDON_KEY_BYTES];
+    char name[FOREVER_ADDON_NAME_BYTES];
+    char status[48];
+    char description[FOREVER_ADDON_DETAIL_BYTES];
+    char source[FOREVER_ADDON_SOURCE_BYTES];
+    char updated[FOREVER_ADDON_DATE_BYTES];
+    unsigned long long downloads;
+    int installable;
+    int update_available;
+    int check_failed;
+    int curse_only;
+};
+
+struct forever_addon_snapshot
+{
+    enum forever_addon_tab tab;
+    struct forever_addon_row rows[FOREVER_ADDON_ROWS];
+    size_t count;
 };
 
 struct forever_menu_values
@@ -67,6 +134,9 @@ struct forever_menu_result
 {
     enum forever_menu_command command;
     int enabled;
+    enum forever_addon_channel channel;
+    enum forever_addon_tab tab;
+    char key[FOREVER_ADDON_KEY_BYTES];
 };
 
 struct forever_menu_state
@@ -75,6 +145,15 @@ struct forever_menu_state
     enum forever_menu_item selected;
     int confirmation_selected; /* zero is Cancel, deliberately the default */
     struct forever_menu_values values;
+    enum forever_addon_channel addon_channel;
+    enum forever_addon_tab addon_tab;
+    int addon_sort_downloads;
+    size_t addon_selected;
+    size_t addon_scroll;
+    size_t addon_count;
+    int addon_loading;
+    enum forever_menu_command addon_confirmation;
+    struct forever_addon_row addon_rows[FOREVER_ADDON_ROWS];
     char status[FOREVER_MENU_STATUS_BYTES];
 };
 
@@ -83,6 +162,11 @@ void forever_menu_open(struct forever_menu_state *menu, const struct forever_men
 int forever_menu_is_open(const struct forever_menu_state *menu);
 void forever_menu_move(struct forever_menu_state *menu, int direction);
 struct forever_menu_result forever_menu_select(struct forever_menu_state *menu);
+struct forever_menu_result forever_menu_addon_button(
+    struct forever_menu_state *menu, enum forever_addon_button button);
+void forever_menu_addon_snapshot(
+    struct forever_menu_state *menu, const struct forever_addon_snapshot *snapshot);
+void forever_menu_addon_error(struct forever_menu_state *menu, const char *text);
 struct forever_menu_result forever_menu_back(struct forever_menu_state *menu);
 struct forever_menu_result forever_menu_click_line(struct forever_menu_state *menu, int line);
 void forever_menu_commit(struct forever_menu_state *menu, enum forever_menu_command command, int enabled);
