@@ -13,7 +13,7 @@
   "prefetch_hosts": ["telemetry-in.battle.net", "level3.blizzard.com", "us.cdn.blizzard.com", "level3.ssl.blizzard.com", "breaking-news.support.blizzard.com", "test.actual.battle.net", "us.version.battle.net", "wow.ingest.gdp.blizzard.com"],
   "dns_upstreams": ["1.1.1.1", "8.8.8.8"],
   "browser_switches": {
-    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1"]
+    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1", "--enable-spatial-navigation"]
   },
   "environment": {
     "PROTON_ENABLE_HDR": "1"

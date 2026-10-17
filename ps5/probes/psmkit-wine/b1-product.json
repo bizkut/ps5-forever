@@ -9,6 +9,6 @@
   "prefetch_hosts": ["distribution.version.battle.net", "us.version.battle.net", "telemetry-in.battle.net", "breaking-news.support.blizzard.com", "us.actual.battle.net", "us.cdn.blizzard.com", "us.account.battle.net", "level3.blizzard.com", "level3.ssl.blizzard.com", "oauth.battle.net", "api.blizzard.com"],
   "dns_upstreams": ["1.1.1.1", "8.8.8.8"],
   "browser_switches": {
-    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1"]
+    "Battle.net.exe": ["--in-process-gpu", "--enable-features=NetworkServiceInProcess2", "--renderer-process-limit=1", "--enable-spatial-navigation"]
   }
 }
