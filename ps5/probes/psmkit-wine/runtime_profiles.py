@@ -137,6 +137,7 @@ def profile(name, overrides=None):
             'installer_dos': r'C:\Battle.net-Setup.exe',
             'payload_programs': [],
             'refused_programs': [],
+            'crash_reporters': [],
             'prefetch_hosts': [],
             'dns_upstreams': [],
             'browser_switches': {},
@@ -159,7 +160,7 @@ def profile(name, overrides=None):
         if name != 'b1' or not isinstance(overrides, dict):
             raise ValueError('profile overrides are a B1 JSON object only')
         allowed = {'argv', 'cwd', 'prefix', 'home', 'dll_overrides', 'child_dll_overrides',
-                   'debug', 'headless', 'payload_programs', 'refused_programs',
+                   'debug', 'headless', 'payload_programs', 'refused_programs', 'crash_reporters',
                    'browser_switches', 'gpu', 'environment', 'prefetch_hosts', 'dns_upstreams'}
         if overrides.keys() - allowed:
             raise ValueError(f'unsupported B1 profile inputs: {sorted(overrides.keys()-allowed)}')
@@ -175,7 +176,7 @@ def profile(name, overrides=None):
                         any(char in path for char in '\0;\r\n') for path in value)):
                     raise ValueError('B1 payload_programs must be a list of absolute DOS paths')
                 selected[key] = value
-            elif key == 'refused_programs':
+            elif key in ('refused_programs', 'crash_reporters'):
                 if (not isinstance(value, list) or len(value) > 64 or any(
                         not isinstance(program, str) or not program or len(program) > 255 or
                         not program.isascii() or program in ('.', '..') or program[-1] in ' .' or
@@ -183,7 +184,7 @@ def profile(name, overrides=None):
                         for program in value) or
                         len({program.lower() for program in value}) != len(value) or
                         len(';'.join(value)) > 4096):
-                    raise ValueError('B1 refused_programs must be unique ASCII Windows basenames')
+                    raise ValueError(f'B1 {key} must be unique ASCII Windows basenames')
                 selected[key] = value
             elif key == 'prefetch_hosts':
                 # host names the parent resolves at start, so the console's
@@ -264,6 +265,8 @@ def profile(name, overrides=None):
             raise ValueError('B1 graphics environment requires a gpu profile')
         if overrides is not None and 'child_dll_overrides' in overrides and not selected['gpu']:
             raise ValueError('B1 child_dll_overrides requires a gpu profile')
+        if overrides is not None and 'crash_reporters' in overrides and not selected['gpu']:
+            raise ValueError('B1 crash_reporters requires a gpu profile')
         selected.setdefault('child_dll_overrides', selected['dll_overrides'])
         if selected['gpu']:
             # The game parent owns the console port; PsmKit children load the
@@ -354,6 +357,8 @@ def qualified_b1_folder(folder):
         'headless': supplied.get('headless', False),
         'payload_programs': supplied.get('payload_programs', []),
         'refused_programs': supplied.get('refused_programs', []),
+        **({'crash_reporters': supplied['crash_reporters']}
+           if supplied.get('gpu') and 'crash_reporters' in supplied else {}),
         'prefetch_hosts': supplied.get('prefetch_hosts', []),
         'dns_upstreams': supplied.get('dns_upstreams', []),
         **({'browser_switches': supplied['browser_switches']} if supplied.get('browser_switches') else {}),
@@ -371,6 +376,7 @@ def qualified_b1_folder(folder):
             'headless': game_supplied.get('headless', False),
             'payload_programs': game_supplied.get('payload_programs', []),
             'refused_programs': game_supplied.get('refused_programs', []),
+            'crash_reporters': game_supplied.get('crash_reporters', []),
             'prefetch_hosts': game_supplied.get('prefetch_hosts', []),
             'dns_upstreams': game_supplied.get('dns_upstreams', []),
             **({'browser_switches': game_supplied['browser_switches']} if game_supplied.get('browser_switches') else {}),

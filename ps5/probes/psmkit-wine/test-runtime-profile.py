@@ -27,6 +27,8 @@ game_config = json.loads(Path(__file__).with_name('b1-game-wow-forever.json').re
 beta_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
 maintenance = profile('b1', product)
 assert maintenance['refused_programs'] == []
+assert maintenance['crash_reporters'] == []
+assert 'crash_reporters' not in product
 assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json' in (
     Path(__file__).with_name('Makefile').read_text())
 for config, channel, executable, uid in (
@@ -40,7 +42,8 @@ for config, channel, executable, uid in (
     assert game['prefix'] == '/data/forever/prefix'
     assert game['home'] == '/data/forever/home'
     assert game['gpu'] is True and game['headless'] is True
-    assert game['refused_programs'] == ['BlizzardError.exe']
+    assert game['refused_programs'] == []
+    assert game['crash_reporters'] == ['BlizzardError.exe']
     assert game['environment'] == {'PROTON_ENABLE_HDR': '1'}
     assert 'WINEPS5_SDR_WHITE_NITS' not in game['environment']
 assert {key: value for key, value in game_config.items() if key not in ('argv', 'cwd')} == {
@@ -178,6 +181,32 @@ assert b1['refused_programs'] == []
 assert 'refused_programs' not in p1w
 assert profile('b1', {'refused_programs': ['BlizzardError.exe']})['refused_programs'] == [
     'BlizzardError.exe']
+assert b1['crash_reporters'] == []
+assert 'crash_reporters' not in p1w
+for reporters in ([], ['BlizzardError.exe'], ['First.exe', 'Second.exe'],
+                  ['x' * 255], [str(index) for index in range(64)]):
+    assert profile('b1', {'gpu': True, 'headless': True,
+                          'crash_reporters': reporters})['crash_reporters'] == reporters
+for reporters in ('BlizzardError.exe', None, [None], [''], ['.'], ['..'],
+                  [r'C:\BlizzardError.exe'], ['Utils/BlizzardError.exe'],
+                  ['BlizzardError.exe;Other.exe'], ['BlizzardError.exe\n'],
+                  ['BlizzardError.exe', 'blizzarderror.EXE'], ['BlizzárdError.exe'],
+                  ['BlizzardError.exe '], ['BlizzardError.exe.'], ['x' * 256],
+                  [str(index) for index in range(65)],
+                  [str(index) + 'x' * 250 for index in range(17)]):
+    try:
+        profile('b1', {'gpu': True, 'headless': True, 'crash_reporters': reporters})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f'B1 accepted unsafe crash reporters: {reporters}')
+for reporters in ([], ['BlizzardError.exe']):
+    try:
+        profile('b1', {**product, 'crash_reporters': reporters})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('maintenance profile accepted game crash reporters')
 assert b1['installer_dos'] == r'C:\Battle.net-Setup.exe'
 assert b1['installer_url'] == 'https://downloader.battle.net//download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'
 # A direct versioned download, tried only after the Live redirect fails.
