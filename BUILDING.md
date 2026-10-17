@@ -224,6 +224,14 @@ docker run --rm --pull=never --user "$(id -u):$(id -g)" \
   bash -c 'mkdir -p "$HOME"; make -s -C ps5/probes/psmkit-wine test MINGW_CC=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang MINGW32_CC=/opt/llvm-mingw/bin/i686-w64-mingw32-clang'
 ```
 
+The `test-file-security` host gate compiles Wine's real `mode_to_sd`,
+`sd_to_mode`, and SID definitions. Only PS5 in-process title servers synthesize
+Administrators, Users, and Interactive full-access ACEs plus All Application
+Packages read/execute for world-rwx files; payload and non-PS5 descriptors are
+unchanged. Directories inherit these grants, and the DACL remains unprotected.
+This reproduces Battle.net's installation repair when title security xattrs
+cannot persist. The existing PS5 `sd_to_mode` policy keeps repair chmods at 0777.
+
 The cursor host regressions are included in that suite (`test-cursor`,
 `test-runtime-input`, `test-wine-title`, and `test-desktop-surface`). Wine sends
 top-down straight-alpha ARGB images up to 64×64 with a desktop-space hotspot;
