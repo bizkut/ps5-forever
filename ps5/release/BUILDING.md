@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.009
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.010
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -62,17 +62,31 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
-## 01.000.009 source changes
+## 01.000.010 source changes
 
+- PS5 in-process title servers synthesize Battle.net Agent's expected ACL grants
+  for world-rwx files and directories when security xattrs cannot persist;
+  payload and non-PS5 descriptors remain unchanged.
+- Native cursor publication uses the opt-in `PS5_DESKTOP_CURSOR_CAPABLE` HELLO
+  capability and type-12 ARGB cursor messages with a hotspot. Maintenance windows
+  publish through wineps5.drv; the headless GPU parent uses win32u's title-GPU
+  null-driver behaviour plus cursor callbacks, enabled only by `wineSetCursor`.
+  CPU-only headless children retain the plain null driver.
+- Battle.net.exe receives `--enable-spatial-navigation`, using the existing
+  D-pad arrow, Triangle Enter and Options Escape mappings on most pages.
+- Final-channel paths now use the actual `_forever_/Wow.exe` spelling for preset
+  installation and direct start; the per-channel user-settings preservation
+  rules remain unchanged.
 - The write-broker pool grows from 4 to 16 lazily opened connections per Wine
   process. Routing drops the two fixed alignment bits from Windows thread IDs
   before selecting a slot; previously every Windows thread selected the same slot.
   Requests and replies remain synchronous and locked per connection, with no new
   client worker. Each live connection uses one broker worker and a 1 MiB buffer
   (at most 16 workers / 16 MiB for one fully used Wine process's pool).
-- Battle.net defaults to the final Forever channel (`wowf`, `_forever_/WoW.exe`);
-  Classic beta (`wow_classic_beta`, `_classic_beta_/WowB.exe`) remains supported.
-  Direct-game startup prefers a complete final install, then a complete beta install.
+- Battle.net defaults to Classic beta (`wow_classic_beta`,
+  `_classic_beta_/WowB.exe`) again; final Forever (`wowf`, `_forever_/Wow.exe`)
+  remains supported when selected. Direct-game startup prefers a complete beta
+  install, then a complete final install.
 - The recommended `Config.wtf` is installed independently for final and beta,
   only when that channel's executable exists and its own settings file is absent.
 - Wine's WoW loader recognition tries the derived loader name, then a lowercase
@@ -113,7 +127,7 @@ entries. The `.008` import-policy correction removes only the obsolete
 `wineps5.so` `strlen` and `strstr` rows from the B1 policy; all other policy entries
 and qualification requirements remain unchanged.
 
-Native acceptance of the exact final `.009` archive is **pending**. These source
+Native acceptance of the exact final `.010` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
@@ -151,7 +165,7 @@ loader or a post-link permission patch; ELF, Mach-O and ARM emission is unchange
 Rebuild the Wine host `tools/winebuild/winebuild`, regenerate both architectures'
 `*.delay.a` libraries and relink their PE consumers before restaging the runtime.
 
-The `.009` sources retain the two independent drive-reporting fixes:
+The `.010` sources retain the two independent drive-reporting fixes:
 
 - Wine's `server/directory.c` initializes the PS5 in-process server's `C:` and
   `W:` links in `\??` with fd-backed `\Device\HarddiskVolume1` and
@@ -223,6 +237,49 @@ docker run --rm --pull=never --user "$(id -u):$(id -g)" \
   forever-launcher-linux:ubuntu-24.04 \
   bash -c 'mkdir -p "$HOME"; make -s -C ps5/probes/psmkit-wine test MINGW_CC=/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang MINGW32_CC=/opt/llvm-mingw/bin/i686-w64-mingw32-clang'
 ```
+
+The `test-file-security` host gate compiles Wine's real `mode_to_sd`,
+`sd_to_mode`, and SID definitions. Only PS5 in-process title servers synthesize
+Administrators, Users, and Interactive full-access ACEs plus All Application
+Packages read/execute for world-rwx files; payload and non-PS5 descriptors are
+unchanged. Directories inherit these grants, and the DACL remains unprotected.
+This reproduces Battle.net's installation repair when title security xattrs
+cannot persist. The existing PS5 `sd_to_mode` policy keeps repair chmods at 0777.
+
+The cursor host regressions are included in that suite (`test-cursor`,
+`test-runtime-input`, `test-wine-title`, and `test-desktop-surface`). Wine sends
+top-down straight-alpha ARGB images up to 64×64 with a desktop-space hotspot;
+Battle.net's CPU compositor uses them at 1×, and the GPU parent uses two 64 KiB
+VideoOut slots. Its nearest-neighbour integer scale follows RADV's fixed
+3840×2160 scanout versus the 1920×1080 desktop (2× when the complete image fits
+64×64, otherwise 1×); the hotspot is scaled identically. App-hidden cursors
+stay hidden on motion; the GPU plane still hides after three seconds idle.
+The B1 headless GPU parent uses win32u's title-GPU driver (null-driver behaviour
+plus native cursor callbacks), enabled only by the `wineSetCursor` callback.
+CPU-only headless children retain the plain null driver. This GPU role does not
+load wineps5.drv; that driver publishes maintenance/desktop cursor messages.
+Both paths use the single conversion/cache implementation in `wine/ps5_cursor.h`.
+The 40-byte cursor prefix includes the top-level HWND (zero means desktop)
+and a reserved zero word; the maximum frame is 16,424 bytes. Conversion is
+cached per HCURSOR and evicted by DestroyCursorIcon, but every SetCursor republishes.
+The compositor uses each window's clipped visible rectangle for ownership and
+remembers other windows' states. Both hubs replay cursor snapshots incrementally
+in at most 64 KiB batches, retaining 64 KiB of queue headroom for live updates.
+Outstanding snapshot entries finish before newer live updates are promoted to the
+next generation, preventing frequently changing windows from starving replay.
+HELLO flag `PS5_DESKTOP_CURSOR_CAPABLE` requests an opt-in support reply;
+no reply means no type-12 publication, preserving old hubs and driver connections.
+Capability probes only peek at ordinary input and never probe a buffered partial
+frame. The latest pending shape is sent when HELLO completes; the publishing GUI
+queue handles late replies. Per-thread queue registration is independent of the
+desktop INPUT_SINK activation, including activation from another GUI thread.
+Registration uses a connection-mutex-protected thread-id set, cleaned by
+ThreadDetach, not ELF TLS. On ELF hosts the cursor host gate compiles the real
+desktop driver sources and the native cursor adapter with Wine API/table
+declarations, rejecting TLS segments, sections, relocations and unreviewed imports.
+Animation uses frame zero and monochrome invert pixels become black. Native
+checks must still establish WoW's `gxCursor 0` software/hardware-cursor interaction,
+mouselook hide/show, and the VideoOut buffer-switch/cache-flush behaviour.
 
 After building Wine's host tools, run the focused assembler/linker regression
 inside the same image (paths below are relative to `ps5-wow`):

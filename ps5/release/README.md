@@ -22,14 +22,22 @@ with HDR and frame generation.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.009
+## Changes in 01.000.010
 
+- Battle.net no longer asks to update installed games on every start: Wine now
+  reports the folder permissions its Agent expects.
+- WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and
+  Battle.net's text and link cursors, with the click point in the right place.
+- On most Battle.net pages, the controller's D-pad moves between buttons and
+  links; Triangle presses and Options goes back.
+- World of Warcraft Classic beta is the default game again; the final
+  WoW: Forever channel still works when selected in Battle.net.
+- Fixes the final channel's executable name (`_forever_/Wow.exe`), so its
+  recommended settings install and direct start finds it.
 - Faster parallel file writes: write-broker requests now use 16 connections
   instead of one shared by all Windows threads. PS5 benchmark: 32 KiB writes from
   4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.
   Real Battle.net download/update speedups have not yet been measured.
-- Supports the final World of Warcraft: Forever channel (`wowf`,
-  `_forever_/Wow.exe`) by default while retaining Classic beta support.
 - Installs recommended `Config.wtf` independently for final and beta without
   replacing user settings.
 - Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
