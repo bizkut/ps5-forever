@@ -16,7 +16,7 @@ from runtime_imports import (
     write_candidate, write_outputs,
 )
 from runtime_profiles import (
-    WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, runtime_tree_manifest,
+    WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, runtime_tree_manifest, builtin_prefix_files,
 )
 
 here = Path(__file__).resolve().parent
@@ -757,17 +757,9 @@ if args.profile == 'b1':
     forever = tree / 'share/forever'
     (forever / 'system32').mkdir(parents=True)
     shutil.copy2(here / '../../release/defaults/Config.wtf', forever / 'Config.wtf')
-    owned = []
-    for arch, folder, names in (
-            ('x86_64', 'system32', ('ntdll.dll', 'wow64.dll', 'wow64cpu.dll', 'wow64win.dll',
-                                    'kernelbase.dll', 'kernel32.dll', 'win32u.dll', 'start.exe',
-                                    'mmdevapi.dll', 'wineps5audio.drv')),
-            ('i386', 'syswow64', ('ntdll.dll', 'kernelbase.dll', 'kernel32.dll', 'win32u.dll',
-                                  'user32.dll', 'gdi32.dll', 'advapi32.dll', 'sechost.dll',
-                                  'msvcrt.dll', 'ucrtbase.dll', 'start.exe', 'mmdevapi.dll',
-                                  'wineps5audio.drv'))):
-        for name in names:
-            owned.append((f'lib/wine/{arch}-windows/{name}', f'drive_c/windows/{folder}/{name}'))
+    # A protected application can restore system DLL code from its disk copy.
+    # Every builtin PE must therefore match the image Wine actually loads.
+    owned = {destination: source for source, destination in builtin_prefix_files(tree)}
     for source_dir, names in ((args.vkd3d_dlls, ('d3d12.dll', 'd3d12core.dll')),
                               (args.dxvk_dlls, ('dxgi.dll',))):
         for name in names:
@@ -775,9 +767,9 @@ if args.profile == 'b1':
             if not source.is_file():
                 raise SystemExit(f'missing app-owned prefix file {source}')
             shutil.copy2(source, forever / 'system32' / name)
-            owned.append((f'share/forever/system32/{name}', f'drive_c/windows/system32/{name}'))
+            owned[f'drive_c/windows/system32/{name}'] = f'share/forever/system32/{name}'
     lines = ['# Forever Launcher: prefix files the app owns (source below wine-title, prefix path, sha256)']
-    for source, destination in owned:
+    for destination, source in sorted(owned.items()):
         path = tree / source
         if not path.is_file():
             raise SystemExit(f'missing app-owned prefix file {path}')

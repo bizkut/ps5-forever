@@ -111,6 +111,22 @@ def installed_paths(loader):
             'data_dir': str(root / 'share/wine'), 'wineloader': str(path)}
 
 
+def builtin_prefix_files(tree):
+    """Mirror wineboot's installed PE directories, excluding its AGS exception."""
+    owned = []
+    for arch, folder in (('i386', 'syswow64'), ('x86_64', 'system32')):
+        for path in sorted((tree / f'lib/wine/{arch}-windows').iterdir()):
+            if not path.is_file() or path.name == 'amd_ags_x64.dll':
+                continue
+            with path.open('rb') as source:
+                header = source.read(96)
+            if (header[:2] == b'MZ' and
+                    header[64:].startswith((b'Wine builtin DLL\0', b'Wine placeholder DLL\0'))):
+                owned.append((path.relative_to(tree).as_posix(),
+                              f'drive_c/windows/{folder}/{path.name}'))
+    return owned
+
+
 def profile(name, overrides=None):
     if name not in ('p1w', 'b1'):
         raise ValueError(f'unknown title runtime profile: {name}')

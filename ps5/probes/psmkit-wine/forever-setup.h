@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -272,21 +273,71 @@ static inline int forever_migrate(const char *prefix, const char *home, const ch
     return 0;
 }
 
-/* The prefix files the app owns (vkd3d-proton, DXVK's dxgi, the audio driver,
- * WoW64 runtime copies) follow the app: copy them all when the shipped list
- * differs from the one recorded in the prefix. The list's lines are
- * "<path below app_root>\t<path below prefix>\t<sha256>", so any changed file
- * changes the list. Returns files copied, 0 when current, -errno failure. */
+/* Use the same ownership signatures as setupapi's is_fake_dll(): native
+ * replacements installed by the user are not Wine prefix-update targets. */
+static inline int forever_is_wine_pe(const char *path)
+{
+    unsigned char header[96];
+    size_t used = 0;
+    int fd = open(path, O_RDONLY), error = 0;
+    if (fd < 0) return -errno;
+    while (used < sizeof(header))
+    {
+        ssize_t count = read(fd, header + used, sizeof(header) - used);
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) { error = -errno; break; }
+        if (!count) break;
+        used += (size_t)count;
+    }
+    close(fd);
+    if (error) return error;
+    return used == sizeof(header) && header[0] == 'M' && header[1] == 'Z' &&
+        (!memcmp(header + 64, "Wine builtin DLL", sizeof("Wine builtin DLL")) ||
+         !memcmp(header + 64, "Wine placeholder DLL", sizeof("Wine placeholder DLL")));
+}
+
+static inline unsigned forever_managed_hash(const char *name)
+{
+    uint32_t hash = 2166136261u;
+    while (*name) hash = (hash ^ (unsigned char)*name++) * 16777619u;
+    return hash & 4095;
+}
+
+/* Keep every shipped Wine PE and explicit native graphics override current.
+ * Diff by destination/digest against the previous manifest, checking sizes
+ * and missing files even when the manifest is unchanged. Publish its stamp
+ * only after all required atomic file copies succeed. */
 static inline int forever_sync_managed(const char *app_root, const char *list_path, const char *prefix)
 {
-    static char list[1u << 16], installed[1u << 16];
+    static char list[1u << 19], installed[1u << 19];
+    static struct { const char *destination, *digest; } previous[4096];
     char stamp[1100], source[1100], destination[1100];
     ssize_t length;
-    int copied = 0, error;
+    int copied = 0, error, manifest_changed;
 
     if ((length = forever_read_file(list_path, list, sizeof(list))) < 0) return (int)length;
     snprintf(stamp, sizeof(stamp), "%s/" FOREVER_MANAGED_STAMP, prefix);
-    if (forever_read_file(stamp, installed, sizeof(installed)) >= 0 && !strcmp(list, installed)) return 0;
+    if (forever_read_file(stamp, installed, sizeof(installed)) < 0) installed[0] = 0;
+    manifest_changed = strcmp(list, installed);
+    memset(previous, 0, sizeof(previous));
+    for (char *line = installed, *next; *line; line = next)
+    {
+        char *tab1, *tab2, *end = strchr(line, '\n');
+        unsigned slot, probes = 0;
+        next = end ? end + 1 : line + strlen(line);
+        if (end) *end = 0;
+        if (!*line || *line == '#' || !(tab1 = strchr(line, '\t')) ||
+            !(tab2 = strchr(tab1 + 1, '\t'))) continue;
+        *tab2 = 0;
+        slot = forever_managed_hash(tab1 + 1);
+        while (previous[slot].destination && strcmp(previous[slot].destination, tab1 + 1))
+        {
+            if (++probes == 4096) return -EFBIG;
+            slot = (slot + 1) & 4095;
+        }
+        previous[slot].destination = tab1 + 1;
+        previous[slot].digest = tab2 + 1;
+    }
     for (char *line = list, *next; *line; line = next)
     {
         char *tab1, *tab2, *end = strchr(line, '\n');
@@ -298,6 +349,35 @@ static inline int forever_sync_managed(const char *app_root, const char *list_pa
         if (strstr(line, "..") || strstr(tab1 + 1, "..")) { error = -EACCES; goto fail; }
         snprintf(source, sizeof(source), "%s/%s", app_root, line);
         snprintf(destination, sizeof(destination), "%s/%s", prefix, tab1 + 1);
+        {
+            struct stat input, output;
+            unsigned slot = forever_managed_hash(tab1 + 1), probes = 0;
+            int exists;
+            if (stat(source, &input)) { error = -errno; goto fail; }
+            exists = !stat(destination, &output);
+            if (!exists && errno != ENOENT) { error = -errno; goto fail; }
+            while (previous[slot].destination && strcmp(previous[slot].destination, tab1 + 1))
+            {
+                if (++probes == 4096) { error = -EFBIG; goto fail; }
+                slot = (slot + 1) & 4095;
+            }
+            if (exists && previous[slot].destination &&
+                !strcmp(previous[slot].digest, tab2 + 1) && input.st_size == output.st_size)
+            {
+                *tab1 = *tab2 = '\t';
+                goto restore;
+            }
+            if (exists && !strncmp(line, "lib/wine/", 9))
+            {
+                int builtin = forever_is_wine_pe(destination);
+                if (builtin < 0) { error = builtin; goto fail; }
+                if (!builtin)
+                {
+                    *tab1 = *tab2 = '\t';
+                    goto restore;
+                }
+            }
+        }
         {
             char *slash = strrchr(destination, '/');
             *slash = 0;
@@ -311,7 +391,7 @@ static inline int forever_sync_managed(const char *app_root, const char *list_pa
     restore:
         if (end) *end = '\n';
     }
-    if ((error = forever_write_file(stamp, list, strlen(list)))) return error;
+    if (manifest_changed && (error = forever_write_file(stamp, list, strlen(list)))) return error;
     return copied;
 fail:
     return error;

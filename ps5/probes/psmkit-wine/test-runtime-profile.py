@@ -9,12 +9,29 @@ import tempfile
 
 from runtime_profiles import (
     WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, installed_paths,
-    runtime_tree_manifest, b1_guard_paths, qualified_b1_folder, file_identity,
+    runtime_tree_manifest, b1_guard_paths, qualified_b1_folder, file_identity, builtin_prefix_files,
 )
 from runtime_imports import (
     candidate_ownership, module_manifest, render_include, load_policy, make_records,
     native_role_imports,
 )
+
+with tempfile.TemporaryDirectory() as directory:
+    tree = Path(directory)
+    builtin = b'MZ' + bytes(62) + b'Wine builtin DLL\0' + bytes(16)
+    for arch in ('x86_64', 'i386'):
+        folder = tree / f'lib/wine/{arch}-windows'
+        folder.mkdir(parents=True)
+        for name in ('advapi32.dll', 'kernel32.dll', 'wineps5audio.drv', 'start.exe', 'dxgi.dll'):
+            (folder / name).write_bytes(builtin)
+        (folder / 'not-pe.txt').write_bytes(b'not a builtin PE')
+        (folder / 'amd_ags_x64.dll').write_bytes(builtin)
+    owned = dict(builtin_prefix_files(tree))
+    for arch, folder in (('x86_64', 'system32'), ('i386', 'syswow64')):
+        for name in ('advapi32.dll', 'kernel32.dll', 'wineps5audio.drv', 'start.exe'):
+            assert owned[f'lib/wine/{arch}-windows/{name}'] == f'drive_c/windows/{folder}/{name}'
+    assert not any('not-pe.txt' in name or 'amd_ags_x64.dll' in name for name in owned)
+    assert list(owned) == sorted(owned)
 
 b1 = profile('b1')
 p1w = profile('p1w')

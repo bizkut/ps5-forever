@@ -182,8 +182,12 @@ Updating the app replaces only the app folder. Your games and settings stay.
 - **By hand:** close the app and replace only its `PPSA99030` app folder
   with the folder from the new zip. Do not delete `/data/forever`.
 
-The first start after an update copies the app's new Windows files into
-`/data/forever` by itself.
+The first start after an update synchronizes the app's Windows files into
+`/data/forever`, including Wine's system DLLs. This keeps the on-disk DLLs
+identical to the builtin images loaded by Wine; mismatched copies can crash
+protected games during startup. Only changed, missing or wrong-size managed
+files are copied. Existing native DLL replacements are preserved, while the
+app's managed DXVK/vkd3d graphics files take precedence.
 
 ## Uninstalling
 

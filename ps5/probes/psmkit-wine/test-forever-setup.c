@@ -157,6 +157,73 @@ static void test_managed_sync(void)
     assert(forever_sync_managed(app, list, prefix) == 1);
     assert(text_is("managed/prefix/drive_c/windows/system32/d3d12core.dll", "core-v2"));
 
+    /* Per-entry digests: changing one DLL must not rewrite another unchanged
+     * entry; missing/wrong-size destinations are repaired even with a stamp. */
+    put("app/share/forever/system32/unchanged.dll", "same");
+    put("app/share/forever/system32/changed.dll", "new");
+    put("managed/prefix/drive_c/windows/system32/unchanged.dll", "mine");
+    put("managed/prefix/drive_c/windows/system32/changed.dll", "old");
+    put("managed/prefix/" FOREVER_MANAGED_STAMP,
+        "share/forever/system32/unchanged.dll\tdrive_c/windows/system32/unchanged.dll\taaaa\n"
+        "share/forever/system32/changed.dll\tdrive_c/windows/system32/changed.dll\tbbbb\n");
+    put("app/share/forever/prefix-files.txt",
+        "share/forever/system32/unchanged.dll\tdrive_c/windows/system32/unchanged.dll\taaaa\n"
+        "share/forever/system32/changed.dll\tdrive_c/windows/system32/changed.dll\tcccc\n");
+    assert(forever_sync_managed(app, list, prefix) == 1);
+    assert(text_is("managed/prefix/drive_c/windows/system32/unchanged.dll", "mine"));
+    assert(text_is("managed/prefix/drive_c/windows/system32/changed.dll", "new"));
+    char missing[1024];
+    path(missing, "managed/prefix/drive_c/windows/system32/changed.dll");
+    assert(!unlink(missing));
+    assert(forever_sync_managed(app, list, prefix) == 1);
+    put("managed/prefix/drive_c/windows/system32/changed.dll", "wrong-size");
+    assert(forever_sync_managed(app, list, prefix) == 1);
+    assert(forever_sync_managed(app, list, prefix) == 0);
+
+    /* Failed publication must leave the previous manifest stamp intact. */
+    put("app/share/forever/prefix-files.txt",
+        "share/forever/system32/missing.dll\tdrive_c/windows/system32/missing.dll\tdddd\n");
+    assert(forever_sync_managed(app, list, prefix) == -ENOENT);
+    assert(text_is("managed/prefix/" FOREVER_MANAGED_STAMP,
+        "share/forever/system32/unchanged.dll\tdrive_c/windows/system32/unchanged.dll\taaaa\n"
+        "share/forever/system32/changed.dll\tdrive_c/windows/system32/changed.dll\tcccc\n"));
+
+    /* Old Wine-owned copies are replaced; user native replacements survive.
+     * Explicit app-owned native graphics rows are tested above. */
+    unsigned char old_pe[96] = {'M', 'Z'}, new_pe[96];
+    memcpy(old_pe + 64, "Wine builtin DLL", sizeof("Wine builtin DLL"));
+    memcpy(new_pe, old_pe, sizeof(new_pe));
+    new_pe[95] = 1;
+    char binary[1024];
+    path(binary, "managed/prefix/drive_c/windows/system32/advapi32.dll");
+    assert(!forever_write_file(binary, old_pe, sizeof(old_pe)));
+    path(binary, "app/lib/wine/x86_64-windows/advapi32.dll");
+    assert(!forever_write_file(binary, new_pe, sizeof(new_pe)));
+    put("managed/prefix/drive_c/windows/system32/native.dll", "native replacement");
+    put("app/lib/wine/x86_64-windows/native.dll", "new Wine copy");
+    put("app/share/forever/prefix-files.txt",
+        "lib/wine/x86_64-windows/advapi32.dll\tdrive_c/windows/system32/advapi32.dll\teeee\n"
+        "lib/wine/x86_64-windows/native.dll\tdrive_c/windows/system32/native.dll\tffff\n");
+    assert(forever_sync_managed(app, list, prefix) == 1);
+    assert(text_is("managed/prefix/drive_c/windows/system32/native.dll", "native replacement"));
+    path(binary, "managed/prefix/drive_c/windows/system32/advapi32.dll");
+    unsigned char copied[96];
+    int fd = open(binary, O_RDONLY);
+    assert(fd >= 0 && read(fd, copied, sizeof(copied)) == sizeof(copied));
+    close(fd);
+    assert(!memcmp(copied, new_pe, sizeof(copied)));
+
+    /* The full two-architecture inventory exceeds the old 64-KiB bound. */
+    char *large = malloc(80002);
+    assert(large);
+    memset(large, '#', 80000);
+    large[80000] = '\n';
+    large[80001] = 0;
+    put("app/share/forever/prefix-files.txt", large);
+    assert(forever_sync_managed(app, list, prefix) == 0);
+    assert(forever_sync_managed(app, list, prefix) == 0);
+    free(large);
+
     put("app/share/forever/prefix-files.txt", "../escape\tdrive_c/x\tcccc\n");
     assert(forever_sync_managed(app, list, prefix) == -EACCES);
     put("app/share/forever/prefix-files.txt", "missing-tabs\n");
