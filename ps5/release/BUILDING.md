@@ -57,6 +57,25 @@ Outputs under `ps5-wow/ps5/build/`:
 - `release/PPSA99030.zip`: catalog archive, with size and SHA-256 in the output.
 - `release/logs/`: complete per-stage logs and `timings.tsv` (seconds/status).
 
+### Persistent release-build cache
+
+Linux release builds keep compiled outputs in `SOURCE_ROOT/.cache` so the
+self-hosted runner can reuse them even though checkout cleans
+`ps5-wow/ps5/build`. RADV, FreeType, GnuTLS, vkd3d-proton, and DXVK entries are
+keyed by their pinned sources and downloads, build recipes, container image ID,
+and relevant toolchain environment. Every restored entry is checked against a
+SHA-256 manifest; a mismatch is a cache miss and rebuilds that stage. Wine keeps
+its out-of-tree build and host-tool trees there for incremental `make`, but
+reconfigures from an empty tree when its configure key changes. Its compiler
+flags map the physical cache root back to `/sources`, retaining the debug paths
+and release bytes of an ordinary `ps5/build` tree.
+
+Set the Release workflow's `clean` dispatch input to discard this cache before
+building. The workflow retains the two newest entries per stage and logs
+`CACHE_HIT`, `CACHE_MISS`, and `CACHE_SIZE` receipts. Host tests, both B1 runtime
+roles, packaging, and qualification always run from fresh product outputs; the
+package allowlist remains the only source of ZIP members.
+
 Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 `RUNTIME_TITLE_DUAL_QUALIFIED`. The qualifier's deliberate unknown-import and
 win32u-identity rejection records are expected negative tests. Qualification
@@ -223,8 +242,9 @@ fingerprints and original build-version provenance are recorded separately;
 no private GitHub repository or development history is needed.
 Keep at least **30 GiB free** for sources, build output and Docker. The measured
 cold workspace used 13 GiB before Docker overhead. CI targets a self-hosted
-Linux x86-64 runner and defaults to `JOBS=8` (override with the `FOREVER_JOBS`
-repository variable). RADV Ninja and Wine's `install-lib` honor the same cap.
+Linux x86-64 runner and defaults to the container's `nproc` value (override with
+the `FOREVER_JOBS` repository variable). RADV Ninja and Wine's `install-lib`
+honor the same cap.
 The container runs with the invoking user's UID/GID, writes only its temporary
 home and the supplied source/build tree, and never removes host toolchains.
 

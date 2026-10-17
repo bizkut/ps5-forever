@@ -14,6 +14,9 @@
 # PS5_CPU_FLAGS (default empty) appends target CPU flags to Unix and both PE
 # architectures. Use WINE_BUILD for an isolated comparison, for example:
 # WINE_BUILD="$PWD/ps5/build/wine-ps5-build-znver2" PS5_CPU_FLAGS="-march=znver2"
+# WINE_REPRO_FLAGS and WINE_TOOLS_REPRO_FLAGS optionally normalize
+# build-directory paths in debug data; release cache orchestration sets them,
+# while ordinary builds leave them empty.
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # WINE_SRC selects another checkout when explicitly comparing revisions.
@@ -24,6 +27,8 @@ mingw=${LLVM_MINGW:-$HOME/llvm-mingw}
 tools=${WINE_TOOLS:-$here/build/wine-ps5-tools}
 cross=${WINE_BUILD:-$here/build/wine-ps5-build}
 cpu_flags=${PS5_CPU_FLAGS:-}
+repro_flags=${WINE_REPRO_FLAGS:-}
+tools_repro_flags=${WINE_TOOLS_REPRO_FLAGS:-}
 # Where ps5/stage-wine.sh installs Wine on the console (its prefix).
 source "$here/paths.sh"
 prefix=$WINE_ROOT
@@ -57,6 +62,13 @@ write_paths_header() {
 }
 
 configure() {
+    local -a tools_env=() unix_env=()
+    if [[ -n $tools_repro_flags ]]; then
+        tools_env=(CFLAGS="-g -O2 $tools_repro_flags" CXXFLAGS="-g -O2 $tools_repro_flags")
+    fi
+    if [[ -n $repro_flags ]]; then
+        unix_env=(CXXFLAGS="-g -O2 $cpu_flags $repro_flags")
+    fi
     if [[ ! -f $freetype/include/freetype2/ft2build.h || ! -f $freetype/lib/libfreetype.so ]]; then
         printf 'missing PS5 FreeType: run ps5/build-freetype.sh before configuring Wine\n' >&2
         exit 1
@@ -86,7 +98,8 @@ configure() {
     # Wine's 32-bit host build and needlessly requires multilib libraries.
     local tools_arch=()
     [[ $(uname -s) != Linux ]] || tools_arch=(--enable-win64)
-    (cd "$tools" && FREETYPE_CFLAGS="$host_freetype_cflags" \
+    (cd "$tools" && env "${tools_env[@]}" \
+        FREETYPE_CFLAGS="$host_freetype_cflags" \
         FREETYPE_LIBS="$host_freetype_libs" \
         "$src/configure" "${tools_arch[@]}" "${without[@]}" --without-vulkan --without-gnutls --with-freetype --enable-fonts --without-unwind \
         > configure.log 2>&1)
@@ -109,13 +122,14 @@ configure() {
     # our absolute FreeType, GnuTLS and Vulkan sonames. Override its cache
     # results so the Unix modules' dlopen use the console paths, not bare
     # names or the host build paths.
-    (cd "$cross" && "$src/configure" --host=x86_64-unknown-freebsd11 --with-wine-tools="$tools" \
+    (cd "$cross" && env "${unix_env[@]}" \
+        "$src/configure" --host=x86_64-unknown-freebsd11 --with-wine-tools="$tools" \
         --enable-archs=i386,x86_64 --with-freetype --enable-fonts --with-gnutls --with-vulkan \
-        CROSSCFLAGS="-g -O2 -D__WINE_PS5__ $cpu_flags" \
+        CROSSCFLAGS="-g -O2 -D__WINE_PS5__ $cpu_flags $repro_flags" \
         CROSSLDFLAGS="${CROSSLDFLAGS:-} ${PS5_PE_LDFLAGS:-}" \
         CC="$sdk/prospero-clang" CXX="$sdk/prospero-clang++" AR="$sdk/prospero-ar" \
         RANLIB="$sdk/prospero-ranlib" STRIP="$sdk/prospero-strip" PKG_CONFIG=false \
-        CFLAGS="-g -O2 -include $here/include/ps5_wine_compat.h -include $paths_header $cpu_flags" \
+        CFLAGS="-g -O2 -include $here/include/ps5_wine_compat.h -include $paths_header $cpu_flags $repro_flags" \
         FREETYPE_CFLAGS="-I$freetype/include/freetype2" \
         FREETYPE_LIBS="-L$freetype/lib -lfreetype" \
         ac_cv_lib_soname_freetype="$freetype_soname" \

@@ -11,6 +11,11 @@ on:
         required: true
         default: '01.000.012'
         type: string
+      clean:
+        description: 'Discard the persistent compiled-output cache before building'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -27,6 +32,8 @@ jobs:
       SOURCE_ROOT: ${{ github.workspace }}/sources
       PRODUCT: ${{ github.workspace }}/sources/ps5-proton/ps5-wow
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+      FOREVER_BUILD_CACHE: ${{ github.workspace }}/sources/.cache
+      FOREVER_CLEAN_CACHE: ${{ github.event_name == 'workflow_dispatch' && inputs.clean && '1' || '0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -40,7 +47,7 @@ jobs:
         run: python3 "$PRODUCT/ps5/release/fetch-sources.py" "$SOURCE_ROOT"
       - name: Build and qualify both title roles in the pinned container
         env:
-          JOBS: ${{ vars.FOREVER_JOBS || '8' }}
+          JOBS: ${{ vars.FOREVER_JOBS }}
         run: bash "$PRODUCT/ps5/release/build-linux.sh" "$SOURCE_ROOT" "$RELEASE_TAG"
       - name: Verify archive and write its catalog digest
         working-directory: sources/ps5-proton/ps5-wow/ps5/build/release

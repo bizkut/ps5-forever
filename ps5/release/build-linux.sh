@@ -10,12 +10,16 @@ if [[ ${1:-} != --container ]]; then
     image=forever-launcher-linux:ubuntu-24.04
     start=$SECONDS
     docker build --platform linux/amd64 --tag "$image" "$here"
-    printf 'BUILD_STAGE image seconds=%s\n' "$((SECONDS - start))"
+    image_id=$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$image")
+    printf 'BUILD_STAGE image seconds=%s id=%s\n' "$((SECONDS - start))" "$image_id"
     exec docker run --rm --platform linux/amd64 \
         --user "$(id -u):$(id -g)" \
         --env HOME=/tmp/forever-builder \
         --mount "type=bind,source=$sources,target=/sources" \
-        --env "JOBS=${JOBS:-8}" \
+        --env "JOBS=${JOBS:-}" \
+        --env "FOREVER_BUILD_CACHE=/sources/.cache" \
+        --env "FOREVER_CLEAN_CACHE=${FOREVER_CLEAN_CACHE:-0}" \
+        --env "FOREVER_CONTAINER_IMAGE_ID=$image_id" \
         --env "PS5_MESA_REVISION=${PS5_MESA_REVISION:-}" "$image" \
         bash /sources/ps5-proton/ps5-wow/ps5/release/build-linux.sh --container "$tag"
 fi
@@ -26,7 +30,10 @@ tag=$2
 root=/sources
 wow=$root/ps5-proton/ps5-wow
 cd "$wow"
-export JOBS=${JOBS:-8}
+if [[ -z ${JOBS:-} ]]; then
+    JOBS=$(nproc)
+fi
+export JOBS
 export BUILD_JOBS=$JOBS
 export CMAKE_BUILD_PARALLEL_LEVEL=$JOBS
 export PS5_PE_LDFLAGS=-Wl,--no-insert-timestamp
@@ -37,7 +44,13 @@ export WINE_SRC=$root/ps5-proton/ps5-wine
 export PS5_PAYLOAD_SDK=$PS5_VULKAN/.deps/native/ps5-payload-sdk
 export PATH=$LLVM_MINGW/bin:$PATH
 export PS5_RADV_REVISION=${PS5_MESA_REVISION:-$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["radv_revision"])' "$here/deps.json")}
-mkdir -p "$HOME"
+export FOREVER_BUILD_CACHE=${FOREVER_BUILD_CACHE:-$root/.cache}
+export FOREVER_CONTAINER_IMAGE_ID=${FOREVER_CONTAINER_IMAGE_ID:?container image ID is required}
+if [[ ${FOREVER_CLEAN_CACHE:-0} == 1 ]]; then
+    rm -rf -- "$FOREVER_BUILD_CACHE"
+    printf 'CACHE_CLEAN root=%s\n' "$FOREVER_BUILD_CACHE"
+fi
+mkdir -p "$FOREVER_BUILD_CACHE" "$HOME"
 # The writebroker's existing Makefile uses this historic path.
 ln -s "$PS5_PAYLOAD_SDK" "$HOME/ps5-payload-sdk-platform"
 # The desktop picture is the committed, drawn sce_sys/pic0.dds; never import
@@ -45,6 +58,7 @@ ln -s "$PS5_PAYLOAD_SDK" "$HOME/ps5-payload-sdk-platform"
 unset DESKTOP_DDS
 mkdir -p ps5/build/release/logs
 logs=$wow/ps5/build/release/logs
+cache_helper=$here/build-cache.py
 export FOREVER_SOURCE_ROOT=$root
 export FOREVER_SOURCE_MANIFEST=$here/deps.json
 export PATH=$logs/tools:$PATH
@@ -168,10 +182,185 @@ restore_wine_headers() {
     git -C "$WINE_SRC" restore include/wine/server_protocol.h \
         server/request_handlers.h server/request_trace.h
 }
+cache_key_common() {
+    local stage=$1
+    shift
+    python3 "$cache_helper" key --stage "$stage" --source-root "$root" \
+        --manifest "$here/deps.json" \
+        --path "$cache_helper" \
+        --value "container-image=$FOREVER_CONTAINER_IMAGE_ID" \
+        --value "LLVM_MINGW=$LLVM_MINGW" \
+        --value "PS5_PAYLOAD_SDK=$PS5_PAYLOAD_SDK" \
+        --value "PS5_VULKAN=$PS5_VULKAN" \
+        --value "PS5_PE_LDFLAGS=$PS5_PE_LDFLAGS" "$@"
+}
+cache_key_radv() {
+    cache_key_common radv \
+        --source PS5_Mesa --source PS5_Vulkan --source PS5_PayloadSDK \
+        --download radv-zlib-1.3.1 --download radv-zlib-meson-patch \
+        --path "$wow/ps5/radv" \
+        --value "PS5_RADV_REVISION=$PS5_RADV_REVISION" \
+        --value "PS5_MESA_FORK=$PS5_MESA_FORK" \
+        --value "LLVM_CONFIG=${LLVM_CONFIG:-}"
+}
+cache_key_freetype() {
+    cache_key_common freetype \
+        --source PS5_PayloadSDK --download freetype-2.14.3 \
+        --path "$wow/ps5/build-freetype.sh" \
+        --path "$wow/ps5/build-common.sh" \
+        --path "$wow/ps5/paths.sh"
+}
+cache_key_gnutls() {
+    cache_key_common gnutls \
+        --source PS5_PayloadSDK --source pacbrew-repo \
+        --download nettle-3.10.2 --download libtasn1-4.21.0 \
+        --download gnutls-3.8.13 \
+        --path "$wow/ps5/build-gnutls.sh" \
+        --path "$wow/ps5/build-common.sh" \
+        --path "$wow/ps5/paths.sh" \
+        --value "PACBREW_REPO=$PACBREW_REPO"
+}
+cache_key_vkd3d() {
+    cache_key_common vkd3d-proton \
+        --source-prefix vkd3d-proton \
+        --path "$wow/ps5/build-vkd3d-proton.sh" \
+        --value "PS5_CPU_FLAGS=${PS5_CPU_FLAGS:-}" \
+        --value "WIDL=${WIDL:-}"
+}
+cache_key_dxvk() {
+    cache_key_common dxvk \
+        --source-prefix dxvk \
+        --path "$wow/ps5/build-dxvk.sh" \
+        --value "PS5_CPU_FLAGS=${PS5_CPU_FLAGS:-}"
+}
+cache_key_wine() {
+    local sdk_revision freetype_key gnutls_key vkd3d_key
+    sdk_revision=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sdk_revision"])' "$here/deps.json")
+    freetype_key=$(cache_key_freetype)
+    gnutls_key=$(cache_key_gnutls)
+    vkd3d_key=$(cache_key_vkd3d)
+    cache_key_common wine \
+        --source PS5_PayloadSDK --source PS5_Vulkan \
+        --path "$wow/ps5/build-wine.sh" \
+        --path "$wow/ps5/paths.sh" \
+        --path "$WINE_SRC/configure.ac" \
+        --path "$WINE_SRC/configure" \
+        --value "sdk-revision=$sdk_revision" \
+        --value "freetype-output-key=$freetype_key" \
+        --value "gnutls-output-key=$gnutls_key" \
+        --value "vkd3d-output-key=$vkd3d_key" \
+        --value "PS5_CPU_FLAGS=${PS5_CPU_FLAGS:-}" \
+        --value "CROSSLDFLAGS=${CROSSLDFLAGS:-}" \
+        --value "WINE_REPRO_FLAGS=-fdebug-compilation-dir=<logical-wine-build-path>" \
+        --value "WINE_TOOLS_REPRO_FLAGS=-ffile-prefix-map=<cache-output-root>=$root" \
+        --value "HOST_FREETYPE=${HOST_FREETYPE:-/opt/homebrew/opt/freetype}"
+}
+cached_build() {
+    local name=$1 key=$2
+    local -a outputs=() helper_args=()
+    shift 2
+    while [[ $1 != -- ]]; do
+        outputs+=("$1")
+        shift
+    done
+    shift
+    for output in "${outputs[@]}"; do
+        helper_args+=(--output "$output")
+    done
+    if python3 "$cache_helper" restore --cache "$FOREVER_BUILD_CACHE" \
+        --stage "$name" --key "$key" --source-root "$root" "${helper_args[@]}"; then
+        printf 'CACHE_HIT %s key=%s\n' "$name" "${key:0:12}"
+        return
+    fi
+    printf 'CACHE_MISS %s key=%s\n' "$name" "${key:0:12}"
+    python3 "$cache_helper" clear --source-root "$root" "${helper_args[@]}"
+    "$@"
+    python3 "$cache_helper" store --cache "$FOREVER_BUILD_CACHE" \
+        --stage "$name" --key "$key" --source-root "$root" "${helper_args[@]}"
+    python3 "$cache_helper" prune --cache "$FOREVER_BUILD_CACHE" --keep 2
+}
+build_radv_cached() {
+    local key
+    key=$(cache_key_radv)
+    cached_build radv "$key" \
+        ps5-proton/ps5-wow/ps5/build/radv-release-patched -- \
+        python3 ps5/radv/build-radv.py
+}
+build_freetype_cached() {
+    local key
+    key=$(cache_key_freetype)
+    cached_build freetype "$key" \
+        ps5-proton/ps5-wow/ps5/build/freetype-ps5 \
+        ps5-proton/ps5-wow/ps5/build/freetype-ps5-build -- \
+        bash ps5/build-freetype.sh
+}
+build_gnutls_cached() {
+    local key
+    key=$(cache_key_gnutls)
+    cached_build gnutls "$key" \
+        ps5-proton/ps5-wow/ps5/build/gnutls-ps5 \
+        ps5-proton/ps5-wow/ps5/build/gnutls-stage -- \
+        bash ps5/build-gnutls.sh
+}
 build_wine() {
+    local key hit=false wine_build_real cache_outputs
+    local build=ps5-proton/ps5-wow/ps5/build
+    key=$(cache_key_wine)
+    if python3 "$cache_helper" wine-prepare --cache "$FOREVER_BUILD_CACHE" \
+        --key "$key" --source-root "$root" \
+        --directory "$build/wine-ps5-build" \
+        --directory "$build/wine-ps5-tools" \
+        --directory "$build/ps5-lib" \
+        --file "$build/ps5_paths.h"; then
+        hit=true
+        printf 'CACHE_HIT wine key=%s\n' "${key:0:12}"
+    else
+        printf 'CACHE_MISS wine key=%s\n' "${key:0:12}"
+    fi
+    wine_build_real=$(realpath "$root/$build/wine-ps5-build")
+    cache_outputs=${wine_build_real%/$build/wine-ps5-build}
+    [[ $cache_outputs != "$wine_build_real" && -d $cache_outputs ]] || {
+        printf 'cannot resolve Wine cache output root from %s\n' "$wine_build_real" >&2
+        return 1
+    }
+    # MinGW's -ffile-prefix-map also changes CodeView source separators. Set
+    # only its compilation directory; source paths already live below /sources.
+    # Native host tools are not shipped, so their GCC-compatible prefix map can
+    # cover the physical cache directory as a whole.
+    export WINE_REPRO_FLAGS="-fdebug-compilation-dir=$root/$build/wine-ps5-build"
+    export WINE_TOOLS_REPRO_FLAGS="-ffile-prefix-map=$cache_outputs=$root"
+    python3 "$cache_helper" wine-sync-source --cache "$FOREVER_BUILD_CACHE" \
+        --key "$key" --source "$WINE_SRC"
+    python3 "$cache_helper" wine-restore-headers --cache "$FOREVER_BUILD_CACHE" \
+        --key "$key" --source "$WINE_SRC" || true
     (cd "$WINE_SRC" && perl tools/make_requests)
-    bash ps5/build-wine.sh configure
+    python3 "$cache_helper" wine-save-headers --cache "$FOREVER_BUILD_CACHE" \
+        --key "$key" --source "$WINE_SRC"
+    if [[ $hit == false ]]; then
+        bash ps5/build-wine.sh configure
+        python3 "$cache_helper" wine-mark-configured \
+            --cache "$FOREVER_BUILD_CACHE" --key "$key"
+    fi
     bash ps5/build-wine.sh all
+    python3 "$cache_helper" wine-commit --cache "$FOREVER_BUILD_CACHE" \
+        --key "$key" --source "$WINE_SRC"
+    python3 "$cache_helper" prune --cache "$FOREVER_BUILD_CACHE" --keep 2
+}
+build_vkd3d_cached() {
+    local key
+    key=$(cache_key_vkd3d)
+    cached_build vkd3d-proton "$key" \
+        ps5-proton/ps5-wow/ps5/build/vkd3d-proton-32/dlls \
+        ps5-proton/ps5-wow/ps5/build/vkd3d-proton-64/dlls -- \
+        bash ps5/build-vkd3d-proton.sh
+}
+build_dxvk_cached() {
+    local key
+    key=$(cache_key_dxvk)
+    cached_build dxvk "$key" \
+        ps5-proton/ps5-wow/ps5/build/dxvk-32/dlls \
+        ps5-proton/ps5-wow/ps5/build/dxvk-64/dlls -- \
+        bash ps5/build-dxvk.sh
 }
 cleanup() {
     local status=$?
@@ -186,15 +375,17 @@ stage host-tests make -s -C ps5/probes/psmkit-wine test \
     MINGW32_CC="$LLVM_MINGW/bin/i686-w64-mingw32-clang"
 stage sdk build_sdk
 stage host-tools build_host_tools
-stage radv python3 ps5/radv/build-radv.py
-stage freetype bash ps5/build-freetype.sh
-stage gnutls bash ps5/build-gnutls.sh
+stage radv build_radv_cached
+stage freetype build_freetype_cached
+stage gnutls build_gnutls_cached
 stage wine build_wine
 stage winebuild-delayload make -s -C ps5/probes/psmkit-wine test-winebuild-delayload \
     WINEBUILD="$wow/ps5/build/wine-ps5-tools/tools/winebuild/winebuild" \
     LLVM_MINGW="$LLVM_MINGW"
-stage vkd3d-proton bash ps5/build-vkd3d-proton.sh
-stage dxvk bash ps5/build-dxvk.sh
+stage vkd3d-proton build_vkd3d_cached
+stage dxvk build_dxvk_cached
 stage runtime-b1-dual make -s -C ps5/probes/psmkit-wine runtime-b1-dual
 stage package python3 ps5/release/package.py --tag "$tag"
+python3 "$cache_helper" prune --cache "$FOREVER_BUILD_CACHE" --keep 2
+python3 "$cache_helper" size --cache "$FOREVER_BUILD_CACHE"
 printf 'BUILD_COMPLETE seconds=%s zip=%s\n' "$((SECONDS - started))" "$wow/ps5/build/release/PPSA99030.zip"
