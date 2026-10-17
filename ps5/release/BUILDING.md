@@ -62,22 +62,6 @@ Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 win32u-identity rejection records are expected negative tests. Qualification
 here is a host build/inspection gate, **not console execution**.
 
-## Unreleased crash-dialog exit policy
-
-Both WoW GPU profiles list `BlizzardError.exe` in optional `crash_reporters`,
-not `refused_programs`. When the game requests that reporter, title ntdll logs
-the basename and terminates the requesting process with `STATUS_UNSUCCESSFUL`.
-The GPU parent's existing game-exit path then closes the app instead of leaving
-WoW's invisible error dialog in front. WoW writes its crash report before the
-reporter request; this policy does not fix the underlying crash.
-
-The list uses the same bounded ASCII basename validation and case-insensitive
-path matching as `refused_programs`, but is accepted only in GPU profiles.
-Ordinary refused programs still return access denied without ending their
-requester. Maintenance/Battle.net has no crash-reporter policy, and each role
-overwrites `WINEPS5_CRASH_REPORTERS` even when empty so LoadExec cannot carry
-the game policy back into maintenance.
-
 ## 01.000.011 source changes
 
 - PS5 in-process title servers synthesize Battle.net Agent's expected ACL grants

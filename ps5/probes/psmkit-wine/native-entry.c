@@ -2289,7 +2289,6 @@ int main(int argc, char **argv)
         setenv("WINEPS5_PAYLOAD_PROGRAMS", PW_RUNTIME_PAYLOAD_PROGRAMS, 1)) return 1;
     /* An empty role value overwrites one inherited across LoadExec. */
     if (setenv("WINEPS5_REFUSED_PROGRAMS", PW_RUNTIME_REFUSED_PROGRAMS, 1)) return 1;
-    if (setenv("WINEPS5_CRASH_REPORTERS", PW_RUNTIME_CRASH_REPORTERS, 1)) return 1;
     /* ntdll adds these to launches of the named programs (profile browser_switches) */
     if (*PW_RUNTIME_BROWSER_SWITCHES && setenv("WINEPS5_BROWSER_SWITCHES", PW_RUNTIME_BROWSER_SWITCHES, 1)) return 1;
     if (*PW_RUNTIME_MXCSR_TRACE &&

@@ -554,7 +554,6 @@ if args.profile == 'b1':
                     'installer_cwd'))
     profile_defines += '#define PW_RUNTIME_PAYLOAD_PROGRAMS ' + json.dumps(';'.join(selected['payload_programs'])) + '\n'
     profile_defines += '#define PW_RUNTIME_REFUSED_PROGRAMS ' + json.dumps(';'.join(selected['refused_programs'])) + '\n'
-    profile_defines += '#define PW_RUNTIME_CRASH_REPORTERS ' + json.dumps(';'.join(selected['crash_reporters'])) + '\n'
     profile_defines += '#define PW_RUNTIME_PREFETCH_HOSTS ' + json.dumps(';'.join(selected['prefetch_hosts'])) + '\n'
     profile_defines += '#define PW_RUNTIME_DNS_UPSTREAMS {' + (','.join(
         '0x%08xu' % int.from_bytes(bytes(int(part) for part in server.split('.')), 'big')
