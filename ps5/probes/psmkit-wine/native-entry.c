@@ -2044,6 +2044,7 @@ int forever_title_menu_load(struct forever_menu_values *values)
 
 void title_desktop_addons_snapshot(const struct forever_addon_snapshot *);
 void title_desktop_addons_error(const char *);
+void title_desktop_addons_pause(const char *);
 static int pw_writebroker_connect_port(unsigned int, int64_t);
 
 struct forever_addons_request
@@ -2515,6 +2516,17 @@ int forever_title_addons_action(
     if (result) return -result;
     pthread_detach(thread);
     return 0;
+}
+
+/* Admission pressure pauses the optional service, not Battle.net's renderer.
+ * CLOSE invalidates in-flight snapshots and starts the existing graceful stop
+ * worker. The supervisor bounds its wait and can terminate the child if needed. */
+void forever_title_addons_yield(void)
+{
+    (void)forever_title_addons_action(FOREVER_MENU_COMMAND_ADDONS_CLOSE, 0,
+                                     FOREVER_ADDON_INSTALLED, NULL);
+    title_desktop_addons_pause(
+        "Add-ons paused to keep Battle.net running. Close and reopen Add-ons to continue.");
 }
 
 static void *pw_forever_menu_remove(void *argument)

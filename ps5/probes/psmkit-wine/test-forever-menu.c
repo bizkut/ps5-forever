@@ -126,7 +126,7 @@ static void test_hdr_config(void)
 
 static void test_deletion_scope(void)
 {
-    char prefix[1024], path[1024];
+    char prefix[512], path[1024];
 
     make_path(prefix, sizeof(prefix), "delete/prefix");
 

@@ -195,6 +195,10 @@ URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
 and TukUI entries work without a key. Changes load the next time WoW starts, or
 after typing `/reload` in WoW.
 
+If Battle.net needs another web renderer process, Add-ons pauses and releases its
+helper process instead of blocking Battle.net. Close and reopen **Add-ons** to
+resume; the process limit and Battle.net's updater/game reserve stay unchanged.
+
 Add-ons are checked against the selected channel's product and client version,
 and go into that channel's own `Interface/AddOns` folder. The curated catalogue
 and starter packs currently have Forever data only. Other flavours can use

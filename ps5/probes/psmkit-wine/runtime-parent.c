@@ -30,6 +30,8 @@ void title_desktop_message(const char *);
 #endif
 #if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
 void forever_title_menu_wait_lifetime(void);
+void forever_title_addons_yield(void);
+static uint64_t addonforge_nonce;
 #endif
 
 int32_t sceSystemServiceAddLocalProcessForPsmKit(
@@ -1691,8 +1693,8 @@ int pw_supervisor_init(void)
  * line), which may not take the last free slot: Battle.net's own restarter
  * after a self-update ("Battle.net.exe --updatepid=") was refused with all
  * seven slots held, mostly by renderers, and the launcher never came back
- * (run 20261009-b1-installed-41). Chromium starts another renderer later;
- * the last slot stays for programs like that, and for the game. */
+ * (run 20261009-b1-installed-41). The optional AddonForge child must yield
+ * before this reserve rejects a renderer: CEF can CHECK on the missing frame. */
 static int is_chromium_subprocess(const struct wine_ps5_title_spawn *spawn)
 {
     for (char *const *arg = spawn->argv ? spawn->argv + 1 : NULL; arg && *arg; arg++)
@@ -1707,6 +1709,83 @@ static const char *spawn_command(const struct wine_ps5_title_spawn *spawn, char 
 {
     return pw_redact_spawn_argv(spawn->argv, text, size);
 }
+
+#if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+static int is_addonforge_core(const struct wine_ps5_title_spawn *spawn)
+{
+    return spawn->argv && spawn->argv[0] && spawn->argv[1] &&
+           !strcmp(spawn->argv[1], "C:\\Forever\\Addons\\addonforge-core.exe");
+}
+
+static int is_battlenet_renderer(const struct wine_ps5_title_spawn *spawn)
+{
+    if (!spawn->argv || !spawn->argv[0] || !spawn->argv[1]) return 0;
+    const char *name = spawn->argv[1];
+    for (const char *p = name; *p; p++)
+        if (*p == '\\' || *p == '/') name = p + 1;
+    if (strcasecmp(name, "Battle.net.exe")) return 0;
+    for (char *const *arg = spawn->argv + 2; *arg; arg++)
+        if (!strcmp(*arg, "--type=renderer")) return 1;
+    return 0;
+}
+#endif
+
+/* Caller holds lock. Only the reaper releases a live child's slot after EOF;
+ * a graceful stop or a successful kill does not by itself make it reusable. */
+static int reserve_spawn_slot(const struct wine_ps5_title_spawn *spawn, uint64_t nonce)
+{
+    int chromium = is_chromium_subprocess(spawn), helper = 0, index;
+#if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+    helper = is_addonforge_core(spawn);
+    if (!stopping && is_battlenet_renderer(spawn) && occupied_slots() >= PW_CHILDREN - 1)
+    {
+        for (unsigned i = 0; addonforge_nonce && i < PW_CHILDREN; i++)
+        {
+            if (!slots[i].occupied || slots[i].nonce != addonforge_nonce) continue;
+            uint64_t victim_nonce = slots[i].nonce;
+            int64_t grace = io_now_ms() + 2000, deadline = grace + 2000;
+            io_log("p1c supervisor yielding addon helper slot=%u windows_pid=%u for=%u",
+                   i, slots[i].windows_pid, spawn->windows_pid);
+            pthread_mutex_unlock(&lock);
+            forever_title_addons_yield();
+            pthread_mutex_lock(&lock);
+            while (!stopping && occupied_slots() >= PW_CHILDREN - 1 &&
+                   slots[i].occupied && slots[i].nonce == victim_nonce)
+            {
+                int64_t now = io_now_ms();
+                if (now >= deadline) break;
+                if (now >= grace && !slots[i].kill_requested) kill_slot(&slots[i]);
+                struct timespec pause = {.tv_nsec = 10000000};
+                pthread_mutex_unlock(&lock);
+                nanosleep(&pause, NULL);
+                pthread_mutex_lock(&lock);
+            }
+            break;
+        }
+    }
+#endif
+    if (stopping || ((chromium || helper) && occupied_slots() >= PW_CHILDREN - 1))
+    {
+        char command[160];
+        io_log("p1c supervisor refuse reason=reserve occupied=%u windows_pid=%u command=%s",
+               occupied_slots(), spawn->windows_pid, spawn_command(spawn, command, sizeof(command)));
+        errno = EAGAIN;
+        return -1;
+    }
+    index = pw_slot_reserve(slots, generation, nonce, spawn->windows_pid);
+    if (index < 0)
+    {
+        int error = errno;
+        char command[160];
+        io_log("p1c supervisor refuse reason=full occupied=%u windows_pid=%u command=%s",
+               occupied_slots(), spawn->windows_pid, spawn_command(spawn, command, sizeof(command)));
+        errno = error;
+    }
+#if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+    if (index >= 0 && helper) addonforge_nonce = nonce;
+#endif
+    return index;
+}
 int pw_supervisor_spawn(const struct wine_ps5_title_spawn *spawn)
 {
     struct pw_p1c_bootstrap bootstrap;
@@ -1717,22 +1796,10 @@ int pw_supervisor_spawn(const struct wine_ps5_title_spawn *spawn)
     error = pw_p1c_bootstrap_init(&bootstrap, generation, nonce, spawn->windows_pid, spawn->argv, spawn->unix_cwd);
     if (error) return error;
     pthread_mutex_lock(&lock);
-    if (stopping) { error = EAGAIN; goto complete; }
-    if (is_chromium_subprocess(spawn) && occupied_slots() >= PW_CHILDREN - 1)
-    {
-        char command[160];
-        error = EAGAIN;
-        io_log("p1c supervisor refuse reason=reserve occupied=%u windows_pid=%u command=%s", occupied_slots(),
-               spawn->windows_pid, spawn_command(spawn, command, sizeof(command)));
-        goto complete;
-    }
-    index = pw_slot_reserve(slots, generation, nonce, spawn->windows_pid);
+    index = reserve_spawn_slot(spawn, nonce);
     if (index < 0)
     {
         error = errno;
-        char command[160];
-        io_log("p1c supervisor refuse reason=full occupied=%u windows_pid=%u command=%s", occupied_slots(),
-               spawn->windows_pid, spawn_command(spawn, command, sizeof(command)));
         goto complete;
     }
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair)) { error = errno; goto failed; }

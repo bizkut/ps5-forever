@@ -203,6 +203,7 @@ struct forever_menu_result forever_menu_addon_button(
 void forever_menu_addon_snapshot(
     struct forever_menu_state *menu, const struct forever_addon_snapshot *snapshot);
 void forever_menu_addon_error(struct forever_menu_state *menu, const char *text);
+int forever_menu_addon_pause(struct forever_menu_state *menu, const char *text);
 struct forever_menu_result forever_menu_back(struct forever_menu_state *menu);
 struct forever_menu_result forever_menu_click_line(struct forever_menu_state *menu, int line);
 void forever_menu_commit(struct forever_menu_state *menu, enum forever_menu_command command, int enabled);

@@ -116,7 +116,7 @@ $(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-staged-runtime.c elf-runtime.c -o $@
 
-test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wine-title \
+test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wine-title \
 		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
 		$(HOST_OUT)/test-direct-commit $(HOST_OUT)/test-direct-cache $(HOST_OUT)/test-direct-fail-fast $(HOST_OUT)/test-vm-cpu \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
@@ -133,6 +133,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile test-build-speed \
 		../../tools/test-ps5-capture.py
 	$(HOST_OUT)/test-protocol
+	$(HOST_OUT)/test-supervisor-admission
 	$(HOST_OUT)/test-elf-runtime
 	$(HOST_OUT)/test-wine-title
 	$(HOST_OUT)/test-write-buffer
@@ -200,6 +201,16 @@ $(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h wo
 		forever-setup.h sha256.h protocol.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-supervisor-admission
+test-supervisor-admission: $(HOST_OUT)/test-supervisor-admission
+	$(HOST_OUT)/test-supervisor-admission
+
+$(HOST_OUT)/test-supervisor-admission: test-supervisor-admission.c build-supervisor-admission-test.py \
+		build-desktop-surface-test.py runtime-parent.c native-entry.c protocol.c protocol.h \
+		../../title/main.c ../../title/forever-menu.c ../../title/forever-menu.h \
+		$(IO) ../localproc/psmkit-io.h
+	python3 build-supervisor-admission-test.py --output "$@" --cc "$(HOST_CC)"
 
 .PHONY: test-desktop-surface
 test-desktop-surface: $(HOST_OUT)/test-desktop-surface

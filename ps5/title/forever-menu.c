@@ -473,6 +473,16 @@ void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
     menu->addon_pending_github = 0;
 }
 
+int forever_menu_addon_pause(struct forever_menu_state *menu, const char *text)
+{
+    if (menu->page != FOREVER_MENU_ADDON_PAGE &&
+        menu->page != FOREVER_MENU_ADDON_CONFIRM &&
+        menu->page != FOREVER_MENU_WAGO_KEY) return 0;
+    menu->addon_loading = menu->addon_pending_github = 0;
+    forever_menu_notice(menu, text);
+    return 1;
+}
+
 static size_t utf8_size(const unsigned char *text, size_t available)
 {
     if (!available) return 0;

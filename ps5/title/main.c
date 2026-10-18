@@ -98,17 +98,33 @@ void title_desktop_addons_snapshot(const struct forever_addon_snapshot *snapshot
 {
     if (!snapshot) return;
     pthread_mutex_lock(&message_mutex);
-    pending_addon_snapshot = *snapshot;
-    pending_addon_kind = 1;
+    if (pending_addon_kind != 3)
+    {
+        pending_addon_snapshot = *snapshot;
+        pending_addon_kind = 1;
+    }
     pthread_mutex_unlock(&message_mutex);
 }
 
 void title_desktop_addons_error(const char *text)
 {
     pthread_mutex_lock(&message_mutex);
-    snprintf(pending_addon_error, sizeof(pending_addon_error), "%s",
-             text ? text : "The add-on operation failed.");
-    pending_addon_kind = 2;
+    if (pending_addon_kind != 3)
+    {
+        snprintf(pending_addon_error, sizeof(pending_addon_error), "%s",
+                 text ? text : "The add-on operation failed.");
+        pending_addon_kind = 2;
+    }
+    pthread_mutex_unlock(&message_mutex);
+}
+
+void title_desktop_addons_pause(const char *text)
+{
+    pthread_mutex_lock(&message_mutex);
+    snprintf(pending_addon_error, sizeof(pending_addon_error), "%s", text);
+    /* An old worker may already have passed its generation check. Keep this
+     * event ahead of its late snapshot/error until the compositor consumes it. */
+    pending_addon_kind = 3;
     pthread_mutex_unlock(&message_mutex);
 }
 #endif
@@ -1200,6 +1216,15 @@ static void desktop_frame(void)
     {
         if (pending_addon_kind == 1)
             forever_menu_addon_snapshot(&menu, &pending_addon_snapshot);
+        else if (pending_addon_kind == 3)
+        {
+            if (forever_menu_addon_pause(&menu, pending_addon_error))
+            {
+                if (menu_ime_command && user >= 0) ime_show(user, 0);
+                menu_ime_command = FOREVER_MENU_COMMAND_NONE;
+                ime_clear_text();
+            }
+        }
         else
             forever_menu_addon_error(&menu, pending_addon_error);
         pending_addon_kind = 0;
