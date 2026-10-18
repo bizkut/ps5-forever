@@ -11,10 +11,14 @@ records, not read by the app). The qualified dual runtime must match the
 checked-in publication inventory; release notices are added only to the ZIP.
 """
 import argparse
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -97,12 +101,83 @@ def release_members():
         yield f"licenses/{name}", path
 
 
+def compress_member(name, path, runtime_names):
+    """Build one ordinary ZIP member; retain its original local header/deflate bytes."""
+    temporary = tempfile.TemporaryFile()
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            info = zipfile.ZipInfo(f"{TITLE_ID}/{name}", EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            executable = name in runtime_names and path.stat().st_mode & 0o111
+            info.external_attr = (0o100755 if executable else 0o100644) << 16
+            with path.open("rb") as source, archive.open(info, "w") as target:
+                while chunk := source.read(1 << 20):
+                    target.write(chunk)
+            local_size = archive.start_dir
+        return temporary, info, local_size
+    except BaseException:
+        temporary.close()
+        raise
+
+
+def write_archive(destination, entries, runtime_names, jobs):
+    # zipfile has no public precompressed-member API. Workers use its normal
+    # writer (including ZipInfo's default compression level), then the sole
+    # output writer copies their local records and lets zipfile write the
+    # central directory with the new offsets. Bound both open files and disk
+    # usage to jobs, rather than retaining the entire compressed publication.
+    pending = deque()
+    iterator = iter(entries)
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        def submit():
+            item = next(iterator, None)
+            if item is not None:
+                name, path = item
+                pending.append(executor.submit(compress_member, name, path, runtime_names))
+
+        try:
+            for _ in range(jobs):
+                submit()
+            with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+                while pending:
+                    temporary, info, remaining = pending.popleft().result()
+                    try:
+                        info.header_offset = archive.fp.tell()
+                        archive._writecheck(info)
+                        archive._didModify = True
+                        temporary.seek(0)
+                        while remaining:
+                            chunk = temporary.read(min(remaining, 1 << 20))
+                            if not chunk:
+                                raise OSError("truncated compressed ZIP member")
+                            archive.fp.write(chunk)
+                            remaining -= len(chunk)
+                        archive.filelist.append(info)
+                        archive.NameToInfo[info.filename] = info
+                        archive.start_dir = archive.fp.tell()
+                    finally:
+                        temporary.close()
+                    submit()
+        finally:
+            for future in pending:
+                try:
+                    temporary, _, _ = future.result()
+                except BaseException:
+                    continue
+                temporary.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", required=True, help="release tag = contentVersion, e.g. 01.000.000")
     parser.add_argument("--title", type=Path, default=PS5 / "build/title-psmkit-wine-b1")
     parser.add_argument("--out", type=Path, default=PS5 / "build/release")
+    parser.add_argument("--jobs", type=int, default=min(24, os.cpu_count() or 1),
+                        help="parallel compression workers (default: up to 24 CPUs)")
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be positive")
 
     if not re.fullmatch(r"\d\d\.\d\d\d\.\d\d\d", args.tag):
         raise SystemExit(f"tag {args.tag!r} is not a content version (NN.NNN.NNN)")
@@ -128,16 +203,7 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     zip_path = args.out / f"{TITLE_ID}.zip"
     temporary = zip_path.with_suffix(".zip.part")
-    with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for name, path in entries:
-            info = zipfile.ZipInfo(f"{TITLE_ID}/{name}", EPOCH)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.create_system = 3
-            executable = name in runtime_names and path.stat().st_mode & 0o111
-            info.external_attr = (0o100755 if executable else 0o100644) << 16
-            with path.open("rb") as source, archive.open(info, "w") as target:
-                while chunk := source.read(1 << 20):
-                    target.write(chunk)
+    write_archive(temporary, entries, runtime_names, args.jobs)
     size = temporary.stat().st_size
     if size >= LIMIT:
         temporary.unlink()

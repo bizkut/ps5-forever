@@ -78,6 +78,31 @@ building. The workflow retains the two newest entries per stage and logs
 roles, packaging, and qualification always run from fresh product outputs; the
 package allowlist remains the only source of ZIP members.
 
+`ps5/build-wine.sh configure` also retains a per-tree `.configure-stamp.json`
+for direct/private incremental builds. Its key covers the configure command,
+configure/configure.ac bytes, compiler/tool paths and configure environment
+(including target/repro flags, PE linker flags and library sonames). Matching
+inputs skip configure, not `make`. Changed C/C++ or PE compiler flags clean
+the affected build tree before configuring: Wine does not track flag changes
+in object dependencies. A tree without a stamp is configured; its existing
+Makefile flags are compared first so switching flags cannot reuse old objects.
+Generated Makefile/config.status/config.h hashes also invalidate the stamp if
+another private build reconfigures the shared tree without this helper.
+
+Runtime construction decodes each compile-database command and resolves its
+output once per role, reusing that metadata for module manifests and the
+existing title-ABI freshness checks. Qualification itself is unchanged:
+the qualifier binds its own source hash into each qualification key, so even
+a behavior-preserving qualifier edit would change the required receipts.
+No qualification receipt or file-identity check is reused or skipped.
+
+The package writer compresses independent members with up to 24 threads
+(`package.py --jobs 1` selects one). It preserves the serial writer's local
+headers, compression settings, member order and central-directory metadata;
+workers spool to temporary files and retain at most one member per worker.
+`make -C ps5/probes/psmkit-wine test-build-speed` covers configure reuse/clean
+decisions and parallel-versus-original-serial ZIP byte equality.
+
 Require two `RUNTIME_TITLE_QUALIFIED` records with `raw_syscalls=0`, followed by
 `RUNTIME_TITLE_DUAL_QUALIFIED`. The qualifier's deliberate unknown-import and
 win32u-identity rejection records are expected negative tests. Qualification

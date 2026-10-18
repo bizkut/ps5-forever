@@ -42,6 +42,7 @@ vulkan_soname=$prefix/lib/libvulkan.so
 # The interactive shell exports Homebrew include and library paths in CPPFLAGS
 # and LDFLAGS; they must not reach a cross build.
 jobs=${JOBS:-8}
+wine_ps5_extra_cflags=${WINE_PS5_EXTRA_CFLAGS:-}
 unset CPPFLAGS LDFLAGS CFLAGS CXXFLAGS
 export PATH=$mingw/bin:${BISON_BIN:-/opt/homebrew/opt/bison/bin}:$PATH
 
@@ -98,11 +99,11 @@ configure() {
     # Wine's 32-bit host build and needlessly requires multilib libraries.
     local tools_arch=()
     [[ $(uname -s) != Linux ]] || tools_arch=(--enable-win64)
-    (cd "$tools" && env "${tools_env[@]}" \
+    env "${tools_env[@]}" \
         FREETYPE_CFLAGS="$host_freetype_cflags" \
         FREETYPE_LIBS="$host_freetype_libs" \
-        "$src/configure" "${tools_arch[@]}" "${without[@]}" --without-vulkan --without-gnutls --with-freetype --enable-fonts --without-unwind \
-        > configure.log 2>&1)
+        python3 "$here/configure-stamp.py" --build "$tools" -- \
+        "$src/configure" "${tools_arch[@]}" "${without[@]}" --without-vulkan --without-gnutls --with-freetype --enable-fonts --without-unwind
     make -C "$tools" -j"$jobs" __tooldeps__ > "$tools/make.log" 2>&1
     # __tooldeps__ also builds native sfnt2fon. With fonts enabled in the PS5
     # tree, its fonts/all target uses that tool for .fon files and installs
@@ -122,14 +123,14 @@ configure() {
     # our absolute FreeType, GnuTLS and Vulkan sonames. Override its cache
     # results so the Unix modules' dlopen use the console paths, not bare
     # names or the host build paths.
-    (cd "$cross" && env "${unix_env[@]}" \
+    env "${unix_env[@]}" python3 "$here/configure-stamp.py" --build "$cross" -- \
         "$src/configure" --host=x86_64-unknown-freebsd11 --with-wine-tools="$tools" \
         --enable-archs=i386,x86_64 --with-freetype --enable-fonts --with-gnutls --with-vulkan \
         CROSSCFLAGS="-g -O2 -D__WINE_PS5__ $cpu_flags $repro_flags" \
         CROSSLDFLAGS="${CROSSLDFLAGS:-} ${PS5_PE_LDFLAGS:-}" \
         CC="$sdk/prospero-clang" CXX="$sdk/prospero-clang++" AR="$sdk/prospero-ar" \
         RANLIB="$sdk/prospero-ranlib" STRIP="$sdk/prospero-strip" PKG_CONFIG=false \
-        CFLAGS="-g -O2 -include $here/include/ps5_wine_compat.h -include $paths_header $cpu_flags $repro_flags" \
+        CFLAGS="-g -O2 -include $here/include/ps5_wine_compat.h -include $paths_header $cpu_flags $repro_flags $wine_ps5_extra_cflags" \
         FREETYPE_CFLAGS="-I$freetype/include/freetype2" \
         FREETYPE_LIBS="-L$freetype/lib -lfreetype" \
         ac_cv_lib_soname_freetype="$freetype_soname" \
@@ -141,7 +142,7 @@ configure() {
         LDFLAGS="-L$here/build/ps5-lib -lunwind -lps5platform" --without-unwind \
         --disable-amd_ags_x64 \
         --disable-wineopenxr \
-        "${without[@]}" > configure.log 2>&1)
+        "${without[@]}"
     if ! grep -Fxq '#define HAVE_FT2BUILD_H 1' "$cross/include/config.h" ||
         ! grep -Fxq "#define SONAME_LIBFREETYPE \"$freetype_soname\"" "$cross/include/config.h"; then
         printf 'PS5 FreeType configuration is incomplete: check %s/configure.log\n' "$cross" >&2

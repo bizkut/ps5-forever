@@ -89,6 +89,8 @@ def run(command, *, cwd=None, env=None):
 
 
 def command_for(entry):
+    if '_title_arguments' in entry:
+        return list(entry['_title_arguments'])
     return list(entry['arguments']) if 'arguments' in entry else shlex.split(entry['command'])
 
 
@@ -99,6 +101,18 @@ def output_path(command, directory):
         raise SystemExit(f'compile command has no separate -o: {command!r}')
     path = Path(value)
     return (directory / path).resolve() if not path.is_absolute() else path.resolve()
+
+
+def prepare_compile_entries(entries, build):
+    # A Wine database contains both PE architectures and Unix compilations.
+    # Decode/resolve once, not once per linked module. Commands returned to
+    # callers remain copies because title-variant compilation edits them.
+    for entry in entries:
+        command = command_for(entry)
+        entry['_title_arguments'] = tuple(command)
+        entry['_title_output'] = output_path(command, Path(entry.get('directory', build)))
+        entry['_title_native'] = any(
+            Path(value).name.startswith('prospero-clang') for value in command)
 
 
 def compile_entry(entries, suffix, destination, extra, original_output=None):
@@ -124,10 +138,9 @@ def exact_object_manifest(entries, directory, generated=()):
     root = (build / directory).resolve()
     objects = []
     for entry in entries:
-        command = command_for(entry)
-        path = output_path(command, Path(entry.get('directory', build)))
-        if (path.is_relative_to(root) and path.suffix == '.o' and
-                any(Path(value).name.startswith('prospero-clang') for value in command)):
+        path = entry['_title_output']
+        if (str(path).startswith(str(root) + os.sep) and path.suffix == '.o' and
+                entry['_title_native']):
             objects.append(path)
     objects = sorted(set(objects))
     for relative in generated:
@@ -251,6 +264,7 @@ def undefined_symbols(path):
 
 
 entries = json.loads((build / 'compile_commands.json').read_text())
+prepare_compile_entries(entries, build)
 
 
 def require_current_title_abi(entries, directories):
@@ -261,7 +275,7 @@ def require_current_title_abi(entries, directories):
     directories this build links are checked. A source counts when it reaches
     the header through quoted includes (ntdll's files get it via
     unix_private.h)."""
-    roots = [(build / directory).resolve() for directory in directories]
+    roots = tuple(str((build / directory).resolve()) + os.sep for directory in directories)
     include = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.M)
     reaches = {}
 
@@ -282,8 +296,8 @@ def require_current_title_abi(entries, directories):
     header = None
     stale = []
     for entry in entries:
-        output = output_path(command_for(entry), Path(entry.get('directory', build)))
-        if not any(output.is_relative_to(root) for root in roots):
+        output = entry['_title_output']
+        if not str(output).startswith(roots):
             continue
         source = Path(entry.get('directory', build), entry['file']).resolve()
         if source.suffix != '.c':

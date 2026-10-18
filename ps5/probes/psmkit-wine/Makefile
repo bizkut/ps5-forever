@@ -106,6 +106,10 @@ test-runtime-profile: test-runtime-profile.py runtime_profiles.py runtime_import
 		b1-game-wow-forever.json b1-game-wow-classic-beta.json
 	python3 test-runtime-profile.py
 
+.PHONY: test-build-speed
+test-build-speed: test-build-speed.py ../../configure-stamp.py ../../release/package.py
+	python3 test-build-speed.py
+
 test-staged: runtime-qualification
 
 $(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime.h
@@ -125,7 +129,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
 		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
 		$(HOST_OUT)/test-cursor-peer $(HOST_OUT)/test-file-security \
-		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile \
+		$(PE_OUT)/audio-tone.exe test-startup-routing test-runtime-profile test-build-speed \
 		../../tools/test-ps5-capture.py
 	$(HOST_OUT)/test-protocol
 	$(HOST_OUT)/test-elf-runtime
