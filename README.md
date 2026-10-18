@@ -110,6 +110,35 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
    `_classic_beta_`) by default. Press **Install**, wait for the download (about 50 GB),
    then press **Play**. The final Forever game also works if you select it in Battle.net.
 
+### Faster: copy WoW from a PC
+
+If WoW is already installed on a PC, you can copy it to the console over your
+home network instead of downloading it again. Battle.net then only checks the
+files and downloads what is missing.
+
+1. Start Forever Launcher once and install Battle.net (steps 1–3 above), then
+   close the app.
+2. On the PC, find your `World of Warcraft` folder. On Windows it is usually
+   `C:\Program Files (x86)\World of Warcraft`. A Mac install
+   (`/Applications/World of Warcraft`) works too; Battle.net replaces the Mac
+   game files with the Windows ones.
+3. With an FTP program, copy the whole folder, including the hidden files
+   `.build.info` and `.product.db`, to the console as:
+
+   ```text
+   /data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft
+   ```
+
+   Use a wired network if you can. Classic is about 50 GB; Retail is much larger.
+4. Start Forever Launcher. In Battle.net, select the game. If it shows
+   **Install**, use **Locate the game** below the button and choose
+   `C:\Program Files (x86)\World of Warcraft`.
+5. Battle.net checks the files and downloads only what is missing or newer.
+   For a full check, use the gear next to **Play** → **Scan and Repair**.
+
+Forever Launcher fixes the file permissions of copied folders at startup, so
+you don't need to change them by hand.
+
 ## Signing in to Battle.net
 
 - Sign in with your **email address and password**, and choose to get a **code by email**
@@ -130,6 +159,10 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).
+
+In Battle.net, the mouse cursor hides after three seconds without pointer
+movement. Move the pointer or click to show it again. A new visible cursor
+shape also restarts the timer; the game's or app's own hidden cursor stays hidden.
 
 ## Forever menu
 
