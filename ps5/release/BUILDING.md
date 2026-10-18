@@ -313,6 +313,58 @@ remain in force.
   installer and restarts into the existing installer path; World of Warcraft
   paths are never deletion roots.
 
+## All WoW channels (014)
+
+`ps5/probes/psmkit-wine/wow-channels.h` owns C-side channel discovery and path
+parsing. An immediate `_<name>_` folder under `World of Warcraft` is listed when
+it has `.flavor.info` or an executable matching `^Wow[A-Za-z]*\.exe$` without
+case sensitivity. Direct start additionally requires the executable and its
+exact-stem or lowercase-stem `_loader.dll`. `.flavor.info` is authoritative;
+the optional `.build.info` fallback uses only an identified matching row.
+Battle.net can replace `.build.info` with just one product row, so it never
+controls discovery and never supplies another channel's product.
+
+Direct selection maps the TACT products `wowt`/`wowxptr` to Agent's
+`wow_ptr`/`wow_ptr_x` uids. Play's argv/uid are passed through unchanged.
+
+Discovery intentionally scans only the default
+`C:\Program Files (x86)\World of Warcraft` root. Battle.net's binary
+`.product.db` / `Launcher.db` are not parsed. Play handoffs accept structural
+channel paths at any C:/W: install root; custom roots are outside automatic
+settings/Add-ons/direct-start discovery for now.
+
+The single `b1-game-wow.json` has `runtime_game: true`, with no configured
+executable, argv, uid or channel cwd. `runtime-b1-dual` still separately builds
+and qualifies maintenance and GPU roles; profile reconstruction validates both
+standalone and combined runtime-game receipts. The GPU parent requires the
+validated Play/direct-game wire before entering Wine. No channel overrides or
+rendering changes were added. The exact `Wow.exe` dynamic-MSAA workaround in
+vkd3d already covers both Retail and Forever and is unchanged. Wine's CPU
+diagnostic bucket groups `Wow*.exe` without interpreting it as a product.
+
+Every parent start (Play handoff, direct selection, or game-role relaunch)
+passes `main`'s `pw_forever_start()` gate before `wine_public_title_main`.
+`pw_forever_start` calls `pw_forever_sync_managed`, logs
+`forever: prefix sync checked=… hashed=… repaired=…` in either role, and returns
+failure on an unrepaired sync error; `main` then returns without entering Wine.
+Direct start is only attempted after this gate and the new GPU process repeats
+it. `build-runtime.py` generates app-owned destinations for the manifest-owned
+system32/syswow64 builtin PEs (retaining wineboot's AMD AGS exception),
+system32 d3d12/d3d12core/dxgi and the two AddonForge PEs.
+There are no channel-specific DLL destinations. FG/HUD/tune/HDR switches are
+shared `drive_c/wineps5-*.txt` user settings, not managed game-folder files.
+The missing-only Config.wtf preset is the only app-supplied channel-local file.
+
+The combined private test build `allwow-a344643a.zip` rendered Retail
+(`_retail_/Wow.exe`) through direct selection at 90 fps. An unavailable `_ptr_`
+selector refused without fallback. Classic Era started `WowClassic.exe` after
+prefix sync checked 1,591 files, then `game.bin` faulted just after display-driver
+initialization with `SYSTEM_XO_VIOLATION` (`0xa0020328`, RIP `0x8000003e`).
+That crash is under investigation; the observation does not qualify Classic Era,
+other channels, per-channel Add-ons, or online compatibility. Battle.net had
+rewritten `.build.info` to a Retail-only row; whether that contributes to the
+Classic Era failure is not established.
+
 ## Add-ons source and packaging
 
 - `deps.json` pins AddonForge commit `0dc9ab28f207f86e33770e359f2345043ef19585`
@@ -325,6 +377,33 @@ remain in force.
   rejects 401/403 without saving; an unavailable check saves with `valid: null`.
   Redirects and HTML pages never count as successful validation. Neither
   response nor log includes key text. The upstream checkout is copied before patching.
+  `0007-all-wow-channels.patch` extends product labels, reads the selected
+  executable's PE `VS_VERSION_INFO` FileVersion, and derives Interface as
+  `major*10000 + minor*100 + patch`, with a product-only fallback when unavailable.
+  Its source capability table uses Wago `retail/classic/bc/wotlk/cata/mop/forever`;
+  GitHub uses release.json flavour/interface metadata and familiar asset tags
+  (`mainline`, `classic`, `bcc`/`tbc`, `wrath`, `cata`, `mists`/`mop`, `forever`).
+  WoWInterface/Tukui metadata is checked against that same target family.
+  Every archive's TOCs are checked before replacing any installed folder.
+  Archive admission and installed scanning share the selected-flavour TOC
+  selector: Mainline, Classic/Vanilla, BCC/TBC, Wrath/WOTLKC, Cata, Mists and
+  Forever/Camelot take precedence over the generic TOC. Version and source
+  identifiers are never merged from a different flavour.
+  Unknown products or unsupported engine families fail before source resolution;
+  a future Classic expansion cannot silently select Retail add-ons.
+  Per-channel installed records,
+  pins and ignores are switched with the selected path. A Forever-only catalogue
+  or starter pack list is never offered as another flavour.
+  Key validation uses an authenticated metadata URL without `game_version`.
+  Loopback Find/catalogue and starter-pack results use `{rows, notice}`.
+  Unavailable catalogue data is a successful empty informational view, so a
+  completed GitHub install or Wago-key change still reports success. Actual
+  failures preserve the known global Wago-key status unless the key operation
+  reports rejection or removal.
+  Mapping references (facts only, no copied implementation):
+  [Wago provider](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-electron/src/app/addon-providers/wago-addon-provider.ts),
+  [client groups](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-lib/src/utils/wow-client.utils.ts),
+  [Tukui provider](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-lib/src/addon-providers/tukui-addon-provider.ts).
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
@@ -333,12 +412,18 @@ remain in force.
   toolchain and container image. A cache miss builds in two empty target
   directories and refuses unequal `addonforge-core.exe` SHA-256 values. The
   staged `build-receipt.json` records both hashes.
-  The 0006 receipt includes patch SHA-256
-  `639ac5ee4888592fbd9392fb519ee0e294206b7d66e390a53b52d3fca5a5c25a`;
+  The 0007 receipt includes patch SHA-256
+  `df3b8cd59716033a55df359b85806d088b37f5f7b949fd86258ed9a616f609fe`;
   its two cold Windows builds both produced
-  `f160daef8ae9783eeab1addc685dfaa73403e49188be5b0fbc66f4931a8ad36e`
-  (2,556,416 bytes). The headless Rust suite has 21 tests; real Wago API
-  acceptance is not qualified by these local HTTP fixtures.
+  `0a894afc976b150290df44b632ed5f60dca335d08d288078895121bc1b17aa2d`
+  (2,583,552 bytes). All 29 headless Rust tests passed offline with an empty
+  Cargo home. Host launcher tests also pass with `HOST_CC=clang-19`, including
+  channel parsing/selection, per-channel settings and menu paths, generic-role
+  receipt reconstruction and the Wine CPU bucket. The extracted production
+  AddonForge worker/mutate test covers successful empty informational views,
+  real operation errors and preserved Wago-key state. Both parent roles pass
+  target-Clang syntax checks. These are host/source qualifications, not console
+  rendering, real-source downloads, or real Wago API acceptance.
   Private menu-diag input can select `addon menu:wago`, open it with `pad CROSS`,
   choose Type key with another `pad CROSS`, then submit `text <key>`.
   Text command contents are never logged, and frame dumps are refused while
@@ -348,6 +433,15 @@ remain in force.
   `forever-maintenance.exe` are Windows PE executables run by Wine. The homebrew
   catalog scan rejects payload ELF executables; it does not classify these PEs
   as payloads, just as it does not classify Wine's other Windows PEs that way.
+  `runtime-b1-dual` does not build AddonForge: `build-runtime.py` copies these
+  files and their receipt from `ps5/build/addonforge` into each qualified title
+  root. `package.py` packages that already-qualified root and does not reread or
+  rebuild the staging directory. Rebuild the dual title after replacing staged
+  AddonForge files. The full `build-linux.sh` pipeline has a preceding,
+  patch-content-keyed AddonForge build/cache stage; direct private runtime
+  builds must supply the fresh artifacts themselves. If a staging path is a
+  cache-output symlink, replace that symlink rather than modifying a
+  content-addressed cache entry.
 - Add-on changes load the next time WoW starts, or after typing `/reload` in
   WoW. The manager remains available only in the Battle.net maintenance role.
 

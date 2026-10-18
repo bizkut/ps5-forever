@@ -2,9 +2,19 @@
 
 ## Record description (`apps/PPSA99030.json`, `description`)
 
-Battle.net launcher for WoW: Forever. Options opens the Forever menu; L3+R3 opens the on-screen keyboard. USB keyboard and mouse work too.
+Battle.net launcher for World of Warcraft. Options opens the Forever menu; L3+R3 opens the on-screen keyboard. USB keyboard and mouse work too.
 
 ## Release notes (GitHub release description, shown by the catalog)
+
+### Forever Launcher 01.000.014 (in development)
+
+- Detects installed WoW channels without a launch-version list, including Retail, Classic, Classic Era, Anniversary, Forever, beta, PTR and future channel names.
+- A one-shot `wine/direct-game` file can select a channel folder such as `_retail_`; an unavailable selection never starts another version.
+- Missing-only Config.wtf presets and the HDR switch apply to every detected channel.
+- Add-ons lists installed channels and selects source flavours from the product and the client's own version resource. Installs, update records and removals stay in the selected channel. Unknown products are not supported for add-ons.
+- The curated catalogue and starter packs currently contain Forever data only; other flavours can use GitHub links and known installed sources.
+- Automatic discovery is limited to the default WoW install root. Custom C:/W: paths can launch from Battle.net Play.
+- Private-build console observations: Retail renders via the direct-game selector at 90 fps; an unavailable PTR selection refuses without fallback. Classic Era crashes after display initialization and remains under investigation. Anniversary, Classic progression, installed PTR/beta channels and per-channel Add-ons still need new console qualification; no general online-compatibility claim.
 
 ### Forever Launcher 01.000.013
 

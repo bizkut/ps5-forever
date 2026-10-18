@@ -3,15 +3,20 @@
 Run **Battle.net** on a jailbroken **PlayStation 5**.
 
 Forever Launcher (`PPSA99030`) runs Battle.net and World of Warcraft through
-Wine, using DirectX 12 on the PS5's own GPU. The default game is
-**World of Warcraft Classic beta** (`WowB.exe` in `_classic_beta_`).
-**World of Warcraft: Forever** final (`Wow.exe` in `_forever_`) is also
-supported when selected in Battle.net. The supplied settings use 4K output
-with HDR and frame generation.
+Wine, using DirectX 12 on the PS5's own GPU. Choose the WoW version you want in
+Battle.net: Retail, Classic, Classic Era, Anniversary, Forever, beta or PTR.
+The launcher detects channel folders rather than keeping a list of versions.
+The supplied settings use 4K output with HDR and frame generation.
+
+Classic beta and Forever have prior console testing. In a private all-versions
+build, Retail rendered through the direct-game selector at 90 fps. Classic Era
+currently crashes after display initialization and is under investigation.
+Other channels still need their own console tests; detection does not guarantee
+that every game build will render or work online.
 
 > [!NOTE]
-> This Battle.net launcher is designed for **World of Warcraft: Forever**. It
-> might be used to install other games. A USB keyboard and mouse work in Battle.net and WoW.
+> This launcher is for World of Warcraft. Other Battle.net games are not
+> supported. A USB keyboard and mouse work in Battle.net and WoW.
 
 > [!WARNING]
 > **Alpha software.** Expect bugs. Forever Launcher is not made, approved or
@@ -172,7 +177,7 @@ keyboard. Use the D-pad and Cross; press Circle or Options at the top level to
 close, or click with a mouse. The menu can:
 
 - turn frame generation, HDR and the performance overlay on or off;
-- browse, install, update and remove add-ons for Forever beta and final;
+- browse, install, update and remove add-ons for the selected WoW version;
 - install a curated starter pack;
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
@@ -180,15 +185,22 @@ close, or click with a mouse. The menu can:
 Until you open the Forever menu once, each start shows an eight-second hint for
 **Options** and **L2**.
 
-Open **Add-ons** before pressing Play. L1/R1 switches between installed beta
-(`_classic_beta_`) and final (`_forever_`); Left/Right switches Installed,
-Updates, Find and Starter packs. Cross opens or installs, Square updates the
+Open **Add-ons** before pressing Play. L1/R1 cycles through detected installed
+WoW channels; Left/Right switches Installed, Updates, Find and Starter packs.
+Cross opens or installs, Square updates the
 selected add-on, Triangle updates all, and R3 removes after a confirmation whose
 default is Cancel. In Find, type on a USB keyboard or choose **Search…** for the
 on-screen keyboard; **Add from GitHub link…** accepts `owner/repo` or its GitHub
 URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
 and TukUI entries work without a key. Changes load the next time WoW starts, or
 after typing `/reload` in WoW.
+
+Add-ons are checked against the selected channel's product and client version,
+and go into that channel's own `Interface/AddOns` folder. The curated catalogue
+and starter packs currently have Forever data only. Other flavours can use
+**Add from GitHub link…** and manage add-ons whose source is known. The menu
+says when catalogue data is unavailable. Unknown products say “Add-ons aren't
+supported for this WoW version yet”; they never receive another flavour's files.
 
 For Wago add-ons, choose **Wago key** on the Add-ons page. Get a free personal
 key at [addons.wago.io/account/apikeys](https://addons.wago.io/account/apikeys),
@@ -247,12 +259,24 @@ without replacing the other options.
 ## WoW settings
 
 WoW starts with settings tuned for the PS5: 4K output at half render scale,
-HDR on, and the controller enabled. The preset covers both Forever final
-(`_forever_`) and Classic beta (`_classic_beta_`) independently: it is installed
-only when that channel's executable is installed and its own `Config.wtf` is
-absent. Change anything you like in WoW's options; neither channel's existing
-settings are overwritten. The Forever menu changes only `HDROutput` for both
-installed channels and leaves every other setting, including `HDRFactor`, alone.
+HDR on, and the controller enabled. Each detected installed channel gets the
+preset only when its own `WTF/Config.wtf` is missing. Existing settings are not
+overwritten. The Forever menu changes only `HDROutput` for every detected
+channel, leaving other settings, including `HDRFactor`, alone.
+
+Automatic discovery currently scans
+`C:\Program Files (x86)\World of Warcraft`. Custom C: or W: installations can
+launch from Battle.net Play, but are not yet included in automatic settings,
+Add-ons discovery or direct start.
+
+### Start one channel directly
+
+Create `/data/homebrew/PPSA99030/wine/direct-game` with just the channel folder
+name, for example `_classic_era_` or `_retail_`, then start Forever Launcher.
+The file is consumed once. If that channel is missing or incomplete, the log
+explains why and Battle.net opens; another channel is never chosen instead.
+An empty file prefers Classic beta, then Forever, then another complete
+installed channel.
 
 ## Where your data is
 
