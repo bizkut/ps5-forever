@@ -137,7 +137,8 @@ files and downloads what is missing.
    For a full check, use the gear next to **Play** → **Scan and Repair**.
 
 Forever Launcher fixes the file permissions of copied folders at startup, so
-you don't need to change them by hand.
+you normally don't need to change them by hand. If it still says it can't
+write to `/data/forever/prefix`, see [Troubleshooting](#troubleshooting).
 
 ## Signing in to Battle.net
 
