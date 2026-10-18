@@ -318,9 +318,9 @@ $(HOST_OUT)/test-wine-title: $(WINE_SRC)/loader/tests/ps5_title.c $(WINE_SRC)/in
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -pthread -I "$(WINE_SRC)/include" $< -o $@
 $(HOST_OUT)/test-write-buffer: test-write-buffer.c build-write-buffer-test.py \
-		$(WINE_SRC)/dlls/ntdll/unix/file.c $(WINE_SRC)/include/wine/ps5_title_private.h
+		$(WINE_SRC)/dlls/ntdll/unix/file.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
+		$(WINE_SRC)/include/wine/ps5_title_private.h
 	python3 build-write-buffer-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
-
 
 $(HOST_OUT)/test-loader-path: test-loader-path.c build-path-test.py $(WINE_SRC)/loader/main.h $(PLATFORM_SRC)/src/libc.c $(PLATFORM_SRC)/include/ps5platform/libc.h
 	mkdir -p $(HOST_OUT)

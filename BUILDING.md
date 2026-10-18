@@ -379,17 +379,24 @@ runtime, full title build or console execution is needed for this regression.
 
 ## WoW CASC download write buffering
 
-The PS5 title ntdll buffers one process-wide run of at most 1 MiB for synchronous
-regular-file writes to exact case-insensitive `data.NNN` names under WoW
-`Data/data/`, including directly nested `_*_` channels, on C: or W:. Only the
-same handle at the next sequential offset continues a run. Other file/section
-operations are global barriers, so archive data is drained before `.idx`
-updates. An idle worker drains after 40 ms with a 10 ms scan interval.
+The PS5 title ntdll buffers up to eight 1 MiB extent slots (8 MiB total) for
+synchronous regular-file writes to exact case-insensitive `data.NNN` names under
+WoW `Data/data/`, including directly nested `_*_` channels, on C: or W:. Each
+handle may retain four nonoverlapping extents; sequential continuations append
+to the matching extent, while independent files remain buffered concurrently.
+Observations of a file drain its identity without flushing unrelated files.
+Global barriers still drain archive data before `.idx` updates. An idle worker
+checks each extent's 40 ms residence deadline at 10 ms intervals.
+
+Each selected identity drains from highest offset to lowest, extending the
+archive through normal writes before filling its earlier extents. Global drains
+visit identities in first-pending order. Overlaps, per-handle capacity and slot
+eviction drain the whole affected handle; writes are never pre-extended.
 
 Normal flushes retain the existing write-broker routing. A pinned fd and
 `(dev, ino)` identity protect retry state; partial errors retain their unwritten
-suffix, disable new buffering, and are reported to the owner handle. Shutdown
-retries retained bytes once. Scoped or unresolved non-image mappings, in-process
+suffix and are reported to the owner handle without discarding other extents.
+Shutdown retries retained bytes once. Scoped or unresolved non-image mappings, in-process
 hard-link creation and renames into scope disable buffering before draining.
 `SEC_IMAGE` and resolved out-of-scope mappings do not disable it. Link counts
 zero and one are admitted because Prospero reports zero for ordinary files;
@@ -399,7 +406,9 @@ hard-link aliases are outside this process-local guarantee.
 `WINEPS5_WRITE_BUFFER=0` or live `write_buffer=off` in `C:\wineps5-tune.txt`
 restores synchronous writes. A diagnostic build can set
 `WINE_PS5_EXTRA_CFLAGS=-DWINE_PS5_WRITE_BUFFER_DIAG=1` when building Wine to
-emit one-time `title writebuf state=... reason=...` decisions. The host suite
+emit one-time `title writebuf state=... reason=...` decisions and 10-second
+path-free write-size, handle/identity, barrier, actual drained-byte/run and bounded
+offset-sample diagnostics. The host suite
 runs both Wine's policy tests and `test-write-buffer`, which extracts the
 production implementation from `WINE_SRC`; use a Wine revision containing this
 implementation, not an older release pin.
@@ -411,6 +420,13 @@ byte and removes its scratch tree. It accepts a MiB argument or
 `C:\write-buffer-bench-result.txt`. On console .39, the 128 MiB benchmark
 improved from about 9 to 62 MiB/s; a real WoW Classic install improved from
 3.9 to 12.4 MB/s median. Full Scan and Repair was not run.
+
+An alternating Retail download comparison on console .39 used public
+`01.000.013` and the combined private build `desc-a5e142bb`: 12.4 to 21.2 MB/s,
+with time inside writes falling from 7.6 to 5.5 seconds per 10-second window.
+The second pair was network-bound at 8.2 to 8.6 MB/s (1.8 to 1.5 seconds inside
+writes). These are combined-build workload measurements, not an isolated claim
+for the buffer alone or a Scan and Repair qualification.
 
 ## Native release gate
 
