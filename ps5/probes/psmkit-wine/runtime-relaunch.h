@@ -2,6 +2,7 @@
 #define PW_RUNTIME_RELAUNCH_H
 #include "protocol.h"
 #include "forever-paths.h"
+#include "wow-channels.h"
 #include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -11,44 +12,14 @@
 #define PW_GAME_ARGC_MAX 64
 struct pw_game_wire { char bytes[PW_GAME_ARGV_BYTES]; const char *argv[PW_GAME_ARGC_MAX + 8]; unsigned argc; };
 typedef int (*pw_game_exists_fn)(const char *, void *);
-struct pw_game_direct_profile
+/* The file is one-shot even when its selector is unavailable or malformed. */
+static inline int pw_game_direct_selector(char *text)
 {
-    char *argv[5];
-    const char *windows_cwd;
-    const char *unix_cwd;
-    const char *unix_exe;
-    const char *unix_loader;
-};
-static inline const struct pw_game_direct_profile *pw_game_direct_profile(pw_game_exists_fn exists,
-                                                                         void *context)
-{
-    /* Keep aligned with b1-game-wow-classic-beta.json and b1-game-wow-forever.json.
-     * Maintenance builds do not contain the GPU profile's generated argv.
-     * Prefer Classic beta (the current default), fall back to final, and
-     * never stage an incomplete install. */
-    static const struct pw_game_direct_profile profiles[] = {
-        {
-            {"C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.exe",
-             "-launcherlogin", "-uid", "wow_classic_beta", NULL},
-            "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"
-        },
-        {
-            {"C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe",
-             "-launcherlogin", "-uid", "wowf", NULL},
-            "C:\\Program Files (x86)\\World of Warcraft\\_forever_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
-            FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"
-        }
-    };
-    if (!exists) return NULL;
-    for (size_t i = 0; i < sizeof(profiles) / sizeof(profiles[0]); ++i)
-        if (exists(profiles[i].unix_exe, context) && exists(profiles[i].unix_loader, context))
-            return &profiles[i];
-    return NULL;
+    size_t n = strlen(text), start = 0;
+    while (n && (text[n - 1] == ' ' || text[n - 1] == '\t' || text[n - 1] == '\r' || text[n - 1] == '\n')) --n;
+    while (start < n && (text[start] == ' ' || text[start] == '\t')) ++start;
+    memmove(text, text + start, n - start); text[n - start] = 0;
+    return *text && !wow_folder_name(text) ? -EINVAL : 0;
 }
 static inline int pw_game_direct_flag_consumed(int present, int unlink_result)
 {
@@ -80,22 +51,25 @@ static inline int pw_game_wire_decode(int argc, char **argv, const char *prefix,
 {
     unsigned separator; size_t bytes = 0, cwd_len, base_len; const char *image, *base;
     char root[4096], loader[4096];
+    struct wow_channel channel;
     if (!argv || !prefix || !exists || argc < 8 || strcmp(argv[1], "--ps5-game-v1") ||
         strcmp(argv[2], "--unix-cwd") || strcmp(argv[4], "--windows-cwd")) return -EINVAL;
     for (separator = 5; separator < (unsigned)argc && strcmp(argv[separator], "--"); ++separator);
     if (separator != 6 || separator + 1 >= (unsigned)argc ||
         (unsigned)argc - separator - 1 > PW_GAME_ARGC_MAX) return -EINVAL;
-    if (snprintf(root, sizeof(root), "%s/drive_c/", prefix) < 0 ||
-        strncmp(argv[3], root, strlen(root)) || strstr(argv[3], "/../")) return -EACCES;
+    if (snprintf(root, sizeof(root), "%s/drive_c/", prefix) < 0) return -EACCES;
+    if (strncmp(argv[3], root, strlen(root)))
+    {
+        if (snprintf(root, sizeof(root), "%s/dosdevices/%c:/", prefix,
+                     (argv[7][0] | 32)) < 0 || strncmp(argv[3], root, strlen(root))) return -EACCES;
+    }
+    if (strstr(argv[3], "/../") || strstr(argv[3], "/./")) return -EACCES;
     for (int i = 0; i < argc; ++i) if ((bytes += strlen(argv[i]) + 1) > PW_GAME_ARGV_BYTES) return -E2BIG;
     image = argv[separator + 1];
-    if (!((image[0] == 'C' || image[0] == 'c' || image[0] == 'W' || image[0] == 'w') &&
-          image[1] == ':' && (image[2] == '\\' || image[2] == '/'))) return -EINVAL;
+    if (wow_channel_parse(image, &channel)) return -EINVAL;
     base = strrchr(image, '\\'); if (!base) base = strrchr(image, '/'); base = base ? base + 1 : image;
     base_len = strlen(base); cwd_len = strlen(argv[3]);
-    if (base_len < 7 || !((base[0] | 32) == 'w' && (base[1] | 32) == 'o' && (base[2] | 32) == 'w') ||
-        strcasecmp(base + base_len - 4, ".exe") ||
-        cwd_len + 1 + base_len - 4 + sizeof("_loader.dll") > sizeof(loader)) return -EINVAL;
+    if (cwd_len + 1 + base_len - 4 + sizeof("_loader.dll") > sizeof(loader)) return -EINVAL;
     memcpy(loader, argv[3], cwd_len); loader[cwd_len] = '/';
     memcpy(loader + cwd_len + 1, base, base_len - 4);
     memcpy(loader + cwd_len + 1 + base_len - 4, "_loader.dll", sizeof("_loader.dll"));

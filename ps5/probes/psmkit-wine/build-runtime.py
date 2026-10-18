@@ -577,6 +577,8 @@ if args.profile == 'b1':
         program + ' ' + ' '.join(switches) for program, switches in selected['browser_switches'].items())) + '\n'
     profile_defines += '#define PW_RUNTIME_WRITEBROKER_ELF ' + json.dumps(
         selected['root'] + '/' + WRITEBROKER_RELATIVE) + '\n'
+    # Runtime-game profiles deliberately generate no channel-specific argv.
+    # native-entry requires the validated Play/direct-game wire before Wine.
     profile_defines += '#define PW_RUNTIME_PARENT_ARGV {' + ','.join(
         '(char *)' + json.dumps(value) for value in selected['argv']) + ',NULL}\n'
     profile_defines += f'#define PW_RUNTIME_PARENT_ARGC {len(selected["argv"])}\n'

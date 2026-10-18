@@ -176,7 +176,7 @@ def profile(name, overrides=None):
             raise ValueError('profile overrides are a B1 JSON object only')
         allowed = {'argv', 'cwd', 'prefix', 'home', 'dll_overrides', 'child_dll_overrides',
                    'debug', 'headless', 'payload_programs', 'refused_programs',
-                   'browser_switches', 'gpu', 'environment', 'prefetch_hosts', 'dns_upstreams'}
+                   'browser_switches', 'gpu', 'runtime_game', 'environment', 'prefetch_hosts', 'dns_upstreams'}
         if overrides.keys() - allowed:
             raise ValueError(f'unsupported B1 profile inputs: {sorted(overrides.keys()-allowed)}')
         for key, value in overrides.items():
@@ -260,7 +260,7 @@ def profile(name, overrides=None):
                         for program, switches in value.items()):
                     raise ValueError('B1 browser_switches maps program file names to lists of --switches')
                 selected[key] = value
-            elif key in ('headless', 'gpu'):
+            elif key in ('headless', 'gpu', 'runtime_game'):
                 if not isinstance(value, bool):
                     raise ValueError(f'B1 {key} must be a boolean')
                 selected[key] = value
@@ -273,6 +273,11 @@ def profile(name, overrides=None):
                     raise ValueError(f'B1 {key} must stay inside the title /app0 tree or {USER_DATA_ROOT}')
                 selected[key] = value
     if b1:
+        if selected.get('runtime_game'):
+            if not selected['gpu'] or (overrides and ('argv' in overrides or 'cwd' in overrides)):
+                raise ValueError('B1 runtime_game requires GPU and runtime-supplied argv/cwd')
+            selected['argv'] = [loader]
+            selected['cwd'] = None
         if selected['gpu'] and not selected['headless']:
             raise ValueError('B1 gpu requires headless to give RADV exclusive VideoOut ownership')
         if (selected.get('environment', {}).keys() -
@@ -367,7 +372,9 @@ def qualified_b1_folder(folder):
     material = receipt['material']
     supplied = material.get('profile', {})
     selected = profile('b1', {
-        **{key: supplied.get(key) for key in ('cwd', 'prefix', 'home', 'dll_overrides', 'debug')},
+        **{key: supplied.get(key) for key in ('prefix', 'home', 'dll_overrides', 'debug')},
+        **({'cwd': supplied.get('cwd')} if not supplied.get('runtime_game') else {}),
+        **({'runtime_game': supplied['runtime_game']} if 'runtime_game' in supplied else {}),
         'headless': supplied.get('headless', False),
         'payload_programs': supplied.get('payload_programs', []),
         'refused_programs': supplied.get('refused_programs', []),
@@ -378,13 +385,15 @@ def qualified_b1_folder(folder):
         **({'child_dll_overrides': supplied['child_dll_overrides']}
            if supplied.get('gpu') and 'child_dll_overrides' in supplied else {}),
         **({'environment': supplied['environment']} if 'environment' in supplied else {}),
-        'argv': supplied.get('argv', [])[1:],
+        **({'argv': supplied.get('argv', [])[1:]} if not supplied.get('runtime_game') else {}),
     })
     game_supplied = material.get('game_profile')
     game_selected = None
     if game_supplied:
         game_selected = profile('b1', {
-            **{key: game_supplied.get(key) for key in ('cwd', 'prefix', 'home', 'dll_overrides', 'debug')},
+            **{key: game_supplied.get(key) for key in ('prefix', 'home', 'dll_overrides', 'debug')},
+            **({'cwd': game_supplied.get('cwd')} if not game_supplied.get('runtime_game') else {}),
+            **({'runtime_game': game_supplied['runtime_game']} if 'runtime_game' in game_supplied else {}),
             'headless': game_supplied.get('headless', False),
             'payload_programs': game_supplied.get('payload_programs', []),
             'refused_programs': game_supplied.get('refused_programs', []),
@@ -395,7 +404,8 @@ def qualified_b1_folder(folder):
             **({'child_dll_overrides': game_supplied['child_dll_overrides']}
                if 'child_dll_overrides' in game_supplied else {}),
             **({'environment': game_supplied['environment']} if 'environment' in game_supplied else {}),
-            'argv': game_supplied.get('argv', [])[1:],
+            **({'argv': game_supplied.get('argv', [])[1:]}
+               if not game_supplied.get('runtime_game') else {}),
         })
     digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     if (receipt.get('status') != 'QUALIFIED_STATIC_NOT_EXECUTED' or

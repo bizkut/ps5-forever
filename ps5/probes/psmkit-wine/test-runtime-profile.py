@@ -38,28 +38,21 @@ p1w = profile('p1w')
 product = json.loads(Path(__file__).with_name('b1-product.json').read_text())
 assert product['debug'] == 'err+all,err-seh'
 assert product['argv'] == [r'C:\Forever\Addons\forever-maintenance.exe']
-game_config = json.loads(Path(__file__).with_name('b1-game-wow-forever.json').read_text())
-beta_config = json.loads(Path(__file__).with_name('b1-game-wow-classic-beta.json').read_text())
+game_config = json.loads(Path(__file__).with_name('b1-game-wow.json').read_text())
 maintenance = profile('b1', product)
 assert maintenance['refused_programs'] == []
-assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json' in (
+assert 'B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow.json' in (
     Path(__file__).with_name('Makefile').read_text())
-for config, channel, executable, uid in (
-        (game_config, '_forever_', 'Wow.exe', 'wowf'),
-        (beta_config, '_classic_beta_', 'WowB.exe', 'wow_classic_beta')):
-    game = profile('b1', config)
-    windows_cwd = rf'C:\Program Files (x86)\World of Warcraft\{channel}'
-    assert config['argv'] == [windows_cwd + '\\' + executable, '-launcherlogin', '-uid', uid]
-    assert game['argv'] == [game['loader'], *config['argv']]
-    assert game['cwd'] == f'/data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft/{channel}'
-    assert game['prefix'] == '/data/forever/prefix'
-    assert game['home'] == '/data/forever/home'
-    assert game['gpu'] is True and game['headless'] is True
-    assert game['refused_programs'] == ['BlizzardError.exe']
-    assert game['environment'] == {'PROTON_ENABLE_HDR': '1'}
-    assert 'WINEPS5_SDR_WHITE_NITS' not in game['environment']
-assert {key: value for key, value in game_config.items() if key not in ('argv', 'cwd')} == {
-    key: value for key, value in beta_config.items() if key not in ('argv', 'cwd')}
+game = profile('b1', game_config)
+assert 'argv' not in game_config and 'cwd' not in game_config
+assert game['argv'] == [game['loader']]
+assert game['cwd'] is None and game['runtime_game'] is True
+assert game['prefix'] == '/data/forever/prefix'
+assert game['home'] == '/data/forever/home'
+assert game['gpu'] is True and game['headless'] is True
+assert game['refused_programs'] == ['BlizzardError.exe']
+assert game['environment'] == {'PROTON_ENABLE_HDR': '1'}
+assert 'WINEPS5_SDR_WHITE_NITS' not in game['environment']
 assert set(b1['module_paths']) == {
     'ntdll.so', 'win32u.so', 'wineserver.so', 'ws2_32.so', 'crypt32.so', 'opengl32.so',
     'secur32.so', 'bcrypt.so', 'libgnutls.so', 'wineps5.so', 'dwrite.so', 'libfreetype.so',
@@ -105,6 +98,21 @@ native_startup = Path(__file__).with_name('native-entry.c').read_text()
 common_environment = native_startup.split('if (native_runtime.payload_spawn', 1)[1].split(
     '#if PW_RUNTIME_GPU', 1)[0]
 assert 'setenv("WINEPS5_PROFILE", PW_RUNTIME_PROFILE, 0)' in common_environment
+# Source trace of the shared pre-Wine gate: valid Play, direct-game and game
+# restarts all enter this main. Managed-copy failure behavior is exercised by
+# test-forever-setup; these assertions keep both role entry paths behind it.
+startup_main = native_startup.split('int main(int argc, char **argv)', 1)[1]
+setup_gate = startup_main.index('if (pw_forever_start())')
+direct_handoff = startup_main.index('pw_maintenance_direct_game()')
+game_wine_entry = startup_main.index('wine_public_title_main(parent_argc,args)')
+assert setup_gate < direct_handoff < game_wine_entry
+assert 'return 1;' in startup_main[setup_gate:direct_handoff]
+sync_stage = native_startup.split('static int pw_forever_start(void)', 1)[1].split(
+    'result = forever_install_wow_config', 1)[0]
+assert 'result = pw_forever_sync_managed();' in sync_stage
+assert 'if (result < 0)' in sync_stage.split('result = pw_forever_sync_managed();', 1)[1]
+assert 'return -1;' in sync_stage.split('io_log("forever: app-owned prefix files', 1)[1]
+assert 'forever: prefix sync checked=%u hashed=%u repaired=%u' in native_startup
 assert profile('b1', {'gpu': True, 'headless': True,
                       'environment': {'PROTON_ENABLE_HDR': '1', 'WINEPS5_DIRECT_REQUESTS': '0',
                                       'WINEPS5_HDR_TRACE': '1', 'WINEPS5_QUERY_TRACE': '1'}})['environment'] == {
@@ -418,6 +426,32 @@ with tempfile.TemporaryDirectory(prefix='pw-b1-profile-') as temporary:
     }
     (folder / 'runtime-qualification.json').write_text(json.dumps(receipt))
     assert qualified_b1_folder(folder) == (receipt, manifest)
+    # The same channel-neutral role must survive both its own qualification
+    # and the combined maintenance/game receipt reconstruction.
+    added_modules = []
+    for name, installed in game['module_paths'].items():
+        destination = folder / installed.removeprefix('/app0/')
+        if not destination.exists():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(name.encode())
+            added_modules.append(destination)
+    game_manifest = runtime_tree_manifest(folder / 'wine-title', game)
+    (folder / 'wine-title/title-root-manifest.json').write_text(json.dumps(game_manifest))
+    original_material = dict(material)
+    for dual in (False, True):
+        material['profile'] = maintenance if dual else game
+        if dual:
+            material['game_profile'] = game
+        material['title_root'] = inventory(folder / 'wine-title')
+        receipt['qualification_key'] = hashlib.sha256(json.dumps(
+            material, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        (folder / 'runtime-qualification.json').write_text(json.dumps(receipt))
+        assert qualified_b1_folder(folder) == (receipt, game_manifest)
+    for destination in added_modules:
+        destination.unlink()
+    material.clear()
+    material.update(original_material)
+    (folder / 'wine-title/title-root-manifest.json').write_text(json.dumps(manifest, sort_keys=True))
     for selected_profile, accepted in ((profile('b1', {'gpu': True, 'headless': True}), False),
                                        ({key: value for key, value in b1.items() if key != 'gpu'}, True)):
         material['profile'] = selected_profile

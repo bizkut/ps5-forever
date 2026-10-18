@@ -498,9 +498,12 @@ static int pw_maintenance_direct_game(void)
 {
     static const char flag[] = "/app0/wine/direct-game";
     struct stat flag_stat;
-    const struct pw_game_direct_profile *profile;
+    struct wow_channel channel;
+    char selector[WOW_FOLDER_BYTES + 16], image[WOW_PATH_BYTES];
+    char *program[] = {image, "-launcherlogin", "-uid", channel.product, NULL};
     int error, present = !stat(flag, &flag_stat);
     if (!present) return 0;
+    error = forever_read_file(flag, selector, sizeof(selector));
     int removed = unlink(flag), unlink_errno = errno;
     if (!pw_game_direct_flag_consumed(present, removed))
     {
@@ -508,15 +511,24 @@ static int pw_maintenance_direct_game(void)
         return 0;
     }
     io_log("b1 maintenance direct game flag=consumed");
-    profile = pw_game_direct_profile(pw_game_loader_exists, NULL);
-    if (!profile)
+    if (error < 0 || pw_game_direct_selector(selector))
     {
-        io_log("b1 maintenance direct game unavailable: no supported WoW executable and loader pair; continuing maintenance");
-        forever_say("Direct start unavailable: install World of Warcraft: Forever or Classic beta in Battle.net.\n"
-                    "No supported game executable and loader pair was found.");
+        io_log("b1 maintenance direct game selector invalid; continuing maintenance");
         return 0;
     }
-    error = pw_parent_stage_game_launch(profile->argv, profile->windows_cwd, profile->unix_cwd);
+    error = wow_channel_select(PW_RUNTIME_PREFIX, selector, &channel);
+    if (error)
+    {
+        io_log("b1 maintenance direct game unavailable channel=%s error=%d; no fallback",
+               selector[0] ? selector : "(automatic)", -error);
+        forever_say("Direct start unavailable: the requested WoW channel has no executable and loader pair.");
+        return 0;
+    }
+    if (snprintf(image, sizeof(image), "%s\\%s", channel.windows_cwd, channel.executable) >= (int)sizeof(image))
+        return 0;
+    if (!channel.product[0]) program[2] = NULL;
+    program[3] = (char *)wow_channel_launch_uid(&channel);
+    error = pw_parent_stage_game_launch(program, channel.windows_cwd, channel.unix_cwd);
     if (error)
     {
         io_log("b1 maintenance direct game validation failed error=%d argv=REDACTED cwd=REDACTED; continuing maintenance",

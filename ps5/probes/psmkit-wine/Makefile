@@ -31,7 +31,7 @@ B1_QUARANTINE ?= $(B1_OUT)-quarantine
 B1_MAINTENANCE_OUT ?= $(B1_OUT)-maintenance
 B1_GAME_OUT ?= $(B1_OUT)-game
 B1_PROFILE_CONFIG ?=
-B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow-classic-beta.json
+B1_GAME_PROFILE_CONFIG ?= $(CURDIR)/b1-game-wow.json
 B1_CONFIG_ARG := $(if $(B1_PROFILE_CONFIG),--profile-config "$(B1_PROFILE_CONFIG)",)
 TITLE_DESKTOP := ../../title/main.c ../../title/hub.c ../../title/compositor.c \
 	../../title/forever-menu.c ../../title/addonforge-client.c ../../title/display.c \
@@ -60,7 +60,7 @@ runtime-qualification: runtime-child pe $(HOST_OUT)/test-staged-runtime
 
 runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py \
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
-		runtime-parent.h runtime-relaunch.h writebroker-autostart.h writebroker-menu.h \
+		runtime-parent.h runtime-relaunch.h wow-channels.h writebroker-autostart.h writebroker-menu.h \
 		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-profile.h runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
@@ -103,7 +103,7 @@ test-winebuild-delayload: test-winebuild-delayload.py $(WINEBUILD)
 
 test-runtime-profile: test-runtime-profile.py runtime_profiles.py runtime_imports.py \
 		runtime-import-policy-b1.json ../../deploy-wine.py Makefile b1-product.json \
-		b1-game-wow-forever.json b1-game-wow-classic-beta.json
+		b1-game-wow.json
 	python3 test-runtime-profile.py
 
 .PHONY: test-build-speed
@@ -120,7 +120,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
 		$(HOST_OUT)/test-direct-commit $(HOST_OUT)/test-direct-cache $(HOST_OUT)/test-direct-fail-fast $(HOST_OUT)/test-vm-cpu \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
-		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch \
+		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch $(HOST_OUT)/test-wow-channels \
 		$(HOST_OUT)/test-battlenet-restart $(HOST_OUT)/test-audio-mixer \
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
@@ -148,6 +148,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-title-input
 	$(HOST_OUT)/test-title-ime
 	$(HOST_OUT)/test-runtime-relaunch
+	$(HOST_OUT)/test-wow-channels
 	$(HOST_OUT)/test-battlenet-restart
 	$(HOST_OUT)/test-audio-mixer
 	$(HOST_OUT)/test-audio-selection
@@ -194,7 +195,7 @@ $(HOST_OUT)/test-audio-mixer: test-audio-mixer.c \
 		-I "$(WINE_SRC)/dlls/wineps5audio.drv" \
 		test-audio-mixer.c $(WINE_SRC)/dlls/wineps5audio.drv/mixer.c -o $@
 
-$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h forever-paths.h protocol.h
+$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h wow-channels.h forever-paths.h protocol.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
@@ -245,6 +246,10 @@ $(HOST_OUT)/test-writebroker-space: test-writebroker-space.c build-writebroker-s
 		writebroker-menu.h $(WRITEBROKER_DIR)/writebroker.c $(WINE_SRC)/dlls/ntdll/unix/file.c \
 		$(WINE_SRC)/include/wine/ps5_writebroker.h
 	python3 build-writebroker-space-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-wow-channels: test-wow-channels.c wow-channels.h forever-setup.h sha256.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
 $(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h sha256.h
 	mkdir -p $(HOST_OUT)

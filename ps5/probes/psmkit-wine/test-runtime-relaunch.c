@@ -7,77 +7,23 @@ static int loader_exists(const char *path, void *context)
     (void)context;
     return !strcmp(path, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll");
 }
-
-enum
+static int missing_loader(const char *path, void *context)
 {
-    FINAL_EXE = 1u << 0,
-    FINAL_LOADER = 1u << 1,
-    BETA_EXE = 1u << 2,
-    BETA_LOADER = 1u << 3,
-    FINAL_INSTALLED = FINAL_EXE | FINAL_LOADER,
-    BETA_INSTALLED = BETA_EXE | BETA_LOADER
-};
-
+    (void)path; (void)context; return 0;
+}
 static int installed_exists(const char *path, void *context)
 {
-    static const char *const files[] = {
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe",
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll",
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe",
-        FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"
-    };
-    unsigned installed = *(unsigned *)context;
-    for (unsigned i = 0; i < sizeof(files) / sizeof(files[0]); ++i)
-        if (!strcmp(path, files[i])) return !!(installed & (1u << i));
-    return 0;
+    (void)context;
+    return !strcasecmp(path, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll") ||
+           !strcasecmp(path, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/wowb_loader.dll") ||
+           !strcmp(path, FOREVER_DRIVE_C "/Games/World of Warcraft/_retail_/wow_loader.dll") ||
+           !strcmp(path, FOREVER_PREFIX "/dosdevices/w:/Games/World of Warcraft/_ptr_/wowt_loader.dll");
 }
 
-static void test_direct_profiles(void)
-{
-    unsigned installed = BETA_INSTALLED;
-    const struct pw_game_direct_profile *beta = pw_game_direct_profile(installed_exists, &installed);
-    assert(beta);
-    assert(!strcmp(beta->argv[0], "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.exe"));
-    assert(!strcmp(beta->argv[1], "-launcherlogin"));
-    assert(!strcmp(beta->argv[2], "-uid"));
-    assert(!strcmp(beta->argv[3], "wow_classic_beta"));
-    assert(!beta->argv[4]);
-    assert(!strcmp(beta->windows_cwd, "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_"));
-    assert(!strcmp(beta->unix_cwd, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_"));
-    assert(!strcmp(beta->unix_exe, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB.exe"));
-    assert(!strcmp(beta->unix_loader, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_/WowB_loader.dll"));
-    /* Classic beta is the default; it wins whenever it is completely installed. */
-    installed = FINAL_INSTALLED | BETA_INSTALLED;
-    assert(pw_game_direct_profile(installed_exists, &installed) == beta);
-
-    installed = FINAL_INSTALLED;
-    const struct pw_game_direct_profile *final = pw_game_direct_profile(installed_exists, &installed);
-    assert(final && final != beta);
-    assert(!strcmp(final->argv[0], "C:\\Program Files (x86)\\World of Warcraft\\_forever_\\Wow.exe"));
-    assert(!strcmp(final->argv[1], "-launcherlogin"));
-    assert(!strcmp(final->argv[2], "-uid"));
-    assert(!strcmp(final->argv[3], "wowf"));
-    assert(!final->argv[4]);
-    assert(!strcmp(final->windows_cwd, "C:\\Program Files (x86)\\World of Warcraft\\_forever_"));
-    assert(!strcmp(final->unix_cwd, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_"));
-    assert(!strcmp(final->unix_exe, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/Wow.exe"));
-    assert(!strcmp(final->unix_loader, FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_forever_/wow_loader.dll"));
-    installed = BETA_EXE | FINAL_INSTALLED;
-    assert(pw_game_direct_profile(installed_exists, &installed) == final);
-    installed = BETA_LOADER | FINAL_INSTALLED;
-    assert(pw_game_direct_profile(installed_exists, &installed) == final);
-    const unsigned incomplete[] = {0, FINAL_EXE, FINAL_LOADER, BETA_EXE, BETA_LOADER,
-                                   FINAL_EXE | BETA_EXE, FINAL_LOADER | BETA_LOADER};
-    for (unsigned i = 0; i < sizeof(incomplete) / sizeof(incomplete[0]); ++i)
-    {
-        installed = incomplete[i];
-        assert(!pw_game_direct_profile(installed_exists, &installed));
-    }
-}
 
 static void test_dynamic_channels(void)
 {
-    unsigned installed = FINAL_INSTALLED | BETA_INSTALLED;
+    unsigned installed = 1;
     const struct
     {
         char *image;
@@ -97,6 +43,12 @@ static void test_dynamic_channels(void)
         {"C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_\\WowB.EXE",
          "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_",
          FOREVER_DRIVE_C "/Program Files (x86)/World of Warcraft/_classic_beta_", "wow_classic_beta"}
+        ,{"C:\\Games\\World of Warcraft\\_retail_\\Wow.exe",
+          "C:\\Games\\World of Warcraft\\_retail_",
+          FOREVER_DRIVE_C "/Games/World of Warcraft/_retail_", "wow"}
+        ,{"W:\\Games\\World of Warcraft\\_ptr_\\WowT.exe",
+          "W:\\Games\\World of Warcraft\\_ptr_",
+          FOREVER_PREFIX "/dosdevices/w:/Games/World of Warcraft/_ptr_", "wowt"}
     };
     for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
     {
@@ -110,9 +62,8 @@ static void test_dynamic_channels(void)
         assert(!strcmp(wire.argv[3], channels[i].unix_cwd));
         assert(!strcmp(wire.argv[5], channels[i].windows_cwd));
         for (unsigned j = 0; program[j]; ++j) assert(!strcmp(wire.argv[7 + j], program[j]));
-        unsigned missing = 0;
         assert(pw_game_wire_decode((int)wire.argc, (char **)wire.argv, FOREVER_PREFIX,
-                                   installed_exists, &missing, NULL) == -ENOENT);
+                                   missing_loader, NULL, NULL) == -ENOENT);
     }
 }
 
@@ -125,15 +76,17 @@ int main(void)
     struct pw_game_request request;
     char *forwarded[PW_GAME_WIRE_ARGV + 1];
     unsigned separator = 0;
-    unsigned installed = BETA_INSTALLED;
-    const struct pw_game_direct_profile *direct = pw_game_direct_profile(installed_exists, &installed);
-    test_direct_profiles();
+    char selector[] = " \t_classic_era_\r\n";
+    assert(!pw_game_direct_selector(selector) && !strcmp(selector, "_classic_era_"));
+    char invalid[] = "../_retail_";
+    assert(pw_game_direct_selector(invalid) == -EINVAL);
     test_dynamic_channels();
     assert(!pw_game_direct_flag_consumed(0, 0));
     assert(!pw_game_direct_flag_consumed(0, -1));
     assert(!pw_game_direct_flag_consumed(1, -1));
     assert(pw_game_direct_flag_consumed(1, 0));
-    assert(!pw_game_wire_encode(&wire, direct->argv, direct->windows_cwd, direct->unix_cwd));
+    assert(!pw_game_wire_encode(&wire, program,
+                                "C:\\Program Files (x86)\\World of Warcraft\\_classic_beta_", unix_cwd));
     assert(!pw_game_wire_decode((int)wire.argc, (char **)wire.argv, FOREVER_PREFIX,
                                 loader_exists, NULL, &separator));
     assert(wire.argc == 11 && separator == 6);
