@@ -377,6 +377,41 @@ writable data without execute permission. It fails against the old Wine host
 tool even when ordinary `.text` and the delay helper are executable. No Wine
 runtime, full title build or console execution is needed for this regression.
 
+## WoW CASC download write buffering
+
+The PS5 title ntdll buffers one process-wide run of at most 1 MiB for synchronous
+regular-file writes to exact case-insensitive `data.NNN` names under WoW
+`Data/data/`, including directly nested `_*_` channels, on C: or W:. Only the
+same handle at the next sequential offset continues a run. Other file/section
+operations are global barriers, so archive data is drained before `.idx`
+updates. An idle worker drains after 40 ms with a 10 ms scan interval.
+
+Normal flushes retain the existing write-broker routing. A pinned fd and
+`(dev, ino)` identity protect retry state; partial errors retain their unwritten
+suffix, disable new buffering, and are reported to the owner handle. Shutdown
+retries retained bytes once. Scoped or unresolved non-image mappings, in-process
+hard-link creation and renames into scope disable buffering before draining.
+`SEC_IMAGE` and resolved out-of-scope mappings do not disable it. Link counts
+zero and one are admitted because Prospero reports zero for ordinary files;
+counts above one are rejected. Cross-process mappings and external/pre-existing
+hard-link aliases are outside this process-local guarantee.
+
+`WINEPS5_WRITE_BUFFER=0` or live `write_buffer=off` in `C:\wineps5-tune.txt`
+restores synchronous writes. A diagnostic build can set
+`WINE_PS5_EXTRA_CFLAGS=-DWINE_PS5_WRITE_BUFFER_DIAG=1` when building Wine to
+emit one-time `title writebuf state=... reason=...` decisions. The host suite
+runs both Wine's policy tests and `test-write-buffer`, which extracts the
+production implementation from `WINE_SRC`; use a Wine revision containing this
+implementation, not an older release pin.
+
+`make -C ps5/probes/write-buffer-bench LLVM_MINGW=/opt/llvm-mingw` builds a
+Windows probe that writes scratch `data.000` in 2–64 KiB chunks, verifies every
+byte and removes its scratch tree. It accepts a MiB argument or
+`C:\write-buffer-bench-mib.txt`, and reports through
+`C:\write-buffer-bench-result.txt`. On console .39, the 128 MiB benchmark
+improved from about 9 to 62 MiB/s; a real WoW Classic install improved from
+3.9 to 12.4 MB/s median. Full Scan and Repair was not run.
+
 ## Native release gate
 
 Before publishing the corrected release or promoting its catalog entry, install
