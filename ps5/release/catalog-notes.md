@@ -2,7 +2,7 @@
 
 ## Record description (`apps/PPSA99030.json`, `description`)
 
-Battle.net launcher for World of Warcraft. Options opens the Forever menu; L3+R3 opens the on-screen keyboard. USB keyboard and mouse work too.
+Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a built-in add-on manager; press Options for the Forever menu and L3+R3 for the on-screen keyboard.
 
 ## Release notes (GitHub release description, shown by the catalog)
 
