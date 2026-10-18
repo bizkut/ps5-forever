@@ -302,7 +302,8 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
             .command = FOREVER_MENU_COMMAND_SET_HUD, .enabled = !menu->values.hud};
     case FOREVER_MENU_ADDONS:
         menu->page = FOREVER_MENU_ADDON_PAGE;
-        menu->addon_channel = FOREVER_ADDON_CLASSIC_BETA;
+        menu->addon_channel = 0;
+        menu->addon_channel_count = 0;
         menu->addon_tab = FOREVER_ADDON_INSTALLED;
         menu->addon_sort_downloads = 0;
         menu->addon_selected = menu->addon_scroll = menu->addon_count = 0;
@@ -344,10 +345,10 @@ struct forever_menu_result forever_menu_addon_button(
     case FOREVER_ADDON_L1:
     case FOREVER_ADDON_R1:
     {
-        enum forever_addon_channel channel =
-            button == FOREVER_ADDON_R1 ? FOREVER_ADDON_FINAL : FOREVER_ADDON_CLASSIC_BETA;
-        if (menu->addon_channel == channel) return none();
-        menu->addon_channel = channel;
+        size_t count = menu->addon_channel_count;
+        if (count < 2) return none();
+        menu->addon_channel = (menu->addon_channel +
+            (button == FOREVER_ADDON_R1 ? 1 : count - 1)) % count;
         menu->addon_selected = menu->addon_scroll = menu->addon_count = 0;
         addon_working(menu, "Switching WoW channel...");
         return addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_REFRESH, NULL);
@@ -398,11 +399,20 @@ void forever_menu_addon_snapshot(
 {
     char selected_key[FOREVER_ADDON_KEY_BYTES] = {0};
     const struct forever_addon_row *selected;
+    int successful_action;
     if (!snapshot || (menu->page != FOREVER_MENU_ADDON_PAGE &&
                       menu->page != FOREVER_MENU_ADDON_CONFIRM) ||
         snapshot->tab != menu->addon_tab) return;
+    successful_action = snapshot->wago_saved || menu->addon_pending_github;
     selected = selected_addon(menu);
     menu->wago_status = snapshot->wago_status;
+    if (snapshot->channel_count)
+    {
+        menu->addon_channel_count = snapshot->channel_count < FOREVER_ADDON_CHANNELS ?
+            snapshot->channel_count : FOREVER_ADDON_CHANNELS;
+        memcpy(menu->addon_channels, snapshot->channels,
+               menu->addon_channel_count * sizeof(menu->addon_channels[0]));
+    }
     if (selected) snprintf(selected_key, sizeof(selected_key), "%s", selected->key);
     if (menu->addon_tab == FOREVER_ADDON_FIND)
     {
@@ -443,6 +453,13 @@ void forever_menu_addon_snapshot(
         copy_status(menu, menu->addon_count ? "" : "No add-ons found for this view.");
     else
         menu->status[0] = 0;
+    if (snapshot->notice[0] && !successful_action) copy_status(menu, snapshot->notice);
+    if (snapshot->message[0])
+    {
+        copy_status(menu, snapshot->message);
+        if (!strcmp(snapshot->message, "Wago rejected this key."))
+            menu->wago_status = FOREVER_WAGO_REJECTED;
+    }
 }
 
 void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
@@ -851,8 +868,8 @@ static void render_addons(const struct forever_menu_state *menu, char *text, siz
 {
     struct text_writer writer = {text, size, 0};
     const struct forever_addon_row *selected = selected_addon(menu);
-    const char *channel = menu->addon_channel == FOREVER_ADDON_FINAL ?
-        "WoW: Forever (final)" : "WoW: Forever (beta)";
+    const char *channel = menu->addon_channel < menu->addon_channel_count ?
+        menu->addon_channels[menu->addon_channel].label : "Detecting installed WoW channels";
     append(&writer, " Add-ons \xe2\x80\x94 %s\n", channel);
     if (find_query_separate(menu))
         append(&writer, " Find: \"%s\"\n", menu->addon_query);

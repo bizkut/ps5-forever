@@ -1,0 +1,1318 @@
+--- /dev/null
++++ b/src-tauri/src/flavor.rs
+@@ -0,0 +1,231 @@
++//! Source capability vocabulary. Discovery/launch never uses this allow-list.
++use std::path::Path;
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Flavor { Retail, Classic, Bc, Wrath, Cata, Mists, Forever }
++pub const UNSUPPORTED: &str = "Add-ons aren't supported for this WoW version yet";
++impl Default for Flavor { fn default() -> Self { Self::Forever } }
++impl Flavor {
++    pub fn id(self) -> &'static str {
++        match self {
++            Self::Retail => "retail", Self::Classic => "classic", Self::Bc => "bc",
++            Self::Wrath => "wrath", Self::Cata => "cata", Self::Mists => "mists",
++            Self::Forever => "forever",
++        }
++    }
++    // Wago's vocabulary differs from BigWigs/TOC's mists/wrath.
++    pub fn wago(self) -> &'static str {
++        match self { Self::Mists => "mop", Self::Wrath => "wotlk", _ => self.id() }
++    }
++    pub fn accepts_interface(self, interface: u32) -> bool {
++        match self {
++            Self::Retail => interface >= 60000,
++            Self::Classic => (10000..16000).contains(&interface),
++            Self::Forever => (16000..17000).contains(&interface),
++            Self::Bc => (20000..30000).contains(&interface),
++            Self::Wrath => (30000..40000).contains(&interface),
++            Self::Cata => (40000..50000).contains(&interface),
++            Self::Mists => (50000..60000).contains(&interface),
++        }
++    }
++    pub fn accepts_patch(self, patch: &str) -> bool {
++        let mut parts = patch.split('.');
++        let interface = (|| interface_from_version(parts.next()?.parse().ok()?,
++            parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))();
++        interface.is_some_and(|n| self.accepts_interface(n))
++    }
++    pub fn accepts_metadata(self, name: &str, interface: u32) -> bool {
++        if interface != 0 { return self.accepts_interface(interface); }
++        match self {
++            Self::Retail => matches!(name, "retail" | "mainline"),
++            Self::Classic => matches!(name, "classic" | "vanilla"),
++            Self::Bc => matches!(name, "bc" | "bcc" | "tbc"),
++            Self::Wrath => matches!(name, "wrath" | "wotlk"),
++            Self::Cata => name == "cata",
++            Self::Mists => matches!(name, "mists" | "mop"),
++            Self::Forever => matches!(name, "forever" | "camelot"),
++        }
++    }
++    pub fn accepts_toc_suffix(self, suffix: &str) -> bool {
++        self.accepts_metadata(suffix, 0) || (self == Self::Wrath && suffix == "wotlkc")
++    }
++    pub fn asset_flavor(name: &str) -> Option<Self> {
++        let lower = name.to_ascii_lowercase();
++        lower.split(|c: char| !c.is_ascii_alphanumeric()).filter_map(|t| match t {
++            "mainline" | "retail" => Some(Self::Retail), "classic" | "vanilla" => Some(Self::Classic),
++            "bc" | "bcc" | "tbc" => Some(Self::Bc), "wrath" | "wotlk" => Some(Self::Wrath),
++            "cata" => Some(Self::Cata), "mists" | "mop" => Some(Self::Mists),
++            "forever" | "camelot" => Some(Self::Forever), _ => None,
++        }).last()
++    }
++    pub fn asset_matches(self, name: &str) -> bool {
++        Self::asset_flavor(name) == Some(self)
++    }
++}
++pub fn interface_from_version(major: u32, minor: u32, patch: u32) -> Option<u32> {
++    if major == 0 || minor > 99 || patch > 99 { return None; }
++    major.checked_mul(10000)?.checked_add(minor * 100 + patch)
++}
++fn from_interface(interface: u32) -> Option<Flavor> {
++    [Flavor::Retail, Flavor::Classic, Flavor::Bc, Flavor::Wrath, Flavor::Cata,
++     Flavor::Mists, Flavor::Forever].into_iter().find(|f| f.accepts_interface(interface))
++}
++pub fn for_product(product: &str, interface: u32) -> Option<Flavor> {
++    let fallback = match product {
++        "wow" | "wowt" | "wowxptr" | "wow_beta" => Flavor::Retail,
++        "wow_classic" | "wow_classic_ptr" => Flavor::Mists,
++        "wow_classic_beta" | "wowf" => Flavor::Forever,
++        "wow_classic_era" | "wow_classic_era_ptr" | "wow_classic_era_beta" => Flavor::Classic,
++        "wow_anniversary" => Flavor::Bc,
++        "wowe1" | "wowe2" | "wowe3" => return from_interface(interface),
++        _ => return None,
++    };
++    // The channel-local executable is authoritative when a beta/progression
++    // product changes engines. Never infer a version from transient .build.info.
++    if interface == 0 { return Some(fallback); }
++    let detected = from_interface(interface)?;
++    // A later Classic expansion must not silently become Retail. Unknown
++    // source capabilities fail closed, while known progression builds move.
++    if (detected == Flavor::Retail) != (fallback == Flavor::Retail) { return None; }
++    if (product == "wowf" || product.starts_with("wow_classic_era")) && detected != fallback {
++        return None;
++    }
++    Some(detected)
++}
++pub fn executable_name(name: &str) -> bool {
++    let lower = name.to_ascii_lowercase();
++    lower.strip_prefix("wow").and_then(|s| s.strip_suffix(".exe"))
++        .is_some_and(|s| s.bytes().all(|b| b.is_ascii_alphabetic()))
++}
++fn u16_at(bytes: &[u8], at: usize) -> Option<u16> {
++    Some(u16::from_le_bytes(bytes.get(at..at.checked_add(2)?)?.try_into().ok()?))
++}
++fn u32_at(bytes: &[u8], at: usize) -> Option<u32> {
++    Some(u32::from_le_bytes(bytes.get(at..at.checked_add(4)?)?.try_into().ok()?))
++}
++fn version_resource(bytes: &[u8], resource_rva: u32) -> Option<u32> {
++    let mut directory = 0;
++    for depth in 0..3 {
++        let count = u16_at(bytes, directory + 12)? as usize + u16_at(bytes, directory + 14)? as usize;
++        let mut child = None;
++        for i in 0..count {
++            let entry = directory.checked_add(16 + i * 8)?;
++            let id = u32_at(bytes, entry)?;
++            if depth != 0 || id == 16 { child = Some(u32_at(bytes, entry + 4)?); break; }
++        }
++        let child = child?;
++        if depth < 2 && child & 0x80000000 == 0 { return None; }
++        directory = (child & 0x7fffffff) as usize;
++    }
++    let data = u32_at(bytes, directory)?.checked_sub(resource_rva)? as usize;
++    let size = u32_at(bytes, directory + 4)? as usize;
++    let data = bytes.get(data..data.checked_add(size)?)?;
++    // VS_VERSION_INFO's UTF-16 key precedes an aligned VS_FIXEDFILEINFO.
++    let key = b"V\0S\0_\0V\0E\0R\0S\0I\0O\0N\0_\0I\0N\0F\0O\0\0\0";
++    if data.get(6..6 + key.len())? != key { return None; }
++    let at = (6 + key.len() + 3) & !3;
++    if u32_at(data, at)? != 0xfeef04bd { return None; }
++    let ms = u32_at(data, at + 8)?;
++    let ls = u32_at(data, at + 12)?;
++    interface_from_version(ms >> 16, ms & 0xffff, ls >> 16)
++}
++pub fn client_interface(path: &Path) -> Option<u32> {
++    use std::io::{Read, Seek, SeekFrom};
++    let mut file = std::fs::File::open(path).ok()?;
++    let mut dos = [0; 64]; file.read_exact(&mut dos).ok()?;
++    if &dos[..2] != b"MZ" { return None; }
++    file.seek(SeekFrom::Start(u32_at(&dos, 60)? as u64)).ok()?;
++    let mut coff = [0; 24]; file.read_exact(&mut coff).ok()?;
++    if &coff[..4] != b"PE\0\0" { return None; }
++    let sections = u16_at(&coff, 6)? as usize;
++    let optional_size = u16_at(&coff, 20)? as usize;
++    if sections > 96 || optional_size > 4096 { return None; }
++    let mut optional = vec![0; optional_size]; file.read_exact(&mut optional).ok()?;
++    let dd = match u16_at(&optional, 0)? { 0x20b => 112, 0x10b => 96, _ => return None };
++    let rva = u32_at(&optional, dd + 16)?;
++    let size = u32_at(&optional, dd + 20)? as usize;
++    if rva == 0 || !(16..=2 * 1024 * 1024).contains(&size) { return None; }
++    for _ in 0..sections {
++        let mut section = [0; 40]; file.read_exact(&mut section).ok()?;
++        let start = u32_at(&section, 12)?;
++        let raw_size = u32_at(&section, 16)?;
++        if rva >= start && rva - start < raw_size && size <= (raw_size - (rva - start)) as usize {
++            let offset = u32_at(&section, 20)? as u64 + (rva - start) as u64;
++            file.seek(SeekFrom::Start(offset)).ok()?;
++            let mut bytes = vec![0; size]; file.read_exact(&mut bytes).ok()?;
++            return version_resource(&bytes, rva);
++        }
++    }
++    None
++}
++
++#[cfg(test)]
++pub fn fixture_pe(major: u32, minor: u32, patch: u32) -> Vec<u8> {
++    fn p16(b: &mut [u8], at: usize, n: u16) { b[at..at + 2].copy_from_slice(&n.to_le_bytes()); }
++    fn p32(b: &mut [u8], at: usize, n: u32) { b[at..at + 4].copy_from_slice(&n.to_le_bytes()); }
++    let mut bytes = vec![0; 0x600];
++    bytes[..2].copy_from_slice(b"MZ"); p32(&mut bytes, 60, 0x80);
++    bytes[0x80..0x84].copy_from_slice(b"PE\0\0");
++    p16(&mut bytes, 0x86, 1); p16(&mut bytes, 0x94, 240);
++    p16(&mut bytes, 0x98, 0x20b);
++    p32(&mut bytes, 0x98 + 128, 0x1000); p32(&mut bytes, 0x98 + 132, 0x200);
++    p32(&mut bytes, 0x188 + 12, 0x1000); p32(&mut bytes, 0x188 + 16, 0x200);
++    p32(&mut bytes, 0x188 + 20, 0x400);
++    let r = &mut bytes[0x400..];
++    p16(r, 14, 1); p32(r, 16, 16); p32(r, 20, 0x80000018);
++    p16(r, 0x18 + 14, 1); p32(r, 0x18 + 16, 1); p32(r, 0x18 + 20, 0x80000030);
++    p16(r, 0x30 + 14, 1); p32(r, 0x30 + 16, 0x409); p32(r, 0x30 + 20, 0x48);
++    p32(r, 0x48, 0x1060); p32(r, 0x4c, 92);
++    let v = &mut r[0x60..];
++    p16(v, 0, 92); p16(v, 2, 52);
++    v[6..38].copy_from_slice(b"V\0S\0_\0V\0E\0R\0S\0I\0O\0N\0_\0I\0N\0F\0O\0\0\0");
++    p32(v, 40, 0xfeef04bd); p32(v, 48, (major << 16) | minor);
++    p32(v, 52, patch << 16);
++    bytes
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn version_resource_reads_fileversion_not_transient_build_info() {
++        let path = std::env::temp_dir().join(format!("af-version-{}.exe", std::process::id()));
++        for (major, minor, patch, interface) in [(12, 1, 5, 120105), (5, 5, 4, 50504),
++            (2, 5, 6, 20506), (1, 15, 9, 11509), (1, 60, 1, 16001)] {
++            let bytes = fixture_pe(major, minor, patch);
++            std::fs::write(&path, &bytes).unwrap();
++            assert_eq!(client_interface(&path), Some(interface));
++            std::fs::write(&path, &bytes[..0x450]).unwrap();
++            assert_eq!(client_interface(&path), None);
++        }
++        std::fs::remove_file(path).unwrap();
++    }
++    #[test]
++    fn products_and_client_interfaces_select_flavour() {
++        for (product, interface, expected) in [
++            ("wow", 120105, Flavor::Retail), ("wowt", 120200, Flavor::Retail),
++            ("wowxptr", 120200, Flavor::Retail), ("wow_beta", 130000, Flavor::Retail),
++            ("wow_classic", 50504, Flavor::Mists), ("wow_classic_ptr", 50504, Flavor::Mists),
++            ("wow_classic_beta", 16001, Flavor::Forever), ("wowf", 16001, Flavor::Forever),
++            ("wow_classic_era", 11509, Flavor::Classic), ("wow_classic_era_ptr", 11509, Flavor::Classic),
++            ("wow_anniversary", 20506, Flavor::Bc), ("wowe1", 11509, Flavor::Classic),
++            ("wow_classic", 40402, Flavor::Cata), ("wow_classic", 30403, Flavor::Wrath),
++            ("wow", 0, Flavor::Retail), ("wow_classic", 0, Flavor::Mists),
++        ] {
++            assert_eq!(for_product(product, interface), Some(expected), "{product}");
++        }
++        assert_eq!(for_product("wow_unannounced", 120105), None);
++        assert_eq!(for_product("wowe1", 0), None);
++        assert_eq!(for_product("wow_classic", 60000), None);
++        assert_eq!(for_product("wow_classic_era", 120105), None);
++        assert_eq!(for_product("wowf", 120105), None);
++        assert_eq!(for_product("wow", 16001), None);
++        assert_eq!(Flavor::Mists.wago(), "mop");
++        assert_eq!(Flavor::Wrath.wago(), "wotlk");
++        assert!(Flavor::Retail.accepts_interface(120105));
++        assert!(!Flavor::Retail.accepts_interface(16001));
++        assert!(Flavor::Classic.accepts_patch("1.15.9"));
++        assert!(!Flavor::Classic.accepts_patch("1.60.1"));
++        assert_eq!(interface_from_version(12, 1, 5), Some(120105));
++        assert_eq!(interface_from_version(5, 5, 4), Some(50504));
++    }
++}
+--- a/src-tauri/src/wow.rs
++++ b/src-tauri/src/wow.rs
+@@ -9,8 +9,6 @@
+ /// Interface numbers that mean "WoW: Forever" (1.60.x -> 160xx).
+ pub const FOREVER_INTERFACE_RANGE: std::ops::RangeInclusive<u32> = 16000..=16999;
+ 
+-/// TOC suffixes the game (and Wago's data endpoint) recognise for Forever.
+-pub const FOREVER_TOC_SUFFIXES: &[&str] = &["_Forever", "-Forever", "_Camelot", "-Camelot"];
+ 
+ #[derive(Serialize, Clone, Debug)]
+ pub struct WowInstall {
+@@ -18,23 +16,25 @@
+     pub path: String,
+     /// Product code from `.flavor.info`, e.g. `wow_classic_beta`.
+     pub product: String,
+-    /// Our flavour id: `forever` or `other`.
++    /// Source capability id; unknown products remain discoverable as `other`.
+     pub flavor: String,
+     /// Human label.
+     pub label: String,
+-}
+-
+-/// Map Blizzard product codes to the flavour we support.
++    pub interface: u32,
++}
++
++/// Product-only fallback when the executable has no readable version resource.
+ pub fn product_flavor(product: &str) -> (&'static str, String) {
+-    match product {
+-        "wow_classic_beta" => ("forever", "WoW: Forever (beta)".into()),
+-        "wowf" => ("forever", "WoW: Forever".into()),
+-        "wow" => ("other", "Retail".into()),
+-        "wow_classic_era" => ("other", "Classic Era".into()),
+-        "wow_anniversary" => ("other", "Anniversary".into()),
+-        "wow_classic" => ("other", "Classic (progression)".into()),
+-        other => ("other", other.to_string()),
+-    }
++    let flavor = crate::flavor::for_product(product, 0).map(|f| f.id()).unwrap_or("other");
++    let label = match product {
++        "wow" => "WoW Retail", "wowt" => "WoW PTR", "wowxptr" => "WoW xPTR",
++        "wow_beta" => "WoW Beta", "wowf" => "WoW Forever",
++        "wow_classic" => "WoW Classic", "wow_classic_beta" => "WoW Classic Beta",
++        "wow_classic_ptr" => "WoW Classic PTR", "wow_classic_era" => "WoW Classic Era",
++        "wow_classic_era_ptr" => "WoW Classic Era PTR", "wow_classic_era_beta" => "WoW Classic Era Beta",
++        "wow_anniversary" => "WoW Anniversary", other => other,
++    };
++    (flavor, label.to_string())
+ }
+ 
+ fn read_flavor_info(product_dir: &Path) -> Option<String> {
+@@ -44,6 +44,26 @@
+         .nth(1)
+         .map(|s| s.trim().to_string())
+         .filter(|s| !s.is_empty())
++}
++
++fn build_product(product_dir: &Path) -> Option<String> {
++    let folder = product_dir.file_name()?.to_str()?.trim_matches('_');
++    let expected = match folder {
++        "retail" => "wow".to_string(), "ptr" => "wowt".to_string(),
++        "xptr" => "wowxptr".to_string(), "forever" => "wowf".to_string(),
++        _ => format!("wow_{folder}"),
++    };
++    let text = fs::read_to_string(product_dir.parent()?.join(".build.info")).ok()?;
++    let mut rows = text.lines();
++    let header: Vec<_> = rows.next()?.split('|').collect();
++    let product = header.iter().position(|s| s.starts_with("Product!"))?;
++    let branch = header.iter().position(|s| s.starts_with("Branch!"));
++    rows.find_map(|row| {
++        let fields: Vec<_> = row.split('|').collect();
++        let value = *fields.get(product)?;
++        (value == expected || branch.and_then(|i| fields.get(i)).is_some_and(|s| *s == folder))
++            .then(|| value.to_string())
++    })
+ }
+ 
+ #[cfg(any(feature = "gui", test))]
+@@ -67,29 +87,27 @@
+ 
+ /// Describe a product folder the user picked or we discovered.
+ pub fn describe_install(product_dir: &Path) -> Option<WowInstall> {
+-    if !product_dir.join("Interface").join("AddOns").is_dir()
+-        && !product_dir.join("Interface").is_dir()
+-        && !product_dir.join("WTF").is_dir()
+-    {
+-        // Not a WoW product folder at all.
+-        if read_flavor_info(product_dir).is_none() {
+-            return None;
+-        }
+-    }
+-    let product = read_flavor_info(product_dir).unwrap_or_else(|| {
+-        // Fall back to the folder name, e.g. "_classic_beta_" -> "classic_beta".
+-        let name = product_dir
+-            .file_name()
+-            .map(|s| s.to_string_lossy().trim_matches('_').to_string())
+-            .unwrap_or_default();
+-        format!("wow_{name}")
+-    });
+-    let (flavor, label) = product_flavor(&product);
++    let folder = product_dir.file_name()?.to_str()?;
++    if !folder.starts_with('_') || !folder.ends_with('_') ||
++        !product_dir.parent()?.file_name()?.to_str()?.eq_ignore_ascii_case("World of Warcraft") {
++        return None;
++    }
++    let executable = fs::read_dir(product_dir).ok()?.flatten()
++        .map(|e| e.path()).filter(|p| p.is_file() &&
++            p.file_name().and_then(|n| n.to_str()).is_some_and(crate::flavor::executable_name)).min();
++    let product = read_flavor_info(product_dir);
++    if executable.is_none() && product.is_none() { return None; }
++    let product = product.or_else(|| build_product(product_dir)).unwrap_or_default();
++    let interface = executable.as_deref().and_then(crate::flavor::client_interface).unwrap_or(0);
++    let (_, mut label) = product_flavor(&product);
++    let flavor = crate::flavor::for_product(&product, interface).map(|f| f.id()).unwrap_or("other");
++    if flavor == "other" { label = folder.to_string(); }
+     Some(WowInstall {
+         path: product_dir.to_string_lossy().to_string(),
+         product,
+         flavor: flavor.to_string(),
+         label,
++        interface,
+     })
+ }
+ 
+@@ -254,7 +272,7 @@
+                     into.notes = Some(clean_title(val));
+                 }
+             }
+-            "interface" => {
++            key if key == "interface" || key.starts_with("interface-") => {
+                 for n in val.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
+                     if !into.interfaces.contains(&n) {
+                         into.interfaces.push(n);
+@@ -302,8 +320,43 @@
+     true
+ }
+ 
++/// The game chooses a matching flavour TOC before the generic TOC. Never
++/// merge metadata from other clients into its version or source identity.
++fn read_addon(directory: &Path, folder: &str, flavor: crate::flavor::Flavor) -> Option<AddonFolder> {
++    let mut selected: Option<(u8, String, AddonFolder)> = None;
++    for entry in fs::read_dir(directory).ok()?.flatten() {
++        let filename = entry.file_name().to_string_lossy().into_owned();
++        let Some((stem, extension)) = filename.rsplit_once('.') else { continue };
++        if !extension.eq_ignore_ascii_case("toc") { continue; }
++        let rank = if stem.eq_ignore_ascii_case(folder) { 1 } else {
++            if !stem.get(..folder.len()).is_some_and(|s| s.eq_ignore_ascii_case(folder)) { continue; }
++            let suffix = &stem[folder.len()..];
++            let Some(suffix) = suffix.strip_prefix('_').or_else(|| suffix.strip_prefix('-')) else { continue };
++            if !flavor.accepts_toc_suffix(&suffix.to_ascii_lowercase()) { continue; }
++            2
++        };
++        if selected.as_ref().is_some_and(|(previous, name, _)|
++            rank < *previous || (rank == *previous && filename >= *name)) { continue; }
++        let mut addon = AddonFolder { folder: folder.to_string(), ..Default::default() };
++        if parse_toc(&entry.path(), &mut addon) { selected = Some((rank, filename, addon)); }
++    }
++    selected.map(|(rank, _, mut addon)| {
++        if addon.title.is_empty() { addon.title = folder.to_string(); }
++        addon.forever_toc = rank == 2 && flavor == crate::flavor::Flavor::Forever;
++        addon.forever_interface = addon.interfaces.iter().any(|n| FOREVER_INTERFACE_RANGE.contains(n));
++        addon
++    })
++}
++
++/// Validate the selected client's TOC before replacing an installed folder.
++pub fn addon_supports(directory: &Path, flavor: crate::flavor::Flavor) -> bool {
++    directory.file_name().and_then(|n| n.to_str())
++        .and_then(|name| read_addon(directory, name, flavor))
++        .is_some_and(|addon| addon.interfaces.iter().any(|n| flavor.accepts_interface(*n)))
++}
++
+ /// Scan `<install>\Interface\AddOns` and parse each folder's TOC.
+-pub fn scan_addons(install: &Path) -> Vec<AddonFolder> {
++pub fn scan_addons(install: &Path, flavor: crate::flavor::Flavor) -> Vec<AddonFolder> {
+     let addons = install.join("Interface").join("AddOns");
+     let Ok(rd) = fs::read_dir(&addons) else {
+         return Vec::new();
+@@ -318,49 +371,7 @@
+         if name.starts_with('.') || name.starts_with("Blizzard_") {
+             continue;
+         }
+-        let mut af = AddonFolder {
+-            folder: name.clone(),
+-            ..Default::default()
+-        };
+-        // Forever-specific TOC first so its Interface/Version win.
+-        for suf in FOREVER_TOC_SUFFIXES {
+-            let candidate = p.join(format!("{name}{suf}.toc"));
+-            if candidate.is_file() {
+-                af.forever_toc = true;
+-                parse_toc(&candidate, &mut af);
+-            }
+-        }
+-        let generic = p.join(format!("{name}.toc"));
+-        let mut any = af.forever_toc;
+-        if generic.is_file() {
+-            any |= parse_toc(&generic, &mut af);
+-        }
+-        if !any {
+-            // Case-insensitive fallback: any *.toc in the folder.
+-            if let Ok(inner) = fs::read_dir(&p) {
+-                for f in inner.flatten() {
+-                    let fname = f.file_name().to_string_lossy().to_string();
+-                    if fname.to_ascii_lowercase().ends_with(".toc") {
+-                        any |= parse_toc(&f.path(), &mut af);
+-                        let stem = fname.trim_end_matches(".toc").trim_end_matches(".TOC");
+-                        if FOREVER_TOC_SUFFIXES.iter().any(|s| stem.ends_with(s)) {
+-                            af.forever_toc = true;
+-                        }
+-                    }
+-                }
+-            }
+-        }
+-        if !any {
+-            continue; // not an addon folder
+-        }
+-        if af.title.is_empty() {
+-            af.title = name.clone();
+-        }
+-        af.forever_interface = af
+-            .interfaces
+-            .iter()
+-            .any(|n| FOREVER_INTERFACE_RANGE.contains(n));
+-        out.push(af);
++        if let Some(addon) = read_addon(&p, &name, flavor) { out.push(addon); }
+     }
+     out.sort_by(|a, b| {
+         a.folder
+@@ -372,6 +383,26 @@
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn product_metadata_survives_unrelated_build_rows_and_unknowns_do_not_alias() {
++        let root = std::env::temp_dir().join(format!("af-metadata-{}", std::process::id()));
++        let world = root.join("Custom/World of Warcraft");
++        for (folder, product) in [("_retail_", "wow"), ("_classic_era_", "wow_classic_era"), ("_new_", "wow_future")] {
++            let directory = world.join(folder);
++            fs::create_dir_all(&directory).unwrap();
++            fs::write(directory.join("wOw.ExE"), crate::flavor::fixture_pe(12, 1, 5)).unwrap();
++            fs::write(directory.join(".flavor.info"), format!("Product Flavor!STRING:0\n{product}\n")).unwrap();
++        }
++        fs::write(world.join(".build.info"), "Branch!STRING:0|Product!STRING:0\nretail|wow\n").unwrap();
++        let unknown = describe_install(&world.join("_new_")).unwrap();
++        assert_eq!(unknown.product, "wow_future"); assert_eq!(unknown.flavor, "other"); assert_eq!(unknown.label, "_new_");
++        assert_eq!(describe_install(&world.join("_classic_era_")).unwrap().product, "wow_classic_era");
++        fs::remove_file(world.join("_retail_/.flavor.info")).unwrap();
++        assert_eq!(describe_install(&world.join("_retail_")).unwrap().product, "wow");
++        fs::remove_file(world.join(".build.info")).unwrap();
++        assert_eq!(find_installs_in_roots(&[world]).len(), 3);
++        fs::remove_dir_all(root).unwrap();
++    }
+     use super::*;
+ 
+     #[test]
+@@ -417,7 +448,7 @@
+                 .iter()
+                 .find(|install| install.product == "wowf")
+                 .map(|install| install.label.as_str()),
+-            Some("WoW: Forever")
++            Some("WoW Forever")
+         );
+         let _ = std::fs::remove_dir_all(root);
+     }
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,6 +1,7 @@
+ //! AddonForge core: Tauri commands the UI calls over IPC.
+ 
+ mod catalog;
++mod flavor;
+ #[cfg(feature = "gui")]
+ mod icons;
+ mod install;
+@@ -472,28 +473,28 @@
+     if matches!(src, Source::Wago(_)) && !st.has_wago_key() {
+         return;
+     }
+-    let (hint, vouched) = entry_hint(cat, pkg);
++    let (hint, _) = entry_hint(cat, pkg);
++    let flavor = match current_flavor(app).await {
++        Ok(flavor) => flavor,
++        Err(error) => { pkg.status = "error".into(); pkg.note = error; return; }
++    };
+     let opts = ResolveOpts {
+         asset_hint: hint.as_deref(),
+         wago_key: st.wago_key.as_deref(),
+         prerelease: st.allow_prerelease,
++        flavor,
+     };
+     match sources::resolve(&app.client, &src, opts).await {
+-        Ok(mut r) => {
+-            // Some authors list 16001 in the TOC but never added "forever" to
+-            // release.json. If the catalogue vouches for it, don't scare people.
+-            if r.forever == Some(false) && vouched == Some(true) {
+-                r.forever = None;
+-            }
++        Ok(r) => {
+             let same = pkg
+                 .installed_version
+                 .as_deref()
+                 .map(|v| normalize_version(v) == normalize_version(&r.version))
+                 .unwrap_or(false);
+-            pkg.update_available = !same;
+-            pkg.status = if same { "ok".into() } else { "update".into() };
++            pkg.update_available = !same && r.forever != Some(false);
++            pkg.status = if r.forever == Some(false) { "error".into() } else if same { "ok".into() } else { "update".into() };
+             pkg.note = match r.forever {
+-                Some(false) => "Latest release does not list a Forever build".into(),
++                Some(false) => "Latest release does not support this WoW flavour".into(),
+                 _ => String::new(),
+             };
+             pkg.remote_forever = r.forever;
+@@ -617,8 +618,11 @@
+     let p = PathBuf::from(path.trim());
+     let info = wow::describe_install(&p)
+         .ok_or_else(|| "That folder doesn't look like a WoW product folder (expected e.g. ...\\_classic_beta_ with Interface\\AddOns inside)".to_string())?;
++    if flavor::for_product(&info.product, info.interface).is_none() {
++        return Err(flavor::UNSUPPORTED.into());
++    }
+     let mut st = app.state.lock().await;
+-    st.install_path = Some(info.path.clone());
++    st.select_install(info.path.clone());
+     st.save().map_err(err)?;
+     logi!("install set to {}", info.path);
+     Ok(info)
+@@ -683,7 +687,7 @@
+         // The collection URL redirects to a public homepage, even with a bad key.
+         // A read-only addon metadata request actually requires authentication.
+         check_wago_key_at(&app.client, key,
+-            "https://addons.wago.io/api/external/addons/7x61oyG1?game_version=forever").await
++            "https://addons.wago.io/api/external/addons/7x61oyG1").await
+     };
+     store_wago_key(app, key, valid).await
+ }
+@@ -737,10 +741,18 @@
+         .ok_or_else(|| "No WoW install selected yet".to_string())
+ }
+ 
++async fn current_flavor(app: &App) -> Result<flavor::Flavor, String> {
++    let path = current_install(app).await?;
++    let info = wow::describe_install(Path::new(&path)).ok_or(flavor::UNSUPPORTED)?;
++    flavor::for_product(&info.product, info.interface).ok_or_else(|| flavor::UNSUPPORTED.into())
++}
++
+ async fn scan_packages(app: &App) -> Result<Vec<Package>, String> {
+     let install = current_install(app).await?;
+     let cat = catalog_cached(app).await;
+-    let folders = tokio::task::spawn_blocking(move || wow::scan_addons(Path::new(&install)))
++    let selected = current_flavor(app).await?;
++    let cat = if cat.flavor == selected.id() { cat } else { Catalog::default() };
++    let folders = tokio::task::spawn_blocking(move || wow::scan_addons(Path::new(&install), selected))
+         .await
+         .map_err(err)?;
+     let st = app.state.lock().await.clone();
+@@ -813,7 +825,8 @@
+     let install = current_install(app).await?;
+     let addons = addons_dir(&install);
+     let zip = zip_path.to_path_buf();
+-    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons))
++    let flavor = current_flavor(app).await?;
++    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons, flavor))
+         .await
+         .map_err(err)?
+         .map_err(err)?;
+@@ -825,32 +838,25 @@
+     key: &str,
+     src: &Source,
+     asset_hint: Option<&str>,
+-    allow_non_forever: bool,
++    _allow_non_forever: bool,
+ ) -> Result<Installed, String> {
+     let install = current_install(app).await?;
++    let flavor = current_flavor(app).await?;
+     let addons = addons_dir(&install);
+     let st = app.state.lock().await.clone();
+     let opts = ResolveOpts {
+         asset_hint,
+         wago_key: st.wago_key.as_deref(),
+         prerelease: st.allow_prerelease,
++        flavor,
+     };
+     let resolve_started = std::time::Instant::now();
+     let remote = sources::resolve(&app.client, src, opts)
+         .await
+         .map_err(err)?;
+     let resolve_tls_ms = resolve_started.elapsed().as_millis();
+-    let vouched = match key.strip_prefix("cat:") {
+-        Some(id) => catalog_cached(app)
+-            .await
+-            .addons
+-            .iter()
+-            .find(|e| e.id == id)
+-            .and_then(|e| e.forever),
+-        None => None,
+-    };
+-    if remote.forever == Some(false) && !allow_non_forever && vouched != Some(true) {
+-        return Err("NOT_FOREVER".into());
++    if remote.forever == Some(false) {
++        return Err("This release does not support the selected WoW flavour".into());
+     }
+     logi!(
+         "install {key} from {} {} -> {}",
+@@ -868,7 +874,7 @@
+         })?;
+     let download_ms = download_started.elapsed().as_millis();
+     let addons2 = addons.clone();
+-    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons2))
++    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons2, flavor))
+         .await
+         .map_err(err)?
+         .map_err(|e| {
+@@ -951,6 +957,10 @@
+         *app.stats.lock().await = None;
+     }
+     let cat = catalog_cached(app).await;
++    let selected = current_flavor(app).await?;
++    if cat.flavor != selected.id() {
++        return Ok(Vec::new());
++    }
+     let stats = stats_cached(app).await;
+     let installed_keys: Vec<String> = match scan_packages(app).await {
+         Ok(p) => p.into_iter().map(|p| p.key).collect(),
+@@ -1012,6 +1022,10 @@
+ 
+ async fn bundles_impl(app: &App) -> Result<Vec<BundleView>, String> {
+     let cat = catalog_cached(app).await;
++    let selected = current_flavor(app).await?;
++    if cat.flavor != selected.id() {
++        return Ok(Vec::new());
++    }
+     let has_wago = app.state.lock().await.has_wago_key();
+     let installed_keys: Vec<String> = match scan_packages(app).await {
+         Ok(p) => p.into_iter().map(|p| p.key).collect(),
+@@ -1141,6 +1155,9 @@
+     allow_non_forever: Option<bool>,
+ ) -> Result<Package, String> {
+     let cat = catalog_cached(app).await;
++    if cat.flavor != current_flavor(app).await?.id() {
++        return Err("No catalogue data for this WoW flavour".into());
++    }
+     let e = cat
+         .addons
+         .iter()
+@@ -1634,6 +1651,13 @@
+     Ok(installed)
+ }
+ 
++async fn catalog_view(app: &App, rows: Value, unavailable_notice: &str) -> Result<Value, String> {
++    let selected = current_flavor(app).await?;
++    let catalogue = app.catalog.lock().await;
++    let available = catalogue.as_ref().is_some_and(|(catalogue, _)| catalogue.flavor == selected.id());
++    Ok(serde_json::json!({"rows": rows, "notice": if available { "" } else { unavailable_notice }}))
++}
++
+ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Value, String> {
+     let _operation = app.mutation.lock().await;
+     if app.shutting_down.load(Ordering::Acquire) {
+@@ -1659,9 +1683,13 @@
+         "update_all" => serde_json::to_value(update_all_impl(app.clone()).await?).map_err(err),
+         "catalog_list" => {
+             let refresh = args.get("refresh").and_then(Value::as_bool);
+-            serde_json::to_value(catalog_list_impl(&app, refresh).await?).map_err(err)
+-        }
+-        "bundles" => serde_json::to_value(bundles_impl(&app).await?).map_err(err),
++            let rows = serde_json::to_value(catalog_list_impl(&app, refresh).await?).map_err(err)?;
++            catalog_view(&app, rows, "No catalogue data for this WoW flavour. Use Install from GitHub in Find.").await
++        }
++        "bundles" => {
++            let rows = serde_json::to_value(bundles_impl(&app).await?).map_err(err)?;
++            catalog_view(&app, rows, "No starter packs for this WoW flavour. Use Install from GitHub in Find.").await
++        }
+         "install_catalog" => {
+             let id = string_arg(args, "id")?;
+             let allow = args.get("allow_non_forever").and_then(Value::as_bool);
+@@ -2107,7 +2135,7 @@
+                 let p = args.get(1).ok_or("usage: use <product folder>")?;
+                 let info = wow::describe_install(Path::new(p)).ok_or("not a WoW product folder")?;
+                 let mut st = app.state.lock().await;
+-                st.install_path = Some(info.path.clone());
++                st.select_install(info.path.clone());
+                 st.save().map_err(err)?;
+                 Ok(serde_json::to_value(info).unwrap())
+             }
+@@ -2125,6 +2153,7 @@
+             "resolve" => {
+                 let cat = catalog_cached(&app).await;
+                 let st = app.state.lock().await.clone();
++                let flavor = current_flavor(&app).await?;
+                 let has_wago = st.has_wago_key();
+                 let want: Vec<&CatalogEntry> = if args.get(1).map(String::as_str) == Some("all") {
+                     cat.addons.iter().collect()
+@@ -2149,6 +2178,7 @@
+                                     asset_hint: e.asset_hint.as_deref(),
+                                     wago_key: st.wago_key.as_deref(),
+                                     prerelease: st.allow_prerelease,
++                                    flavor,
+                                 },
+                             )
+                             .await
+@@ -2330,6 +2360,159 @@
+     static STATE_ENV: Mutex<()> = Mutex::const_new(());
+ 
+     #[tokio::test]
++    async fn installed_packages_use_selected_flavour_toc_versions_and_source_ids() {
++        let _environment = STATE_ENV.lock().await;
++        let root = std::env::temp_dir().join(format!("af-selected-toc-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&root);
++        std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
++        let app = make_app();
++        *app.catalog.lock().await = Some((Catalog::default(), "test"));
++        *app.stats.lock().await = Some(Stats::default());
++        let clients = [
++            ("_retail_", "wow", 12, 1, 5, "Mainline"),
++            ("_classic_era_", "wow_classic_era", 1, 15, 9, "Classic"),
++            ("_era_vanilla_", "wow_classic_era", 1, 15, 9, "Vanilla"),
++            ("_anniversary_", "wow_anniversary", 2, 5, 6, "BCC"),
++            ("_anniversary_tbc_", "wow_anniversary", 2, 5, 6, "TBC"),
++            ("_wrath_", "wow_classic", 3, 4, 3, "Wrath"),
++            ("_wrath_wotlkc_", "wow_classic", 3, 4, 3, "WOTLKC"),
++            ("_cata_", "wow_classic", 4, 4, 2, "Cata"),
++            ("_classic_", "wow_classic", 5, 5, 4, "Mists"),
++            ("_forever_", "wowf", 1, 60, 1, "Forever"),
++            ("_forever_camelot_", "wowf", 1, 60, 1, "Camelot"),
++        ];
++        for (folder, product, major, minor, patch, expected) in clients {
++            let channel = root.join("World of Warcraft").join(folder);
++            std::fs::create_dir_all(&channel).unwrap();
++            std::fs::write(channel.join(".flavor.info"), format!("Product Flavor!STRING:0\n{product}\n")).unwrap();
++            std::fs::write(channel.join("Wow.exe"), flavor::fixture_pe(major, minor, patch)).unwrap();
++            let selected = flavor::for_product(product, major * 10000 + minor * 100 + patch).unwrap();
++            for name in ["WagoFoo", "WowiFoo", "GitFoo"] {
++                let addon = channel.join("Interface/AddOns").join(name);
++                std::fs::create_dir_all(&addon).unwrap();
++                for (tag, interface, id) in [("Forever", 16001, 1), ("Camelot", 16001, 1),
++                    ("Mainline", 120105, 2), ("Classic", 11509, 3), ("Vanilla", 11509, 3),
++                    ("Mists", 50504, 4), ("BCC", 20506, 5), ("TBC", 20506, 5),
++                    ("Wrath", 30403, 6), ("WOTLKC", 30403, 6), ("Cata", 40402, 7), ("", 120105, 9)] {
++                    if !tag.is_empty() && tag != expected && selected.accepts_interface(interface) { continue; }
++                    let source = match name {
++                        "WagoFoo" => format!("## X-Wago-ID: wago-{id}\n"),
++                        "WowiFoo" => format!("## X-WoWI-ID: {id}\n"),
++                        _ => format!("## X-Website: https://github.com/flavour{}/addon\n", id),
++                    };
++                    let filename = if tag.is_empty() { format!("{name}.toc") } else { format!("{name}_{tag}.toc") };
++                    std::fs::write(addon.join(filename), format!(
++                        "## Interface: {interface}\n## Version: {tag}\n{source}")).unwrap();
++                }
++                assert!(wow::addon_supports(&addon, selected));
++            }
++            set_install_path_impl(&app, channel.to_string_lossy().into()).await.unwrap();
++            let packages = scan_packages(&app).await.unwrap();
++            assert_eq!(packages.len(), 3);
++            let id = match expected {
++                "Forever" | "Camelot" => 1, "Mainline" => 2, "Classic" | "Vanilla" => 3,
++                "Mists" => 4, "BCC" | "TBC" => 5, "Wrath" | "WOTLKC" => 6, _ => 7,
++            };
++            for package in &packages {
++                assert_eq!(package.installed_version.as_deref(), Some(expected), "{folder}/{}", package.name);
++            }
++            assert_eq!(packages.iter().find(|p| p.name == "WagoFoo").unwrap().source, Some(Source::Wago(format!("wago-{id}"))));
++            assert_eq!(packages.iter().find(|p| p.name == "WowiFoo").unwrap().source, Some(Source::Wowi(id)));
++            assert_eq!(packages.iter().find(|p| p.name == "GitFoo").unwrap().source, Some(Source::Github(format!("flavour{id}/addon"))));
++            for name in ["WagoFoo", "WowiFoo", "GitFoo"] {
++                let addon = channel.join("Interface/AddOns").join(name);
++                for entry in std::fs::read_dir(&addon).unwrap().flatten() {
++                    std::fs::remove_file(entry.path()).unwrap();
++                }
++                let source = match name {
++                    "WagoFoo" => "## X-Wago-ID: wago-9\n",
++                    "WowiFoo" => "## X-WoWI-ID: 9\n",
++                    _ => "## X-Website: https://github.com/flavour9/addon\n",
++                };
++                std::fs::write(addon.join(format!("{name}.toc")), format!(
++                    "## Interface: {}\n## Version: Generic\n{source}", major * 10000 + minor * 100 + patch)).unwrap();
++            }
++            let generic = scan_packages(&app).await.unwrap();
++            assert!(generic.iter().all(|p| p.installed_version.as_deref() == Some("Generic")));
++            assert_eq!(generic.iter().find(|p| p.name == "WagoFoo").unwrap().source, Some(Source::Wago("wago-9".into())));
++        }
++        std::fs::remove_dir_all(root).unwrap();
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++    }
++
++    #[tokio::test]
++    async fn channel_installs_updates_removals_and_catalogues_are_isolated() {
++        use std::io::Write;
++        let _environment = STATE_ENV.lock().await;
++        let root = std::env::temp_dir().join(format!("af-channels-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&root);
++        std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
++        let app = make_app();
++        *app.catalog.lock().await = Some((serde_json::from_str(
++            r#"{"flavor":"forever","addons":[{"id":"fixture","name":"Fixture","github":"local/fixture","folders":["Fixture"],"forever":true}]}"#).unwrap(), "test"));
++        *app.stats.lock().await = Some(Stats::default());
++        let channels = [
++            ("_retail_", "wow", 12, 1, 5), ("_classic_era_", "wow_classic_era", 1, 15, 9),
++            ("_anniversary_", "wow_anniversary", 2, 5, 6), ("_classic_", "wow_classic", 5, 5, 4),
++            ("_forever_", "wowf", 1, 60, 1), ("_classic_beta_", "wow_classic_beta", 1, 60, 1),
++        ];
++        for (folder, product, major, minor, patch) in channels {
++            let channel = root.join("World of Warcraft").join(folder);
++            std::fs::create_dir_all(&channel).unwrap();
++            std::fs::write(channel.join(".flavor.info"), format!("Product Flavor!STRING:0\n{product}\n")).unwrap();
++            std::fs::write(channel.join("Wow.exe"), flavor::fixture_pe(major, minor, patch)).unwrap();
++            let info = set_install_path_impl(&app, channel.to_string_lossy().into()).await.unwrap();
++            assert_eq!(info.interface, major * 10000 + minor * 100 + patch);
++            assert!(scan_packages(&app).await.unwrap().is_empty());
++            for version in ["1", "2"] {
++                let zip = root.join(format!("{folder}-{version}.zip"));
++                let mut archive = zip::ZipWriter::new(std::fs::File::create(&zip).unwrap());
++                archive.start_file("Fixture/Fixture.toc", zip::write::SimpleFileOptions::default()).unwrap();
++                write!(archive, "## Interface: {}\n## Version: {version}\n", info.interface).unwrap();
++                archive.finish().unwrap();
++                install_local_archive(&app, "github:local/fixture", &Source::Github("local/fixture".into()), version, &zip).await.unwrap();
++                assert_eq!(scan_packages(&app).await.unwrap()[0].installed_version.as_deref(), Some(version));
++            }
++            if info.flavor == "forever" {
++                assert_eq!(catalog_list_impl(&app, None).await.unwrap().len(), 1);
++            } else {
++                assert!(catalog_list_impl(&app, None).await.unwrap().is_empty());
++                assert!(bundles_impl(&app).await.unwrap().is_empty());
++                let find = dispatch_headless(app.clone(), HeadlessRequest {
++                    command: "catalog_list".into(), args: serde_json::json!({"refresh": false}),
++                }).await.unwrap();
++                assert_eq!(find["rows"], serde_json::json!([]));
++                assert!(find["notice"].as_str().unwrap().contains("No catalogue data"));
++                let packs = dispatch_headless(app.clone(), HeadlessRequest {
++                    command: "bundles".into(), args: serde_json::json!({}),
++                }).await.unwrap();
++                assert_eq!(packs["rows"], serde_json::json!([]));
++                assert!(packs["notice"].as_str().unwrap().contains("No starter packs"));
++                assert!(install_catalog_impl(&app, "fixture".into(), None).await.err().unwrap().contains("No catalogue data"));
++            }
++        }
++        let retail = root.join("World of Warcraft/_retail_");
++        set_install_path_impl(&app, retail.to_string_lossy().into()).await.unwrap();
++        assert_eq!(scan_packages(&app).await.unwrap()[0].installed_version.as_deref(), Some("2"));
++        remove_package_impl(&app, "github:local/fixture".into()).await.unwrap();
++        assert!(!retail.join("Interface/AddOns/Fixture").exists());
++        for (folder, _, _, _, _) in &channels[1..] {
++            assert!(root.join("World of Warcraft").join(folder).join("Interface/AddOns/Fixture/Fixture.toc").is_file());
++        }
++        let unknown = root.join("World of Warcraft/_newthing_");
++        std::fs::create_dir_all(&unknown).unwrap();
++        std::fs::write(unknown.join(".flavor.info"), "Product Flavor!STRING:0\nwow_unknown\n").unwrap();
++        std::fs::write(unknown.join("Wow.exe"), flavor::fixture_pe(12, 1, 5)).unwrap();
++        assert_eq!(set_install_path_impl(&app, unknown.to_string_lossy().into()).await.unwrap_err(), flavor::UNSUPPORTED);
++        // Even a persisted unsupported selection cannot reach source resolution.
++        app.state.lock().await.select_install(unknown.to_string_lossy().into());
++        assert_eq!(install_from(&app, "github:x/y", &Source::Github("x/y".into()), None, true).await.unwrap_err(), flavor::UNSUPPORTED);
++        assert!(!unknown.join("Interface").exists());
++        std::fs::remove_dir_all(root).unwrap();
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++    }
++
++    #[tokio::test]
+     async fn wago_key_set_clear_status_and_redaction() {
+         let _environment = STATE_ENV.lock().await;
+         let directory = std::env::temp_dir().join(format!("addonforge-wago-{}", std::process::id()));
+@@ -2636,6 +2819,7 @@
+     fn shutdown_waits_for_the_active_mutation_boundary() {
+         let runtime = tokio::runtime::Runtime::new().unwrap();
+         runtime.block_on(async {
++            let _environment = STATE_ENV.lock().await;
+             let app = make_app();
+             let mutation = app.mutation.lock().await;
+             let request = HeadlessRequest {
+@@ -2657,6 +2841,7 @@
+     fn committed_shutdown_notifies_even_when_response_write_fails() {
+         let runtime = tokio::runtime::Runtime::new().unwrap();
+         runtime.block_on(async {
++            let _environment = STATE_ENV.lock().await;
+             let app = make_app();
+             let notified = app.shutdown.notified();
+             assert!(finish_headless_response(
+--- a/src-tauri/src/state.rs
++++ b/src-tauri/src/state.rs
+@@ -21,6 +21,13 @@
+ }
+ 
+ #[derive(Serialize, Deserialize, Clone, Debug, Default)]
++pub struct ChannelState {
++    pub installed: HashMap<String, Installed>,
++    pub pinned: BTreeSet<String>,
++    pub ignored: BTreeSet<String>,
++}
++
++#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+ pub struct AppState {
+     /// Product folder we manage, e.g. `C:\...\World of Warcraft\_classic_beta_`.
+     #[serde(default)]
+@@ -31,6 +38,8 @@
+     /// Packages we installed ourselves, keyed by package key.
+     #[serde(default)]
+     pub installed: HashMap<String, Installed>,
++    #[serde(default)]
++    pub channels: HashMap<String, ChannelState>,
+     /// Consider GitHub pre-releases and Wago beta builds when checking.
+     #[serde(default)]
+     pub allow_prerelease: bool,
+@@ -53,6 +62,23 @@
+ }
+ 
+ impl AppState {
++    pub fn select_install(&mut self, path: String) {
++        let key = path.replace('\\', "/").to_ascii_lowercase();
++        let previous = self.install_path.as_deref().map(|s| s.replace('\\', "/").to_ascii_lowercase());
++        if previous.as_deref() == Some(key.as_str()) { return; }
++        if let Some(previous) = previous {
++            self.channels.insert(previous, ChannelState {
++                installed: std::mem::take(&mut self.installed),
++                pinned: std::mem::take(&mut self.pinned),
++                ignored: std::mem::take(&mut self.ignored),
++            });
++        }
++        let channel = self.channels.remove(&key).unwrap_or_default();
++        self.installed = channel.installed;
++        self.pinned = channel.pinned;
++        self.ignored = channel.ignored;
++        self.install_path = Some(path);
++    }
+     /// `%APPDATA%\AddonForge`. `ADDONFORGE_STATE_DIR` overrides it so tests and
+     /// screenshots can use a throwaway profile without touching the real one.
+     pub fn dir() -> PathBuf {
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -312,7 +312,7 @@
+ 
+ /// Extract `zip_path` and move its addon folders into `addons_dir`,
+ /// replacing same-named folders and recording the two local phases.
+-pub fn place_timed(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<PlaceResult> {
++pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Flavor) -> anyhow::Result<PlaceResult> {
+     fs::create_dir_all(addons_dir)?;
+     let work = addons_dir.join(TMP_DIR).join(unique());
+     let extract_dir = work.join("x");
+@@ -328,6 +328,11 @@
+         let files = safety_scan(&extract_dir)?;
+         crate::logi!("zip ok: {} files, no executables", files);
+         let sources = addon_dirs(&extract_dir)?;
++        for source in &sources {
++            if !crate::wow::addon_supports(source, flavor) {
++                anyhow::bail!("Add-on TOCs do not support the selected {} client", flavor.id());
++            }
++        }
+         let zip_ms = zip_started.elapsed().as_millis();
+ 
+         let write_started = std::time::Instant::now();
+@@ -383,7 +388,7 @@
+ #[cfg(test)]
+ /// Extract and install an addon archive.
+ pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>> {
+-    place_timed(zip_path, addons_dir).map(|placed| placed.folders)
++    place_timed(zip_path, addons_dir, crate::flavor::Flavor::Forever).map(|placed| placed.folders)
+ }
+ 
+ /// Delete the given addon folders (used by "Remove").
+@@ -404,6 +409,23 @@
+ 
+ #[cfg(test)]
+ mod tests {
++    #[test]
++    fn wrong_flavour_archive_never_replaces_an_installed_folder() {
++        use std::io::Write;
++        let root = std::env::temp_dir().join(format!("af-flavour-{}", unique()));
++        let addons = root.join("AddOns");
++        fs::create_dir_all(addons.join("Fixture")).unwrap();
++        fs::write(addons.join("Fixture/keep"), b"user").unwrap();
++        let zip = root.join("wrong.zip");
++        let mut archive = zip::ZipWriter::new(fs::File::create(&zip).unwrap());
++        archive.start_file("Fixture/Fixture.toc", zip::write::SimpleFileOptions::default()).unwrap();
++        archive.write_all(b"## Interface: 16001\n").unwrap();
++        archive.finish().unwrap();
++        assert!(place_timed(&zip, &addons, crate::flavor::Flavor::Retail).unwrap_err().to_string().contains("TOCs"));
++        assert_eq!(fs::read(addons.join("Fixture/keep")).unwrap(), b"user");
++        assert!(!addons.join("Fixture/Fixture.toc").exists());
++        fs::remove_dir_all(root).unwrap();
++    }
+     use super::*;
+ 
+     /// ForeverSVFix puts a directory link inside addon folders that points at
+--- a/src-tauri/src/sources/mod.rs
++++ b/src-tauri/src/sources/mod.rs
+@@ -69,8 +69,8 @@
+     pub version: String,
+     pub download_url: String,
+     pub filename: String,
+-    /// Some(true) = source says this build supports Forever,
+-    /// Some(false) = it says it doesn't, None = the source can't tell us.
++    /// Compatibility with the selected client's flavour.
++    /// Some(false) = wrong flavour, None = archive TOCs must establish it.
+     pub forever: Option<bool>,
+     /// True when this came from a pre-release / beta channel.
+     pub prerelease: bool,
+@@ -82,6 +82,7 @@
+     pub asset_hint: Option<&'a str>,
+     pub wago_key: Option<&'a str>,
+     pub prerelease: bool,
++    pub flavor: crate::flavor::Flavor,
+ }
+ 
+ pub async fn resolve(
+@@ -90,10 +91,10 @@
+     opts: ResolveOpts<'_>,
+ ) -> anyhow::Result<Remote> {
+     match src {
+-        Source::Github(repo) => github::resolve(client, repo, opts.asset_hint, opts.prerelease).await,
+-        Source::Wago(id) => wago::resolve(client, id, opts.wago_key, opts.prerelease).await,
+-        Source::Wowi(id) => wowi::resolve(client, *id).await,
+-        Source::Tukui(slug) => tukui::resolve(client, slug).await,
++        Source::Github(repo) => github::resolve(client, repo, opts.asset_hint, opts.prerelease, opts.flavor).await,
++        Source::Wago(id) => wago::resolve(client, id, opts.wago_key, opts.prerelease, opts.flavor).await,
++        Source::Wowi(id) => wowi::resolve(client, *id, opts.flavor).await,
++        Source::Tukui(slug) => tukui::resolve(client, slug, opts.flavor).await,
+     }
+ }
+ 
+--- a/src-tauri/src/sources/github.rs
++++ b/src-tauri/src/sources/github.rs
+@@ -55,10 +55,8 @@
+     browser_download_url: String,
+ }
+ 
+-fn is_forever(m: &Meta) -> bool {
+-    m.flavor.eq_ignore_ascii_case("forever")
+-        || m.flavor.eq_ignore_ascii_case("camelot")
+-        || crate::wow::FOREVER_INTERFACE_RANGE.contains(&m.interface)
++fn matches_flavor(m: &Meta, flavor: crate::flavor::Flavor) -> bool {
++    flavor.accepts_metadata(&m.flavor.to_ascii_lowercase(), m.interface)
+ }
+ 
+ /// Pick from a release.json. `url_for` maps a filename to its download URL.
+@@ -66,16 +64,11 @@
+     rj: ReleaseJson,
+     url_for: impl Fn(&str) -> String,
+     prerelease: bool,
++    flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+-    let candidates: Vec<&ReleaseEntry> = rj.releases.iter().filter(|r| !r.nolib).collect();
+-    let forever = candidates.iter().find(|r| r.metadata.iter().any(is_forever));
+-    let (pick, is_forever_build): (&ReleaseEntry, bool) = match forever {
+-        Some(r) => (r, true),
+-        None => match candidates.first().copied().or(rj.releases.first()) {
+-            Some(r) => (r, false),
+-            None => anyhow::bail!("release.json lists no files"),
+-        },
+-    };
++    let pick = rj.releases.iter().filter(|r| !r.nolib)
++        .find(|r| r.metadata.iter().any(|m| matches_flavor(m, flavor)))
++        .ok_or_else(|| anyhow::anyhow!("release.json lists no {} build", flavor.id()))?;
+     let version = if pick.version.trim().is_empty() {
+         pick.filename.trim_end_matches(".zip").to_string()
+     } else {
+@@ -85,34 +78,33 @@
+         version,
+         download_url: url_for(&pick.filename),
+         filename: pick.filename.clone(),
+-        forever: Some(is_forever_build),
++        forever: Some(true),
+         prerelease,
+     })
+ }
+ 
+-fn pick_asset<'a>(zips: &'a [&'a ApiAsset], asset_hint: Option<&str>) -> &'a ApiAsset {
+-    let lower = |s: &str| s.to_ascii_lowercase();
+-    asset_hint
+-        .and_then(|h| zips.iter().find(|a| lower(&a.name).contains(&lower(h))))
+-        .or_else(|| {
+-            zips.iter()
+-                .find(|a| lower(&a.name).contains("forever") || lower(&a.name).contains("camelot"))
+-        })
+-        .or_else(|| {
+-            zips.iter().find(|a| {
+-                let n = lower(&a.name);
+-                !["classic", "vanilla", "bcc", "tbc", "wrath", "wotlk", "cata", "mists", "mop", "nolib"]
+-                    .iter()
+-                    .any(|k| n.contains(k))
+-            })
+-        })
+-        .unwrap_or(&zips[0])
++fn pick_asset<'a>(zips: &'a [&'a ApiAsset], asset_hint: Option<&str>,
++                  flavor: crate::flavor::Flavor) -> Option<&'a ApiAsset> {
++    let candidates = || zips.iter().copied().filter(|a|
++        !a.name.to_ascii_lowercase().contains("nolib") && flavor.asset_matches(&a.name));
++    let untagged = || zips.iter().copied().find(|a|
++        !a.name.to_ascii_lowercase().contains("nolib") &&
++        crate::flavor::Flavor::asset_flavor(&a.name).is_none());
++    asset_hint.and_then(|hint| candidates().find(|a|
++        a.name.to_ascii_lowercase().contains(&hint.to_ascii_lowercase())))
++        .or_else(|| candidates().next())
++        // Untagged mainline remains valid beside Classic assets. Other
++        // flavours may try one untagged archive, always pending TOC proof.
++        .or_else(|| if flavor == crate::flavor::Flavor::Retail || zips.len() == 1 {
++            untagged()
++        } else { None })
+ }
+ 
+ async fn from_api_release(
+     client: &reqwest::Client,
+     rel: ApiRelease,
+     asset_hint: Option<&str>,
++    flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+     // Prefer the packager's release.json if this release has one.
+     if let Some(rj_asset) = rel.assets.iter().find(|a| a.name == "release.json") {
+@@ -127,7 +119,7 @@
+                             .map(|a| a.browser_download_url.clone())
+                             .unwrap_or_default()
+                     };
+-                    let r = pick_from_release_json(rj, url_for, rel.prerelease)?;
++                    let r = pick_from_release_json(rj, url_for, rel.prerelease, flavor)?;
+                     if !r.download_url.is_empty() {
+                         return Ok(r);
+                     }
+@@ -143,7 +135,8 @@
+     if zips.is_empty() {
+         anyhow::bail!("release {} has no zip asset", rel.tag_name);
+     }
+-    let pick = pick_asset(&zips, asset_hint);
++    let pick = pick_asset(&zips, asset_hint, flavor)
++        .ok_or_else(|| anyhow::anyhow!("No {} release asset", flavor.id()))?;
+     Ok(Remote {
+         version: rel.tag_name.clone(),
+         download_url: pick.browser_download_url.clone(),
+@@ -166,6 +159,7 @@
+     repo: &str,
+     asset_hint: Option<&str>,
+     prerelease: bool,
++    flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+     let repo = repo.trim().trim_matches('/');
+ 
+@@ -185,14 +179,14 @@
+             .into_iter()
+             .find(|r| !r.draft && !r.assets.is_empty())
+             .ok_or_else(|| anyhow::anyhow!("no GitHub release with files for {repo}"))?;
+-        return from_api_release(client, rel, asset_hint).await;
++        return from_api_release(client, rel, asset_hint, flavor).await;
+     }
+ 
+     let base = format!("https://github.com/{repo}/releases/latest/download/");
+     let resp = client.get(format!("{base}release.json")).send().await?;
+     if resp.status().is_success() {
+         let rj: ReleaseJson = resp.json().await?;
+-        return pick_from_release_json(rj, |name| format!("{base}{name}"), false);
++        return pick_from_release_json(rj, |name| format!("{base}{name}"), false, flavor);
+     }
+ 
+     // No release.json: ask the API for the latest release's assets.
+@@ -206,5 +200,46 @@
+         return Err(e);
+     }
+     let rel: ApiRelease = resp.error_for_status()?.json().await?;
+-    from_api_release(client, rel, asset_hint).await
+-}
++    from_api_release(client, rel, asset_hint, flavor).await
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::flavor::Flavor;
++    #[test]
++    fn retail_keeps_untagged_mainline_assets_in_multi_flavour_releases() {
++        let mainline = ApiAsset { name: "Addon-1.0.zip".into(), browser_download_url: "retail".into() };
++        let classic = ApiAsset { name: "Addon-1.0-classic.zip".into(), browser_download_url: "classic".into() };
++        let forever = ApiAsset { name: "Addon-1.0-forever.zip".into(), browser_download_url: "forever".into() };
++        let nolib = ApiAsset { name: "Addon-1.0-nolib.zip".into(), browser_download_url: "nolib".into() };
++        assert_eq!(pick_asset(&[&mainline, &classic], None, Flavor::Retail).unwrap().name, mainline.name);
++        assert_eq!(pick_asset(&[&classic, &mainline], Some("classic"), Flavor::Retail).unwrap().name, mainline.name);
++        assert!(pick_asset(&[&classic], None, Flavor::Retail).is_none());
++        assert!(pick_asset(&[&forever], None, Flavor::Retail).is_none());
++        assert!(pick_asset(&[&nolib, &classic], None, Flavor::Retail).is_none());
++        assert!(pick_asset(&[&mainline, &classic], None, Flavor::Bc).is_none());
++    }
++    #[test]
++    fn release_metadata_and_asset_tags_select_only_the_requested_flavour() {
++        for (flavor, tag, interface) in [(Flavor::Retail, "mainline", 120105),
++            (Flavor::Classic, "classic", 11509), (Flavor::Bc, "bcc", 20506),
++            (Flavor::Wrath, "wrath", 30403), (Flavor::Cata, "cata", 40402),
++            (Flavor::Mists, "mists", 50504), (Flavor::Forever, "forever", 16001)] {
++            let rj: ReleaseJson = serde_json::from_value(serde_json::json!({"releases":[
++                {"filename":"Wrong.zip","metadata":[{"flavor":"other","interface":999}]},
++                {"filename":"Right.zip","metadata":[{"flavor":tag,"interface":interface}]}
++            ]})).unwrap();
++            let selected = pick_from_release_json(rj, str::to_string, false, flavor).unwrap();
++            assert_eq!(selected.filename, "Right.zip");
++            let a = ApiAsset { name: format!("Addon-{tag}.zip"), browser_download_url: "local".into() };
++            let b = ApiAsset { name: "Addon-other.zip".into(), browser_download_url: "wrong".into() };
++            assert_eq!(pick_asset(&[&b, &a], Some("other"), flavor).unwrap().name, a.name);
++            assert!(flavor.asset_matches(&format!("Addon-{tag}.zip")));
++        }
++        let only_wrong: ReleaseJson = serde_json::from_value(serde_json::json!({"releases":[
++            {"filename":"Forever.zip","metadata":[{"flavor":"forever","interface":16001}]}
++        ]})).unwrap();
++        assert!(pick_from_release_json(only_wrong, str::to_string, false, Flavor::Retail).is_err());
++    }
++}
+--- a/src-tauri/src/sources/wago.rs
++++ b/src-tauri/src/sources/wago.rs
+@@ -15,20 +15,21 @@
+     id: &str,
+     key: Option<&str>,
+     prerelease: bool,
++    flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+     let key = key
+         .map(str::trim)
+         .filter(|k| !k.is_empty())
+         .ok_or_else(|| anyhow::anyhow!("Wago needs your API key (Settings)"))?;
+-    let url = format!("https://addons.wago.io/api/external/addons/{id}?game_version=forever");
++    let url = format!("https://addons.wago.io/api/external/addons/{id}?game_version={}", flavor.wago());
+     let resp = client.get(&url).bearer_auth(key).send().await?;
+     match resp.status().as_u16() {
+         401 | 403 => anyhow::bail!("Wago rejected the API key"),
+-        404 => anyhow::bail!("Wago has no Forever release for this addon"),
++        404 => anyhow::bail!("Wago has no {} release for this addon", flavor.id()),
+         _ => {}
+     }
+     let v: Value = resp.error_for_status()?.json().await?;
+-    let recent = &v["recent_release"];
++    let recent = v.get("recent_release").or_else(|| v.get("recent_releases")).unwrap_or(&Value::Null);
+     // Stable first unless the user allows beta builds; alpha only as a last resort.
+     let order: &[&str] = if prerelease {
+         &["beta", "stable", "alpha"]
+@@ -39,7 +40,7 @@
+         .iter()
+         .map(|s| (*s, &recent[*s]))
+         .find(|(_, r)| r.is_object())
+-        .ok_or_else(|| anyhow::anyhow!("Wago lists no release for Forever"))?;
++        .ok_or_else(|| anyhow::anyhow!("Wago lists no release for {}", flavor.id()))?;
+     let version = rel["label"]
+         .as_str()
+         .or_else(|| rel["version"].as_str())
+@@ -54,7 +55,8 @@
+     let forever = if patch.is_empty() {
+         None
+     } else {
+-        Some(patch.starts_with("1.60"))
++        Some(flavor.accepts_patch(patch) || rel["supported_patches"].as_array()
++            .is_some_and(|patches| patches.iter().filter_map(Value::as_str).any(|p| flavor.accepts_patch(p))))
+     };
+     let safe: String = version
+         .chars()
+--- a/src-tauri/src/sources/wowi.rs
++++ b/src-tauri/src/sources/wowi.rs
+@@ -21,7 +21,7 @@
+     version: String,
+ }
+ 
+-pub async fn resolve(client: &reqwest::Client, id: u64) -> anyhow::Result<Remote> {
++pub async fn resolve(client: &reqwest::Client, id: u64, flavor: crate::flavor::Flavor) -> anyhow::Result<Remote> {
+     let url = format!("https://api.mmoui.com/v3/game/WOW/filedetails/{id}.json");
+     let resp = client.get(&url).send().await?;
+     if resp.status().as_u16() == 404 {
+@@ -38,7 +38,7 @@
+     let forever = d
+         .compat
+         .as_ref()
+-        .map(|c| c.iter().any(|x| x.version.starts_with("1.60")));
++        .map(|c| c.iter().any(|x| flavor.accepts_patch(&x.version)));
+     let filename = if d.file_name.is_empty() {
+         format!("wowi-{id}.zip")
+     } else {
+--- a/src-tauri/src/sources/tukui.rs
++++ b/src-tauri/src/sources/tukui.rs
+@@ -13,7 +13,7 @@
+     patch: Vec<String>,
+ }
+ 
+-pub async fn resolve(client: &reqwest::Client, slug: &str) -> anyhow::Result<Remote> {
++pub async fn resolve(client: &reqwest::Client, slug: &str, flavor: crate::flavor::Flavor) -> anyhow::Result<Remote> {
+     let url = format!("https://api.tukui.org/v1/addon/{slug}");
+     let resp = client.get(&url).send().await?;
+     if resp.status().as_u16() == 404 {
+@@ -23,7 +23,7 @@
+     if a.url.is_empty() {
+         anyhow::bail!("TukUI entry has no download url");
+     }
+-    let forever = Some(a.patch.iter().any(|p| p.starts_with("1.60")));
++    let forever = Some(a.patch.iter().any(|p| flavor.accepts_patch(p)));
+     Ok(Remote {
+         version: a.version.clone(),
+         download_url: a.url,

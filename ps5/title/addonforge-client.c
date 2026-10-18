@@ -710,10 +710,18 @@ int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
         return -EIO;
     }
     if (!ok || end - ok < 4 || memcmp(ok, "true", 4) ||
-        !(result = json_value(response, end, "result")) || result >= end || *result != '[')
-        return -EPROTO;
+        !(result = json_value(response, end, "result")) || result >= end) return -EPROTO;
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->tab = tab;
+    if (tab == FOREVER_ADDON_FIND || tab == FOREVER_ADDON_STARTER_PACKS)
+    {
+        const char *view_end;
+        if (*result != '{' || !object_end(result, end, &view_end) ||
+            !json_string(result, view_end, "notice", snapshot->notice, sizeof(snapshot->notice)))
+            return -EPROTO;
+        result = json_value(result, view_end, "rows");
+    }
+    if (!result || result >= end || *result != '[') return -EPROTO;
     at = result + 1;
     while (at < end)
     {
@@ -732,6 +740,22 @@ int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
     }
     if (tab == FOREVER_ADDON_FIND)
         qsort(snapshot->rows, snapshot->count, sizeof(snapshot->rows[0]), row_name_compare);
+    return 0;
+}
+/* Preserve the selected channel's real path, including custom install roots. */
+int addonforge_install_arguments(const char *path, char *arguments, size_t size)
+{
+    size_t used = 9;
+    if (!path || !arguments || size < 13) return -EINVAL;
+    memcpy(arguments, "{\"path\":\"", used);
+    for (const unsigned char *at = (const unsigned char *)path; *at; ++at)
+    {
+        if (*at < 32) return -EINVAL;
+        if (used + 5 >= size) return -EFBIG;
+        if (*at == '\\' || *at == '"') arguments[used++] = '\\';
+        arguments[used++] = *at;
+    }
+    memcpy(arguments + used, "\"}", 3);
     return 0;
 }
 

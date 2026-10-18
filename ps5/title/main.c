@@ -57,7 +57,7 @@ static enum forever_menu_command menu_ime_command;
 static int menu_hint_eligible, menu_hint_started;
 
 int forever_title_menu_load(struct forever_menu_values *);
-int forever_title_addons_action(enum forever_menu_command, enum forever_addon_channel,
+int forever_title_addons_action(enum forever_menu_command, unsigned,
                                 enum forever_addon_tab, const char *);
 #ifdef FOREVER_MENU_DIAG
 #define MENU_DIAG_SCRIPT "/data/homebrew/PPSA99030/wine/menu-script.txt"

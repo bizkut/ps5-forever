@@ -125,7 +125,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-forever-menu \
-		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-security \
+		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-worker $(HOST_OUT)/test-addonforge-security \
 		$(HOST_OUT)/test-forever-menu-diag \
 		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
 		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
@@ -159,6 +159,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-forever-setup
 	$(HOST_OUT)/test-forever-menu
 	$(HOST_OUT)/test-addonforge-client
+	$(HOST_OUT)/test-addonforge-worker
 	$(HOST_OUT)/test-addonforge-security
 	$(HOST_OUT)/test-forever-menu-diag
 	$(HOST_OUT)/test-title-icon
@@ -268,6 +269,11 @@ $(HOST_OUT)/test-addonforge-client: test-addonforge-client.c \
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread \
 		test-addonforge-client.c ../../title/addonforge-client.c \
 		../../title/forever-menu.c -o $@
+
+$(HOST_OUT)/test-addonforge-worker: test-addonforge-worker.c build-addonforge-worker-test.py \
+		native-entry.c wow-channels.h ../../title/addonforge-client.c ../../title/addonforge-client.h \
+		../../title/forever-menu.c ../../title/forever-menu.h
+	python3 build-addonforge-worker-test.py --output "$@" --cc "$(HOST_CC)"
 
 $(HOST_OUT)/test-forever-menu-diag: test-forever-menu-diag.c ../../title/menu-diag.h \
 		../../title/input.h

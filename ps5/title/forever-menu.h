@@ -85,10 +85,11 @@ enum forever_frame_generation
     FOREVER_FG_AUTO,
 };
 
-enum forever_addon_channel
+#define FOREVER_ADDON_CHANNELS 64
+struct forever_addon_install
 {
-    FOREVER_ADDON_CLASSIC_BETA,
-    FOREVER_ADDON_FINAL,
+    char path[1100];
+    char label[96];
 };
 
 enum forever_addon_tab
@@ -143,6 +144,10 @@ struct forever_addon_snapshot
     size_t count;
     enum forever_wago_key_status wago_status;
     int wago_saved;
+    struct forever_addon_install channels[FOREVER_ADDON_CHANNELS];
+    size_t channel_count;
+    char message[FOREVER_MENU_STATUS_BYTES];
+    char notice[FOREVER_MENU_STATUS_BYTES]; /* successful empty view, not an operation failure */
 };
 
 struct forever_menu_values
@@ -156,7 +161,7 @@ struct forever_menu_result
 {
     enum forever_menu_command command;
     int enabled;
-    enum forever_addon_channel channel;
+    unsigned channel;
     enum forever_addon_tab tab;
     char key[FOREVER_ADDON_KEY_BYTES];
 };
@@ -167,7 +172,9 @@ struct forever_menu_state
     enum forever_menu_item selected;
     int confirmation_selected; /* zero is Cancel, deliberately the default */
     struct forever_menu_values values;
-    enum forever_addon_channel addon_channel;
+    unsigned addon_channel;
+    struct forever_addon_install addon_channels[FOREVER_ADDON_CHANNELS];
+    size_t addon_channel_count;
     enum forever_addon_tab addon_tab;
     int addon_sort_downloads;
     size_t addon_selected;

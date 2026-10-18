@@ -2053,7 +2053,7 @@ struct forever_addons_request
 {
     unsigned generation;
     enum forever_menu_command command;
-    enum forever_addon_channel channel;
+    unsigned channel;
     enum forever_addon_tab tab;
     char key[ADDONFORGE_WAGO_KEY_BYTES];
 };
@@ -2064,10 +2064,13 @@ static struct
     pthread_mutex_t lifecycle_lock;
     struct forever_addons_request request;
     struct forever_addon_snapshot snapshot;
+    struct forever_addon_install channels[FOREVER_ADDON_CHANNELS];
+    size_t channel_count;
     char response[ADDONFORGE_RESPONSE_BYTES];
     char token[65];
     char control_token[65];
     unsigned generation;
+    enum forever_wago_key_status wago_status; /* global key state survives per-view failures */
     int open, busy, stopping, available;
 } forever_addons = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
@@ -2183,7 +2186,8 @@ static void forever_addons_publish_error(unsigned generation, int error, const c
                  error < 0 ? -error : error);
     io_log("forever addons error generation=%u result=%d detail=%.160s",
            generation, error, detail ? detail : "");
-    title_desktop_addons_error(message);
+    snprintf(forever_addons.snapshot.message, sizeof(forever_addons.snapshot.message), "%s", message);
+    title_desktop_addons_snapshot(&forever_addons.snapshot);
 }
 
 static int forever_addons_command(
@@ -2199,14 +2203,19 @@ static int forever_addons_command(
 }
 
 static int forever_addons_select_channel(
-    struct addonforge_client *client, enum forever_addon_channel channel,
+    struct addonforge_client *client, unsigned channel,
     char *plain, size_t plain_size)
 {
-    const char *arguments = channel == FOREVER_ADDON_FINAL ?
-        "{\"path\":\"C:\\\\Program Files (x86)\\\\World of Warcraft\\\\_forever_\"}" :
-        "{\"path\":\"C:\\\\Program Files (x86)\\\\World of Warcraft\\\\_classic_beta_\"}";
-    return forever_addons_command(client, "set_install_path", arguments, 15000,
-                                  plain, plain_size);
+    char arguments[2 * WOW_PATH_BYTES + 32];
+    int error;
+    if (channel >= forever_addons.channel_count)
+    {
+        snprintf(plain, plain_size, "No installed WoW channels found.");
+        return -ENOENT;
+    }
+    error = addonforge_install_arguments(forever_addons.channels[channel].path, arguments, sizeof(arguments));
+    return error ? error : forever_addons_command(client, "set_install_path", arguments, 15000,
+                                                 plain, plain_size);
 }
 
 static int forever_addons_refresh(
@@ -2264,6 +2273,8 @@ static int forever_addons_mutate(
             addonforge_set_wago_key_file(client, ADDONFORGE_WAGO_KEY_FILE, &status) :
             addonforge_set_wago_key(client,
                 request->command == FOREVER_MENU_COMMAND_WAGO_REMOVE ? "" : key, &status);
+        if (!error || status == FOREVER_WAGO_REJECTED)
+            forever_addons.wago_status = status;
         if (error == -EACCES)
             snprintf(plain, plain_size, "Wago rejected this key.");
         else if (error == -ENOENT && request->command == FOREVER_MENU_COMMAND_WAGO_FILE)
@@ -2313,9 +2324,21 @@ static int forever_addons_mutate(
     return forever_addons_command(client, command, arguments, 600000, plain, plain_size);
 }
 
+static int forever_addons_channel_visit(const struct wow_channel *channel, void *unused)
+{
+    struct forever_addon_install *install;
+    (void)unused;
+    if (forever_addons.channel_count == FOREVER_ADDON_CHANNELS) return -E2BIG;
+    install = &forever_addons.channels[forever_addons.channel_count++];
+    snprintf(install->path, sizeof(install->path), "%s", channel->windows_cwd);
+    snprintf(install->label, sizeof(install->label), "%s", wow_channel_label(channel));
+    return 0;
+}
+
 static void *forever_addons_worker(void *unused)
 {
     struct forever_addons_request request;
+    enum forever_wago_key_status wago_status;
     struct addonforge_client client = {
         .port = ADDONFORGE_CORE_PORT, .token = forever_addons.token, .timeout_ms = 1000};
     char plain[FOREVER_MENU_STATUS_BYTES] = {0}, control[160];
@@ -2328,6 +2351,9 @@ static void *forever_addons_worker(void *unused)
 
     if (request.command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
     {
+        forever_addons.channel_count = 0;
+        error = wow_channels_scan(PW_RUNTIME_PREFIX, forever_addons_channel_visit, NULL);
+        if (error) goto done;
         snprintf(control, sizeof(control), "START %s", forever_addons.token);
         pthread_mutex_lock(&forever_addons.lifecycle_lock);
         if (!forever_addons_current(request.generation))
@@ -2365,10 +2391,13 @@ static void *forever_addons_worker(void *unused)
         (error = forever_addons_mutate(&client, &request, plain, sizeof(plain))))
         goto done;
     if ((error = forever_addons_refresh(&client, request.tab, plain, sizeof(plain)))) goto done;
+    forever_addons.snapshot.channel_count = forever_addons.channel_count;
+    memcpy(forever_addons.snapshot.channels, forever_addons.channels,
+           forever_addons.channel_count * sizeof(forever_addons.channels[0]));
     client.timeout_ms = 15000;
-    if ((error = addonforge_wago_key_status(&client, &forever_addons.snapshot.wago_status)))
-        goto done;
-    addonforge_snapshot_wago_status(&forever_addons.snapshot, forever_addons.snapshot.wago_status);
+    if ((error = addonforge_wago_key_status(&client, &wago_status))) goto done;
+    forever_addons.wago_status = wago_status;
+    addonforge_snapshot_wago_status(&forever_addons.snapshot, wago_status);
     forever_addons.snapshot.wago_saved =
         request.command == FOREVER_MENU_COMMAND_WAGO_REMOVE ? 2 :
         request.command == FOREVER_MENU_COMMAND_WAGO_SET ||
@@ -2376,11 +2405,20 @@ static void *forever_addons_worker(void *unused)
     if (forever_addons_current(request.generation))
     {
         title_desktop_addons_snapshot(&forever_addons.snapshot);
-        io_log("forever addons result generation=%u command=%d channel=%d tab=%d rows=%zu",
+        io_log("forever addons result generation=%u command=%d channel=%u tab=%d rows=%zu",
                request.generation, request.command, request.channel, request.tab,
                forever_addons.snapshot.count);
     }
 done:
+    if (error && error != -ECANCELED && forever_addons_current(request.generation))
+    {
+        memset(&forever_addons.snapshot, 0, sizeof(forever_addons.snapshot));
+        forever_addons.snapshot.tab = request.tab;
+        forever_addons.snapshot.wago_status = forever_addons.wago_status;
+        forever_addons.snapshot.channel_count = forever_addons.channel_count;
+        memcpy(forever_addons.snapshot.channels, forever_addons.channels,
+               forever_addons.channel_count * sizeof(forever_addons.channels[0]));
+    }
     if (error && error != -ECANCELED)
         forever_addons_publish_error(request.generation, error, plain);
     memset(request.key, 0, sizeof(request.key));
@@ -2406,7 +2444,7 @@ static void *forever_addons_stop_worker(void *unused)
 }
 
 int forever_title_addons_action(
-    enum forever_menu_command command, enum forever_addon_channel channel,
+    enum forever_menu_command command, unsigned channel,
     enum forever_addon_tab tab, const char *key)
 {
     pthread_t thread;
@@ -2441,8 +2479,7 @@ int forever_title_addons_action(
         return 0;
     }
     if (tab < FOREVER_ADDON_INSTALLED || tab >= FOREVER_ADDON_TAB_COUNT ||
-        channel < FOREVER_ADDON_CLASSIC_BETA || channel > FOREVER_ADDON_FINAL)
-        return -EINVAL;
+        channel >= FOREVER_ADDON_CHANNELS) return -EINVAL;
     if (key && strlen(key) >= sizeof(forever_addons.request.key)) return -EFBIG;
     pthread_mutex_lock(&forever_addons.lock);
     if (forever_addons.busy || forever_addons.stopping)

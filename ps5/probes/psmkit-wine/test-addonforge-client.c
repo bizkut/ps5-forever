@@ -29,12 +29,12 @@ static void send_all(int fd, const char *data, size_t size)
 static void *serve_fake(void *argument)
 {
     static const char catalogue[] =
-        "{\"ok\":true,\"result\":["
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":["
         "{\"id\":\"zulu\",\"key\":\"cat:zulu\",\"name\":\"Zulu\","
         "\"desc\":\"Last by name\",\"github\":\"owner/zulu\",\"installed\":true,"
         "\"downloads\":42,\"updated_at\":\"2026-10-16T00:00:00Z\"},"
         "{\"id\":\"alpha\",\"key\":\"cat:alpha\",\"name\":\"Alpha\","
-        "\"desc\":\"Link only\",\"curse\":123,\"downloads\":7}]}";
+        "\"desc\":\"Link only\",\"curse\":123,\"downloads\":7}]}}";
     struct fake_server *server = argument;
     for (int request = 0; request < 3; request++)
     {
@@ -152,9 +152,9 @@ static void test_installed_statuses_and_plain_errors(void)
     assert(!strcmp(snapshot.rows[1].status, "pinned"));
     assert(!strcmp(snapshot.rows[2].status, "missing dependency"));
     static const char update_find[] =
-        "{\"ok\":true,\"result\":[{\"id\":\"update\",\"key\":\"cat:update\","
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"id\":\"update\",\"key\":\"cat:update\","
         "\"name\":\"Update Me\",\"github\":\"owner/update\",\"installed\":true,"
-        "\"update_available\":true}]}";
+        "\"update_available\":true}]}}";
     assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, update_find, &snapshot,
                                      error, sizeof(error)));
     assert(!strcmp(snapshot.rows[0].status, "Update available"));
@@ -166,8 +166,8 @@ static void test_installed_statuses_and_plain_errors(void)
     assert(!strcmp(snapshot.rows[0].name, "Emoji ? ??"));
     assert(!strcmp(snapshot.rows[0].description, "R?sum? ?"));
     static const char cafe_find[] =
-        "{\"ok\":true,\"result\":[{\"id\":\"cafe\",\"key\":\"cat:cafe\","
-        "\"name\":\"Caf\xc3\xa9\",\"desc\":\"Recipes and bags\",\"github\":\"owner/cafe\"}]}";
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"id\":\"cafe\",\"key\":\"cat:cafe\","
+        "\"name\":\"Caf\xc3\xa9\",\"desc\":\"Recipes and bags\",\"github\":\"owner/cafe\"}]}}";
     {
         struct forever_menu_state menu;
         assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, cafe_find, &snapshot,
@@ -208,11 +208,11 @@ static void test_installed_statuses_and_plain_errors(void)
     assert(!strcmp(snapshot.rows[0].description,
                    "GitHub is limiting requests, try again in a few minutes."));
     static const char real_bundle[] =
-        "{\"ok\":true,\"result\":[{\"addons\":[{\"desc\":\"Bags\","
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"addons\":[{\"desc\":\"Bags\","
         "\"forever\":true,\"id\":\"betterbags\",\"installable\":true,"
         "\"installed\":false,\"name\":\"BetterBags\",\"needs_key\":false}],"
         "\"desc\":\"A balanced starter selection\",\"id\":\"good-start\","
-        "\"name\":\"A good start\",\"note\":\"Pick one boss mod\"}]}";
+        "\"name\":\"A good start\",\"note\":\"Pick one boss mod\"}]}}";
     assert(!addonforge_parse_snapshot(FOREVER_ADDON_STARTER_PACKS, real_bundle, &snapshot,
                                      error, sizeof(error)));
     assert(snapshot.count == 1);
@@ -247,8 +247,8 @@ static void test_wago_status_and_file(void)
         struct forever_addon_snapshot snapshot;
         char error[128];
         assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND,
-            "{\"ok\":true,\"result\":[{\"key\":\"cat:wago\",\"name\":\"Wago Addon\","
-            "\"wago\":\"fixture\"}]}", &snapshot, error, sizeof(error)));
+            "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"key\":\"cat:wago\",\"name\":\"Wago Addon\","
+            "\"wago\":\"fixture\"}]}}", &snapshot, error, sizeof(error)));
         assert(snapshot.count == 1 && !snapshot.rows[0].installable);
         addonforge_snapshot_wago_status(&snapshot, FOREVER_WAGO_NOT_CHECKED);
         assert(snapshot.rows[0].installable);
@@ -360,6 +360,13 @@ static void test_wago_commands_and_redaction(void)
 
 int main(void)
 {
+    char arguments[2300];
+    assert(!addonforge_install_arguments("W:\\Games\\World of Warcraft\\_retail_", arguments, sizeof(arguments)));
+    assert(!strcmp(arguments, "{\"path\":\"W:\\\\Games\\\\World of Warcraft\\\\_retail_\"}"));
+    assert(!addonforge_install_arguments("C:\\Games\\World of Warcraft\\_classic_era_", arguments, sizeof(arguments)));
+    assert(strstr(arguments, "_classic_era_"));
+    assert(!addonforge_install_arguments("C:\\Games\\World of Warcraft\\_future_", arguments, sizeof(arguments)));
+    assert(strstr(arguments, "_future_"));
     test_http_and_fake_catalogue();
     test_wago_status_and_file();
     test_wago_commands_and_redaction();
