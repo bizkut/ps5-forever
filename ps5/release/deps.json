@@ -9,10 +9,10 @@
     {
       "name": "ps5-wine",
       "url": "https://github.com/bizkut/ps5-forever-wine.git",
-      "commit": "9a5978de5e5009a32658eb6cb3e7884c843c6795",
-      "original_commit": "9a5978de5e5009a32658eb6cb3e7884c843c6795",
-      "content_sha256": "334c339a06044d19ef16baf668ea757d8618cbddc8e495295b7ab6a872af58f2",
-      "describe": "wine-8.0-21023-forever-01.000.012",
+      "commit": "dc1350715a273ecf9af4d5f833d1920f48ab9565",
+      "original_commit": "dc1350715a273ecf9af4d5f833d1920f48ab9565",
+      "content_sha256": "fe4da52a20d4a23065e7948dccd254ac46e9d8eafd8fa2d8ab3e7cdbabecee20",
+      "describe": "wine-8.0-21023-forever-01.000.013",
       "path": "ps5-proton/ps5-wine"
     },
     {

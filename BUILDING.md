@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.012
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.013
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.

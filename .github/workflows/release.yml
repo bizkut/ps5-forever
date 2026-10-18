@@ -9,7 +9,7 @@ on:
       version:
         description: 'Build contentVersion (NN.NNN.NNN); manual runs do not publish'
         required: true
-        default: '01.000.012'
+        default: '01.000.013'
         type: string
       clean:
         description: 'Discard the persistent compiled-output cache before building'
