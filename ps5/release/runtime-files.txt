@@ -16,6 +16,7 @@ wine-title/addonforge/THIRD-PARTY-NOTICES.txt
 wine-title/addonforge/addonforge-core.exe
 wine-title/addonforge/build-receipt.json
 wine-title/addonforge/forever-maintenance.exe
+wine-title/addonforge/github-catalogue.csv
 wine-title/bin/wineserver.so
 wine-title/lib/libfreetype.so
 wine-title/lib/libgnutls.so

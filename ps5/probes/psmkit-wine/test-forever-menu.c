@@ -156,8 +156,8 @@ static void open_find(struct forever_menu_state *menu, struct forever_addon_snap
 
 static void test_find_search_and_github(void)
 {
-    struct forever_menu_state menu;
-    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND, .count = 4};
+    static struct forever_menu_state menu;
+    static struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND, .count = 4};
     struct forever_menu_result result;
     char repo[FOREVER_ADDON_KEY_BYTES], error[FOREVER_MENU_STATUS_BYTES];
     char text[FOREVER_MENU_TEXT_BYTES];
@@ -294,9 +294,9 @@ static void test_find_search_and_github(void)
 
 static void test_state_machine(void)
 {
-    struct forever_menu_state menu;
+    static struct forever_menu_state menu;
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
-    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND};
+    static struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND};
     struct forever_menu_result result;
     char text[FOREVER_MENU_TEXT_BYTES];
 
@@ -466,8 +466,8 @@ static void test_state_machine(void)
 
 static void test_wago_menu(void)
 {
-    struct forever_menu_state menu;
-    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_INSTALLED};
+    static struct forever_menu_state menu;
+    static struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_INSTALLED};
     char text[FOREVER_MENU_TEXT_BYTES];
     static const char *const labels[] = {"not set", "set", "set (not checked)", "rejected"};
     forever_menu_init(&menu);

@@ -452,9 +452,9 @@ static void write_addon_preview(const char *name)
 
 static void test_menu_overlay(void)
 {
-    struct forever_menu_state menu;
+    static struct forever_menu_state menu;
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
-    struct forever_addon_snapshot snapshot = {0};
+    static struct forever_addon_snapshot snapshot = {0};
     struct display_rect panel, title = {0}, selected = {0}, hdr = {0};
     struct display_rect fg_value = {0}, hdr_value = {0}, hud_value = {0}, addons_value = {0};
     struct display_rect addon_row = {0}, addon_value = {0}, hint = {0}, status = {0}, query_line = {0};

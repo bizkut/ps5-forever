@@ -1,16 +1,47 @@
 #!/usr/bin/env python3
 """Patch, vendor, test, and reproducibly build the pinned AddonForge core."""
 import argparse
+import csv
+import io
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import urllib.request
 
 TOOLCHAIN = '1.99.1'
 TARGET = 'x86_64-pc-windows-gnullvm'
 UPSTREAM = '0dc9ab28f207f86e33770e359f2345043ef19585'
+GITHUB_CATALOGUE_URL = (
+    'https://raw.githubusercontent.com/layday/github-wow-addon-catalogue/main/addons.csv')
+
+
+def catalogue_snapshot(path):
+    etag = None
+    if path:
+        data = path.read_bytes()
+    else:
+        request = urllib.request.Request(GITHUB_CATALOGUE_URL, headers={
+            'User-Agent': 'Forever-Launcher-AddonForge-build'})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(4 * 1024 * 1024 + 1)
+            etag = response.headers.get('ETag')
+    if len(data) > 4 * 1024 * 1024:
+        raise SystemExit('GitHub catalogue exceeds 4 MiB')
+    rows = list(csv.DictReader(io.StringIO(data.decode('utf-8'))))
+    required = {'id', 'name', 'full_name', 'url', 'description', 'flavors', 'has_release_json'}
+    if not rows or not required.issubset(rows[0]):
+        raise SystemExit('invalid GitHub catalogue snapshot')
+    return data, {
+        'url': GITHUB_CATALOGUE_URL,
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'size': len(data),
+        'rows': len(rows),
+        'etag': etag,
+        'license': 'GPL-3.0',
+    }
 
 
 def sha256(path):
@@ -110,17 +141,32 @@ def cargo_build(source, cargo_home, target_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=Path, required=True)
-    parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--cache', type=Path, required=True)
+    parser.add_argument('--source', type=Path)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--cache', type=Path)
     parser.add_argument('--project', type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument('--catalogue-snapshot', type=Path,
+                        help='replay an exact receipt-pinned CSV instead of refreshing online')
+    parser.add_argument('--check-catalogue', action='store_true',
+                        help='qualify every starter against live releases and actual archive TOCs')
+    parser.add_argument('--fetch-catalogue', type=Path,
+                        help='refresh the build input before computing a build-cache key, then exit')
     args = parser.parse_args()
+    if args.fetch_catalogue:
+        data, receipt = catalogue_snapshot(None)
+        args.fetch_catalogue.parent.mkdir(parents=True, exist_ok=True)
+        args.fetch_catalogue.write_bytes(data)
+        print('ADDONFORGE_CATALOGUE ' + json.dumps(receipt, sort_keys=True), flush=True)
+        return
+    if not all((args.source, args.output, args.cache)):
+        parser.error('--source, --output and --cache are required for a build')
     source = args.source.resolve()
     output = args.output.resolve()
     project = args.project.resolve()
     work = output.with_name(output.name + '-source')
     fetch_home = args.cache.resolve() / 'cargo-home'
     offline_home = output.with_name(output.name + '-cargo-offline-home')
+    snapshot, snapshot_receipt = catalogue_snapshot(args.catalogue_snapshot)
     shutil.rmtree(work, ignore_errors=True)
     shutil.rmtree(output, ignore_errors=True)
     shutil.copytree(source, work, ignore=shutil.ignore_patterns('.git', 'target'))
@@ -129,6 +175,7 @@ def main():
         raise SystemExit('no AddonForge patches found')
     for patch in patches:
         run(['patch', '--batch', '--fuzz=0', '-p1', '-i', patch], cwd=work)
+    (work / 'catalog/github.csv').write_bytes(snapshot)
 
     fetch_home.mkdir(parents=True, exist_ok=True)
     vendor_root, lock_digest = vendor(work, args.cache.resolve(), fetch_home)
@@ -141,6 +188,14 @@ def main():
     run(['/opt/cargo/bin/cargo', 'test', '--offline', '--locked', '--no-default-features',
          '--features', 'headless', '--lib', '--manifest-path', work / 'src-tauri/Cargo.toml'],
         env=test_environment, cwd=work)
+    catalogue_report = output.with_name(output.name + '-catalogue-check.json')
+    if args.check_catalogue:
+        live_environment = test_environment.copy()
+        live_environment['ADDONFORGE_CATALOGUE_REPORT'] = str(catalogue_report)
+        run(['/opt/cargo/bin/cargo', 'test', '--offline', '--locked', '--no-default-features',
+             '--features', 'headless', '--lib', '--manifest-path', work / 'src-tauri/Cargo.toml',
+             'catalog::live_tests::qualify_live_catalogue', '--', '--ignored', '--nocapture'],
+            env=live_environment, cwd=work)
 
     first_dir = output.with_name(output.name + '-cold-a')
     second_dir = output.with_name(output.name + '-cold-b')
@@ -153,6 +208,9 @@ def main():
         raise SystemExit(f'AddonForge cold builds differ: {first_hash} != {second_hash}')
 
     output.mkdir(parents=True)
+    (output / 'github-catalogue.csv').write_bytes(snapshot)
+    if args.check_catalogue:
+        shutil.copy2(catalogue_report, output / 'catalogue-check.json')
     shutil.copy2(first, output / 'addonforge-core.exe')
     compiler = '/opt/llvm-mingw/bin/x86_64-w64-mingw32-clang'
     run([compiler, '-std=c11', '-Os', '-s', '-static', '-Wall', '-Wextra', '-Werror',
@@ -171,6 +229,7 @@ def main():
         'rust_toolchain': TOOLCHAIN,
         'target': TARGET,
         'cargo_lock_sha256': lock_digest,
+        'github_catalogue': snapshot_receipt,
         'patches': patch_hashes,
         'cold_build_a_sha256': first_hash,
         'cold_build_b_sha256': second_hash,

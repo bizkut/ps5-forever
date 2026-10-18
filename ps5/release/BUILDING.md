@@ -449,26 +449,79 @@ Classic Era failure is not established.
   [Wago provider](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-electron/src/app/addon-providers/wago-addon-provider.ts),
   [client groups](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-lib/src/utils/wow-client.utils.ts),
   [Tukui provider](https://github.com/WowUp/WowUp/blob/5baca162dacdbdf86044ae25933ddbf0fa9bcdc9/wowup-lib/src/addon-providers/tukui-addon-provider.ts).
+- `0008-all-flavour-catalogues.patch` makes Find's primary source the
+  [GPL-3.0 GitHub catalogue by layday](https://github.com/layday/github-wow-addon-catalogue).
+  CSV parsing uses the maintained `csv` crate, including quoted commas,
+  doubled quotes and multiline descriptions. Exact comma-separated flavour
+  tokens map `mainline/bcc/classic/mists/forever` to the selected channel;
+  repositories deduplicate case-insensitively against the existing Forever
+  catalogue while preserving its stable IDs and folder mappings.
+  GitHub resolution continues to prefer the packager's `release.json`
+  flavour/interface metadata, falling back to the existing tagged-asset logic.
+  The runtime GitHub cache has a 24-hour TTL, conditional `If-None-Match`/304
+  refreshes and last-good offline fallback. A build-refreshed CSV is compiled
+  in for first-run offline use. The receipt pins its SHA-256, byte size and
+  row count. `build-linux.sh` refreshes this input *before* cache lookup and
+  includes its hash in the AddonForge cache key; `build.py --catalogue-snapshot`
+  replays a receipt's exact CSV without changing the two cold-build inputs.
+  Generated notices include the catalogue attribution and full GPL-3.0 text.
+  [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
+  [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
+  cached for six hours with last-good fallback. WoWInterface downloads use
+  v4 `filedetails/<id>.json`'s `downloadUri`; compatibility comes from
+  filelist `gameVersions` and the downloaded archive's selected-flavour TOCs.
+  All cache updates flush a sibling temporary file and atomically replace the
+  destination with `std::fs::rename` (including Windows replacement semantics);
+  failed replacement never unlinks the last-good cache. Index bodies are
+  streamed with an 8 MiB cap independent of missing/misleading Content-Length.
+  Cache reads and JSON encoding are capped at 16 MiB before parsing/promotion.
+  Oversized responses retain last-good data; oversized cache files fall back
+  to the bundled GitHub snapshot or the curated starter pointers.
+  Secondary compatibility filters require current 12.x/5.5.x/2.5.x/1.15.x/
+  1.60.x families, not obsolete Retail or original-MoP builds.
+  Starter packs use verified author GitHub releases (BetterBags, BagSync,
+  ImproveAny, MinimapButtonButton, XanChat and Immersion), plus ElvUI from
+  Tukui for Retail/MoP/Anniversary/Era. They need no Wago key. CurseForge is
+  still information-only; no CurseForge download path is introduced.
+  The C client keeps all rows for local Find search: 4,096 bounded rows and a
+  2 MiB response limit, with an explicit overflow error instead of truncation.
+  Large host fixtures use static storage, as the production menu already does.
+  Run `build.py ... --check-catalogue` to resolve every starter for every
+  family, download its ZIP and exercise the production TOC-admission/install
+  path in temporary directories. It writes `catalogue-check.json` with counts,
+  actual download URLs, installed folders and serialized Find response sizes.
+  This is host source/download qualification, not console or in-game validation.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
   and all later Cargo commands use `--offline --locked`.
 - The `addonforge` cache key covers the source pin, patches, `Cargo.lock`, Rust
-  toolchain and container image. A cache miss builds in two empty target
-  directories and refuses unequal `addonforge-core.exe` SHA-256 values. The
+  toolchain, container image and exact GitHub catalogue snapshot. A cache miss
+  builds in two empty target directories and refuses unequal
+  `addonforge-core.exe` SHA-256 values. The
   staged `build-receipt.json` records both hashes.
-  The 0007 receipt includes patch SHA-256
-  `df3b8cd59716033a55df359b85806d088b37f5f7b949fd86258ed9a616f609fe`;
+  The 0008 receipt includes patch SHA-256
+  `2e47655f98d1cd7702ffd9b372711d5c7ed340bdbe290ac315be5881a8539a2b`;
   its two cold Windows builds both produced
-  `0a894afc976b150290df44b632ed5f60dca335d08d288078895121bc1b17aa2d`
-  (2,583,552 bytes). All 29 headless Rust tests passed offline with an empty
-  Cargo home. Host launcher tests also pass with `HOST_CC=clang-19`, including
-  channel parsing/selection, per-channel settings and menu paths, generic-role
-  receipt reconstruction and the Wine CPU bucket. The extracted production
-  AddonForge worker/mutate test covers successful empty informational views,
-  real operation errors and preserved Wago-key state. Both parent roles pass
-  target-Clang syntax checks. These are host/source qualifications, not console
-  rendering, real-source downloads, or real Wago API acceptance.
+  `346dc4260717db86dbe05a5f5c28fa89bc8f0ce2e4196cec369ec0f66defefbc`
+  (3,286,016 bytes). The unmodified CSV contains 2,421 rows, is 609,505 bytes,
+  and has SHA-256
+  `8d5b512a8bf7b2d6107f2b2a2407a0f24485752cca6e58b6771c7a7b856dbd09`.
+  All 37 offline headless Rust tests passed with an empty Cargo home; the
+  separately enabled live qualification passed 34 starter/flavour archive
+  installs and three WoWInterface download/TOC smoke checks (Retail, BC, Era).
+  Find row counts were Retail 2,320; MoP 640; Anniversary 1,040; Era 1,131;
+  Forever 115. These include catalogue information rows; only the starter
+  entries and named smoke downloads received real-archive qualification.
+  The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows
+  129 and 2,999, and explicit overflow rejection. Menu and desktop-surface
+  host tests also passed after moving their enlarged fixtures off the stack.
+  ReviewCatalog cleared the final patch, including atomic cache replacement,
+  forced replacement failure and bounded live/cache input regressions.
+  The receipt, live report, raw CSV, executables and notices are in
+  `private-builds/catalogue-014-addonforge/` and staged in both canonical
+  `ps5/build/addonforge` and the rc-013b build tree. No console operation or
+  in-game add-on behavior was qualified by this work.
   Private menu-diag input can select `addon menu:wago`, open it with `pad CROSS`,
   choose Type key with another `pad CROSS`, then submit `text <key>`.
   Text command contents are never logged, and frame dumps are refused while
@@ -479,8 +532,10 @@ Classic Era failure is not established.
   catalog scan rejects payload ELF executables; it does not classify these PEs
   as payloads, just as it does not classify Wine's other Windows PEs that way.
   `runtime-b1-dual` does not build AddonForge: `build-runtime.py` copies these
-  files and their receipt from `ps5/build/addonforge` into each qualified title
-  root. `package.py` packages that already-qualified root and does not reread or
+  files, their receipt and the exact `github-catalogue.csv` source snapshot from
+  `ps5/build/addonforge` into each qualified title root. The raw CSV accompanies
+  its GPL notice and permits exact receipt-pinned offline rebuilds.
+  `package.py` packages that already-qualified root and does not reread or
   rebuild the staging directory. Rebuild the dual title after replacing staged
   AddonForge files. The full `build-linux.sh` pipeline has a preceding,
   patch-content-keyed AddonForge build/cache stage; direct private runtime

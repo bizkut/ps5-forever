@@ -95,8 +95,9 @@ static void test_http_and_fake_catalogue(void)
     struct sockaddr_in address = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
     struct fake_server fake = {0};
     struct addonforge_client client = {.token = "session-secret", .timeout_ms = 2000};
-    struct forever_addon_snapshot snapshot;
-    char response[ADDONFORGE_RESPONSE_BYTES], error[FOREVER_MENU_STATUS_BYTES];
+    static struct forever_addon_snapshot snapshot;
+    static char response[ADDONFORGE_RESPONSE_BYTES];
+    char error[FOREVER_MENU_STATUS_BYTES];
     socklen_t address_size = sizeof(address);
     pthread_t thread;
 
@@ -139,7 +140,7 @@ static void test_installed_statuses_and_plain_errors(void)
         "{\"key\":\"cat:pinned\",\"name\":\"Pinned\",\"status\":\"ok\",\"pinned\":true},"
         "{\"key\":\"folder:missing\",\"name\":\"Needs Library\",\"status\":\"ok\","
         "\"missing_deps\":[{\"folder\":\"Library\"}]}]}";
-    struct forever_addon_snapshot snapshot;
+    static struct forever_addon_snapshot snapshot;
     char error[FOREVER_MENU_STATUS_BYTES];
 
     assert(!addonforge_parse_snapshot(FOREVER_ADDON_INSTALLED, installed, &snapshot,
@@ -169,7 +170,7 @@ static void test_installed_statuses_and_plain_errors(void)
         "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"id\":\"cafe\",\"key\":\"cat:cafe\","
         "\"name\":\"Caf\xc3\xa9\",\"desc\":\"Recipes and bags\",\"github\":\"owner/cafe\"}]}}";
     {
-        struct forever_menu_state menu;
+        static struct forever_menu_state menu;
         assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, cafe_find, &snapshot,
                                          error, sizeof(error)));
         assert(!strcmp(snapshot.rows[0].name, "Caf?"));
@@ -244,7 +245,7 @@ static void test_wago_status_and_file(void)
     assert(status == FOREVER_WAGO_REJECTED);
     assert(addonforge_parse_wago_status("{\"ok\":true,\"result\":{}}", &status) < 0);
     {
-        struct forever_addon_snapshot snapshot;
+        static struct forever_addon_snapshot snapshot;
         char error[128];
         assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND,
             "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"key\":\"cat:wago\",\"name\":\"Wago Addon\","
@@ -358,6 +359,55 @@ static void test_wago_commands_and_redaction(void)
     assert(!strstr(captured, "fake-"));
 }
 
+static void test_live_sized_catalogue_is_fully_searchable(void)
+{
+    static struct forever_addon_snapshot snapshot;
+    static struct forever_menu_state menu;
+    static char response[ADDONFORGE_RESPONSE_BYTES];
+    char error[FOREVER_MENU_STATUS_BYTES];
+    char description[256];
+    memset(description, 'x', sizeof(description) - 1);
+    description[sizeof(description) - 1] = 0;
+    size_t used = (size_t)snprintf(response, sizeof(response),
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[");
+    for (unsigned i = 0; i < 3000; i++)
+    {
+        int length = snprintf(response + used, sizeof(response) - used,
+            "%s{\"key\":\"cat:wowi-%u\",\"name\":\"Addon %04u\",\"wowi\":%u,\"desc\":\"%s\"}",
+            i ? "," : "", i, i, i, description);
+        assert(length > 0 && (size_t)length < sizeof(response) - used);
+        used += (size_t)length;
+    }
+    assert(used > 512u * 1024u); /* Live Retail exceeds the old response limit. */
+    snprintf(response + used, sizeof(response) - used, "]}}");
+    assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, response, &snapshot, error, sizeof(error)));
+    assert(snapshot.count == 3000);
+    forever_menu_init(&menu);
+    menu.page = FOREVER_MENU_ADDON_PAGE;
+    menu.addon_tab = FOREVER_ADDON_FIND;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    assert(menu.addon_catalog_count == 3000);
+    assert(forever_menu_find_set_query(&menu, "Addon 2999"));
+    assert(menu.addon_match_count == 1);
+    assert(!strcmp(menu.addon_rows[1].key, "cat:wowi-2999"));
+    assert(forever_menu_find_set_query(&menu, "Addon 0129"));
+    assert(menu.addon_match_count == 1);
+    assert(!strcmp(menu.addon_rows[1].key, "cat:wowi-129"));
+
+    used = (size_t)snprintf(response, sizeof(response),
+        "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[");
+    for (unsigned i = 0; i <= FOREVER_ADDON_ROWS; i++)
+    {
+        int length = snprintf(response + used, sizeof(response) - used,
+            "%s{\"key\":\"cat:%u\",\"name\":\"Addon %u\",\"wowi\":%u}", i ? "," : "", i, i, i);
+        assert(length > 0 && (size_t)length < sizeof(response) - used);
+        used += (size_t)length;
+    }
+    snprintf(response + used, sizeof(response) - used, "]}}");
+    assert(addonforge_parse_snapshot(FOREVER_ADDON_FIND, response, &snapshot, error, sizeof(error)) == -EOVERFLOW);
+    assert(strstr(error, "too large"));
+}
+
 int main(void)
 {
     char arguments[2300];
@@ -371,6 +421,7 @@ int main(void)
     test_wago_status_and_file();
     test_wago_commands_and_redaction();
     test_installed_statuses_and_plain_errors();
+    test_live_sized_catalogue_is_fully_searchable();
     puts("addonforge client: PASS (fake loopback server, JSON state, offline catalogue)");
     return 0;
 }

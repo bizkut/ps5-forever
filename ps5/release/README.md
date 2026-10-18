@@ -157,9 +157,12 @@ WoWInterface and TukUI entries work without a key. Changes load the next time
 WoW starts, or after typing `/reload` in WoW.
 
 Add-ons are checked against the selected channel's product and client version,
-and go into that channel's own `Interface/AddOns` folder. The curated catalogue
-and starter packs currently have Forever data only. Other flavours can use
-**Add from GitHub link…** and manage add-ons whose source is known. Unknown
+and go into that channel's own `Interface/AddOns` folder. Find and Starter packs
+cover Retail (including PTR/beta), Classic MoP, Anniversary, Classic Era and
+Forever. Find uses [layday's GitHub add-on catalogue](https://github.com/layday/github-wow-addon-catalogue),
+Forever's curated rows and compatible WoWInterface/Tukui entries. It retains
+the last good cache offline and includes a bundled GitHub snapshot for first
+use without a connection. **Add from GitHub link…** remains available. Unknown
 products say “Add-ons aren't supported for this WoW version yet”; they never
 receive another flavour's files.
 

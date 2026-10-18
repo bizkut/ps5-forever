@@ -1,0 +1,979 @@
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -41,6 +41,7 @@
+ tauri-plugin-dialog = { version = "2", optional = true }
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
++csv = "1.4"
+ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "io-util", "net", "time"] }
+ futures-util = "0.3"
+--- a/src-tauri/Cargo.lock
++++ b/src-tauri/Cargo.lock
+@@ -8,6 +8,7 @@
+ dependencies = [
+  "anyhow",
+  "base64 0.22.1",
++ "csv",
+  "dirs 5.0.1",
+  "futures-util",
+  "image 0.25.10",
+@@ -703,6 +704,27 @@
+ dependencies = [
+  "quote",
+  "syn 2.0.119",
++]
++
++[[package]]
++name = "csv"
++version = "1.4.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "52cd9d68cf7efc6ddfaaee42e7288d3a99d613d4b50f76ce9827ae0c6e14f938"
++dependencies = [
++ "csv-core",
++ "itoa",
++ "ryu",
++ "serde_core",
++]
++
++[[package]]
++name = "csv-core"
++version = "0.1.13"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "704a3c26996a80471189265814dbc2c257598b96b8a7feae2d31ace646bb9782"
++dependencies = [
++ "memchr",
+ ]
+ 
+ [[package]]
+--- a/src-tauri/src/catalog.rs
++++ b/src-tauri/src/catalog.rs
+@@ -1,9 +1,6 @@
+-//! The addon catalogue: a JSON file in this repo (`catalog/forever.json`).
+-//!
+-//! It is a *pointer list*, not a host: every entry says where the author
+-//! publishes releases (GitHub, Wago, WoWInterface, TukUI). Downloads always
+-//! come straight from that source. A copy is compiled into the exe as a
+-//! fallback; at runtime we try the latest copy on GitHub first.
++//! Author-hosted catalogue pointers. Public provider indexes are cached on
++//! disk for six hours; failed refreshes retain the last good copy. Forever
++//! also keeps its small upstream pointer list as a first-run offline fallback.
+ 
+ use serde::{Deserialize, Serialize};
+ use std::time::Duration;
+@@ -11,6 +8,164 @@
+ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
+ pub const REMOTE_URL: &str =
+     "https://raw.githubusercontent.com/Topher121/AddonForge/main/catalog/forever.json";
++pub const GITHUB_URL: &str =
++    "https://raw.githubusercontent.com/layday/github-wow-addon-catalogue/main/addons.csv";
++pub const BUNDLED_GITHUB: &str = include_str!("../../catalog/github.csv");
++const GITHUB_TTL: Duration = Duration::from_secs(24 * 60 * 60);
++const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
++const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
++
++#[derive(Deserialize)]
++struct GithubRow {
++    id: u64,
++    name: String,
++    full_name: String,
++    url: String,
++    description: String,
++    flavors: String,
++    curse_id: String,
++    wago_id: String,
++    wowi_id: String,
++}
++
++fn parse_github(text: &str) -> anyhow::Result<Vec<GithubRow>> {
++    let mut reader = csv::Reader::from_reader(text.as_bytes());
++    let rows: Vec<GithubRow> = reader.deserialize().collect::<Result<_, _>>()?;
++    anyhow::ensure!(!rows.is_empty() && rows.iter().all(|r|
++        r.id != 0 && r.full_name.split('/').all(|part| !matches!(part, "." | ".."))
++            && r.url.strip_prefix("https://github.com/") == Some(r.full_name.as_str())
++            && crate::sources::parse_github_repo(&r.full_name).as_deref() == Some(&r.full_name)),
++        "Invalid GitHub add-on catalogue");
++    Ok(rows)
++}
++
++fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<CatalogEntry> {
++    let token = match flavor {
++        crate::flavor::Flavor::Retail => "mainline",
++        crate::flavor::Flavor::Bc => "bcc",
++        _ => flavor.id(),
++    };
++    rows.iter().filter(|r| r.flavors.split(',').any(|f| f.trim() == token)).map(|r| CatalogEntry {
++        id: format!("gh-{}", r.id), name: r.name.clone(), desc: r.description.clone(),
++        github: Some(r.full_name.clone()), url: Some(r.url.clone()),
++        wowi: r.wowi_id.parse().ok(), curse: r.curse_id.parse().ok(),
++        wago: if r.wago_id.is_empty() { None } else { Some(r.wago_id.clone()) },
++        forever: Some(true), ..Default::default()
++    }).collect()
++}
++
++#[derive(Serialize, Deserialize)]
++struct CachedGithub {
++    fetched_at: u64,
++    etag: Option<String>,
++    text: String,
++}
++
++fn size_error() -> std::io::Error {
++    std::io::Error::new(std::io::ErrorKind::InvalidData, "catalogue size limit exceeded")
++}
++
++fn read_cache(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
++    use std::io::Read;
++    let file = std::fs::File::open(path)?;
++    let size = file.metadata()?.len();
++    if size > MAX_CACHE_BYTES as u64 { return Err(size_error()); }
++    let mut bytes = Vec::with_capacity(size as usize);
++    file.take(MAX_CACHE_BYTES as u64 + 1).read_to_end(&mut bytes)?;
++    if bytes.len() > MAX_CACHE_BYTES { return Err(size_error()); }
++    Ok(bytes)
++}
++
++async fn read_index(response: reqwest::Response) -> Option<Vec<u8>> {
++    use futures_util::StreamExt;
++    if response.content_length().is_some_and(|size| size > MAX_INDEX_BYTES as u64) { return None; }
++    let mut bytes = Vec::with_capacity(response.content_length().unwrap_or(4096) as usize);
++    let mut stream = response.bytes_stream();
++    while let Some(chunk) = stream.next().await {
++        let chunk = chunk.ok()?;
++        if chunk.len() > MAX_INDEX_BYTES - bytes.len() { return None; }
++        bytes.extend_from_slice(&chunk);
++    }
++    Some(bytes)
++}
++
++fn encode_cache(value: &impl Serialize) -> Result<Vec<u8>, serde_json::Error> {
++    struct Bounded(Vec<u8>);
++    impl std::io::Write for Bounded {
++        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
++            if bytes.len() > MAX_CACHE_BYTES - self.0.len() { return Err(size_error()); }
++            self.0.extend_from_slice(bytes);
++            Ok(bytes.len())
++        }
++        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
++    }
++    let mut output = Bounded(Vec::new());
++    serde_json::to_writer(&mut output, value)?;
++    Ok(output.0)
++}
++
++fn store_cache(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
++    store_cache_with(path, bytes, |from, to| std::fs::rename(from, to))
++}
++
++fn store_cache_with(
++    path: &std::path::Path, bytes: &[u8],
++    replace: impl FnOnce(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
++) -> std::io::Result<()> {
++    use std::io::Write;
++    if bytes.len() > MAX_CACHE_BYTES { return Err(size_error()); }
++    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
++    let temporary = path.with_extension("tmp");
++    let result = (|| {
++        let mut file = std::fs::File::create(&temporary)?;
++        file.write_all(bytes)?;
++        file.sync_all()?;
++        drop(file);
++        // std::fs::rename atomically replaces files on Unix and Windows
++        // (MoveFileExW/SetFileInformationByHandle). Never unlink the last good
++        // destination: a failed replacement must leave it intact.
++        replace(&temporary, path)
++    })();
++    if result.is_err() { let _ = std::fs::remove_file(&temporary); }
++    result
++}
++
++async fn github_index(client: &reqwest::Client, url: &str,
++                      path: &std::path::Path, refresh: bool) -> Vec<GithubRow> {
++    let cached = read_cache(path).ok()
++        .and_then(|bytes| serde_json::from_slice::<CachedGithub>(&bytes).ok())
++        .filter(|c| parse_github(&c.text).is_ok());
++    if !refresh && cached.as_ref().is_some_and(|c|
++        c.fetched_at <= now() && now() - c.fetched_at < GITHUB_TTL.as_secs()) {
++        return parse_github(&cached.unwrap().text).unwrap();
++    }
++    let fetched = async {
++        let mut request = client.get(url).timeout(Duration::from_secs(6));
++        if let Some(etag) = cached.as_ref().and_then(|c| c.etag.as_ref()) {
++            request = request.header(reqwest::header::IF_NONE_MATCH, etag);
++        }
++        let response = request.send().await.ok()?;
++        if response.status() == reqwest::StatusCode::NOT_MODIFIED {
++            return cached.as_ref().map(|c| CachedGithub {
++                fetched_at: now(), etag: c.etag.clone(), text: c.text.clone() });
++        }
++        let response = response.error_for_status().ok()?;
++        let etag = response.headers().get(reqwest::header::ETAG)
++            .and_then(|h| h.to_str().ok()).map(str::to_owned);
++        let text = String::from_utf8(read_index(response).await?).ok()?;
++        parse_github(&text).ok()?;
++        Some(CachedGithub { fetched_at: now(), etag, text })
++    }.await;
++    if let Some(record) = fetched {
++        if let Ok(bytes) = encode_cache(&record) {
++            let _ = store_cache(path, &bytes);
++        }
++        parse_github(&record.text).unwrap()
++    } else {
++        cached.and_then(|c| parse_github(&c.text).ok())
++            .unwrap_or_else(|| parse_github(BUNDLED_GITHUB).expect("build-validated GitHub snapshot"))
++    }
++}
+ 
+ #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+ pub struct CatalogEntry {
+@@ -152,27 +307,498 @@
+     serde_json::from_str(BUNDLED).unwrap_or_default()
+ }
+ 
+-/// Latest catalogue: remote copy if reachable within a few seconds, else bundled.
+-pub async fn load(client: &reqwest::Client) -> (Catalog, &'static str) {
+-    let remote = async {
+-        let r = client
+-            .get(REMOTE_URL)
+-            .timeout(Duration::from_secs(6))
+-            .send()
+-            .await
+-            .ok()?
+-            .error_for_status()
+-            .ok()?;
+-        r.json::<Catalog>().await.ok()
+-    }
+-    .await;
+-    // A build can ship with a catalogue newer than what is on GitHub for a
+-    // little while (or the remote copy could be rolled back); take the newer
+-    // of the two by their `updated` date, remote on a tie.
+-    let local = bundled();
+-    match remote {
+-        Some(c) if !c.addons.is_empty() && c.updated >= local.updated => (c, "remote"),
+-        Some(_) => (local, "bundled (newer)"),
+-        None => (local, "bundled"),
+-    }
+-}
++pub const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
++pub const WOWI_LIST: &str = "https://api.mmoui.com/v4/game/WOW/filelist.json";
++pub const TUKUI_LIST: &str = "https://api.tukui.org/v1/addons";
++
++#[derive(Serialize, Deserialize)]
++struct CachedJson {
++    fetched_at: u64,
++    data: serde_json::Value,
++}
++
++fn now() -> u64 {
++    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
++        .unwrap_or_default().as_secs()
++}
++
++async fn cached_json(
++    client: &reqwest::Client, url: &str, path: &std::path::Path, refresh: bool,
++    valid: impl Fn(&serde_json::Value) -> bool,
++) -> Option<serde_json::Value> {
++    let cached = read_cache(path).ok()
++        .and_then(|bytes| serde_json::from_slice::<CachedJson>(&bytes).ok())
++        .filter(|c| valid(&c.data));
++    if !refresh && cached.as_ref().is_some_and(|c|
++        c.fetched_at <= now() && now() - c.fetched_at < CACHE_TTL.as_secs()) {
++        return cached.map(|c| c.data);
++    }
++    let fetched = async {
++        let response = client.get(url).timeout(Duration::from_secs(6)).send().await.ok()?
++            .error_for_status().ok()?;
++        serde_json::from_slice::<serde_json::Value>(&read_index(response).await?).ok()
++    }.await.filter(|v| valid(v));
++    if let Some(data) = fetched {
++        let record = CachedJson { fetched_at: now(), data };
++        if let Ok(bytes) = encode_cache(&record) {
++            let _ = store_cache(path, &bytes);
++        }
++        Some(record.data)
++    } else {
++        cached.map(|c| c.data)
++    }
++}
++
++/// Current engines, not historical 5.4/1.12 or obsolete Retail expansions.
++/// PTR/beta use the selected base flavour from flavor::for_product.
++pub fn current_patch(flavor: crate::flavor::Flavor, patch: &str) -> bool {
++    use crate::flavor::Flavor::*;
++    let prefix = match flavor {
++        Retail => "12.", Mists => "5.5.", Bc => "2.5.", Classic => "1.15.",
++        Forever => "1.60.", Wrath => "3.4.", Cata => "4.4.",
++    };
++    patch.starts_with(prefix) && flavor.accepts_patch(patch)
++}
++
++fn compatible(value: &serde_json::Value, key: &str, flavor: crate::flavor::Flavor) -> bool {
++    value[key].as_array().is_some_and(|versions|
++        versions.iter().filter_map(|v| v.as_str()).any(|p| current_patch(flavor, p)))
++}
++
++fn public_entries(wowi: &serde_json::Value, tukui: &serde_json::Value,
++                  flavor: crate::flavor::Flavor) -> Vec<CatalogEntry> {
++    let mut entries = Vec::new();
++    for file in wowi.as_array().into_iter().flatten() {
++        if !compatible(file, "gameVersions", flavor) || file["library"] == true { continue; }
++        let (Some(id), Some(name)) = (file["id"].as_u64(), file["title"].as_str()) else { continue };
++        entries.push(CatalogEntry {
++            id: format!("wowi-{id}"), name: name.into(), wowi: Some(id),
++            desc: format!("WoWInterface · {}", file["author"].as_str().unwrap_or("")),
++            url: Some(format!("https://www.wowinterface.com/downloads/info{id}")),
++            forever: Some(true), ..Default::default()
++        });
++    }
++    for addon in tukui.as_array().into_iter().flatten() {
++        if !compatible(addon, "patch", flavor) || addon["url"].as_str().is_none_or(|s| s.is_empty()) { continue; }
++        let (Some(slug), Some(name)) = (addon["slug"].as_str(), addon["name"].as_str()) else { continue };
++        entries.push(CatalogEntry {
++            id: format!("tukui-{slug}"), name: name.into(), tukui: Some(slug.into()),
++            desc: addon["small_desc"].as_str().unwrap_or("Tukui").into(),
++            folders: addon["directories"].as_array().into_iter().flatten()
++                .filter_map(|v| v.as_str().map(str::to_owned)).collect(),
++            url: Some(format!("https://tukui.org/{slug}")),
++            forever: Some(true), ..Default::default()
++        });
++    }
++    entries
++}
++
++/// Small author-release pointers verified for every supported family by the
++/// live qualification test. Resolution and archive admission still recheck
++/// the selected flavour at install/update time.
++fn compose(flavor: crate::flavor::Flavor, mut cat: Catalog,
++           public: Vec<CatalogEntry>) -> Catalog {
++    cat.flavor = flavor.id().into();
++    let five_families = matches!(flavor, crate::flavor::Flavor::Retail | crate::flavor::Flavor::Mists
++        | crate::flavor::Flavor::Bc | crate::flavor::Flavor::Classic | crate::flavor::Flavor::Forever);
++    for (id, name, repo, folder, only_five) in [
++        ("betterbags", "BetterBags", "Cidan/BetterBags", "BetterBags", true),
++        ("bagsync", "BagSync", "Xruptor/BagSync", "BagSync", false),
++        ("improve-any", "ImproveAny", "d4kir92/ImproveAny", "ImproveAny", false),
++        ("minimap-button-button", "MinimapButtonButton", "syndenbock/MinimapButtonButton", "MinimapButtonButton", false),
++        ("immersion", "Immersion", "seblindfors/Immersion", "Immersion", true),
++        ("xanchat", "XanChat", "Xruptor/XanChat", "XanChat", false),
++    ] {
++        if only_five && !five_families { continue; }
++        if !cat.addons.iter().any(|e| e.id == id) {
++            cat.addons.push(CatalogEntry {
++                id: id.into(), name: name.into(), github: Some(repo.into()),
++                folders: vec![folder.into()], desc: "GitHub author release".into(),
++                forever: Some(true), ..Default::default()
++            });
++        }
++    }
++    let has_elvui = matches!(flavor, crate::flavor::Flavor::Retail | crate::flavor::Flavor::Mists
++        | crate::flavor::Flavor::Bc | crate::flavor::Flavor::Classic);
++    if has_elvui {
++        cat.addons.push(CatalogEntry {
++            id: "tukui-elvui".into(), name: "ElvUI".into(), tukui: Some("elvui".into()),
++            folders: vec!["ElvUI".into(), "ElvUI_Libraries".into(), "ElvUI_Options".into()],
++            desc: "Tukui · complete interface replacement".into(),
++            forever: Some(true), ..Default::default()
++        });
++    }
++    for entry in public {
++        if let Some(existing) = cat.addons.iter_mut().find(|e|
++            e.id == entry.id || (entry.github.as_ref().is_some_and(|repo|
++                e.github.as_ref().is_some_and(|other| repo.eq_ignore_ascii_case(other))))
++                || (entry.github.is_none() && entry.wowi.is_some() && e.wowi == entry.wowi)
++                || (entry.tukui.is_some() && e.tukui == entry.tukui)) {
++            if existing.id.starts_with("tukui-") { *existing = entry; }
++        } else { cat.addons.push(entry); }
++    }
++    cat.bundles = vec![
++        Bundle { id: "quality-of-life".into(), name: "Quality of life".into(),
++            desc: "Small interface fixes and a tidy minimap.".into(),
++            addons: vec!["improve-any".into(), "minimap-button-button".into()],
++            note: "Author GitHub releases; no API key needed.".into() },
++        Bundle { id: "bags".into(), name: "Bags and inventory".into(),
++            desc: "BetterBags and cross-character item tracking with BagSync.".into(),
++            addons: if five_families { vec!["betterbags".into(), "bagsync".into()] } else { vec!["bagsync".into()] },
++            note: "Author GitHub releases; no API key needed.".into() },
++        Bundle { id: "chat-quests".into(), name: "Chat and quest text".into(),
++            desc: "XanChat and Immersion's quest dialogue.".into(),
++            addons: if five_families { vec!["xanchat".into(), "immersion".into()] } else { vec!["xanchat".into()] },
++            note: "Author GitHub releases; no API key needed.".into() },
++    ];
++    if has_elvui {
++        cat.bundles.push(Bundle { id: "interface".into(), name: "User interface".into(),
++            desc: "ElvUI's complete interface replacement.".into(),
++            addons: vec!["tukui-elvui".into()], note: "Tukui author download; no API key needed.".into() });
++    }
++    cat.addons.sort_by_cached_key(|e| e.name.to_lowercase());
++    cat
++}
++
++pub async fn load_for(client: &reqwest::Client, flavor: crate::flavor::Flavor,
++                      dir: &std::path::Path, refresh: bool) -> (Catalog, &'static str) {
++    let wowi_path = dir.join("wowi-v4.json");
++    let tukui_path = dir.join("tukui-v1.json");
++    let forever_path = dir.join("forever.json");
++    let github_path = dir.join("github-index.json");
++    let (github, wowi, tukui, forever) = tokio::join!(
++        github_index(client, GITHUB_URL, &github_path, refresh),
++        cached_json(client, WOWI_LIST, &wowi_path, refresh, |v| v.as_array().is_some_and(|a|
++            a.iter().any(|e| e["id"].is_u64() && e["title"].is_string() && e["gameVersions"].is_array()))),
++        cached_json(client, TUKUI_LIST, &tukui_path, refresh, |v| v.as_array().is_some_and(|a|
++            a.iter().any(|e| e["slug"].is_string() && e["patch"].is_array()))),
++        async {
++            if flavor == crate::flavor::Flavor::Forever {
++                cached_json(client, REMOTE_URL, &forever_path, refresh, |v|
++                    serde_json::from_value::<Catalog>(v.clone()).is_ok_and(|c|
++                        c.flavor == "forever" && !c.addons.is_empty())).await
++            } else { None }
++        },
++    );
++    let base = if flavor == crate::flavor::Flavor::Forever {
++        let local = bundled();
++        forever.and_then(|v| serde_json::from_value::<Catalog>(v).ok())
++            .filter(|c| c.updated >= local.updated).unwrap_or(local)
++    } else { Catalog::default() };
++    let mut public = github_entries(&github, flavor);
++    public.extend(public_entries(&wowi.unwrap_or_default(), &tukui.unwrap_or_default(), flavor));
++    (compose(flavor, base, public), "GitHub catalogue + secondary public indexes")
++}
++
++#[cfg(test)]
++mod live_tests {
++    use super::*;
++    use crate::flavor::Flavor;
++    use serde_json::json;
++
++    const CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen\n\
++        42,Quoted,Owner/Repo,https://github.com/Owner/Repo,\"Comma, \"\"quote\"\"\nand newline\",2026-10-18,\"mainline,mists,bcc,classic,forever\",123,key,7,True,2026-10-18\n\
++        43,Other,Owner/Other,https://github.com/Owner/Other,Other,2026-10-18,wrath,,,,False,2026-10-18\n";
++
++    fn oversized_chunked_server(prefix: String, fill: u8, suffix: &'static str, lying_length: bool)
++        -> (String, std::thread::JoinHandle<()>) {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let thread = std::thread::spawn(move || {
++            use std::io::{Read, Write};
++            fn chunk(stream: &mut std::net::TcpStream, bytes: &[u8]) -> std::io::Result<()> {
++                write!(stream, "{:x}\r\n", bytes.len())?;
++                stream.write_all(bytes)?;
++                stream.write_all(b"\r\n")
++            }
++            let (mut stream, _) = listener.accept().unwrap();
++            let mut request = [0;4096]; let _ = stream.read(&mut request);
++            let _ = (|| -> std::io::Result<()> {
++                stream.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n")?;
++                if lying_length { stream.write_all(b"Content-Length: 1\r\n")?; }
++                stream.write_all(b"\r\n")?;
++                chunk(&mut stream, prefix.as_bytes())?;
++                let block = vec![fill; 64 * 1024];
++                for _ in 0..=MAX_INDEX_BYTES / block.len() { chunk(&mut stream, &block)?; }
++                if !suffix.is_empty() { chunk(&mut stream, suffix.as_bytes())?; }
++                stream.write_all(b"0\r\n\r\n")
++            })();
++        });
++        (url, thread)
++    }
++
++    #[tokio::test]
++    async fn oversized_live_and_cached_indexes_keep_last_good_or_bundled_fallback() {
++        use std::io::Write;
++        let dir = std::env::temp_dir().join(format!("af-bounded-index-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let github_path = dir.join("github.json");
++        let json_path = dir.join("public.json");
++        let github = serde_json::to_vec(&CachedGithub {
++            fetched_at: now(), etag: None, text: CSV_FIXTURE.into(),
++        }).unwrap();
++        let public = serde_json::to_vec(&CachedJson {
++            fetched_at: now(), data: json!([{"id":42}]),
++        }).unwrap();
++        std::fs::write(&github_path, &github).unwrap();
++        std::fs::write(&json_path, &public).unwrap();
++        let client = reqwest::Client::new();
++        for lying_length in [false, true] {
++            let (url, server) = oversized_chunked_server(
++                CSV_FIXTURE.replace("42,Quoted", "99,Quoted"), b'\n', "", lying_length);
++            let rows = github_index(&client, &url, &github_path, true).await;
++            server.join().unwrap();
++            assert_eq!(rows[0].id, 42);
++            assert_eq!(std::fs::read(&github_path).unwrap(), github);
++
++            let (url, server) = oversized_chunked_server("[{\"id\":99,\"padding\":\"".into(), b'x', "\"}]", lying_length);
++            let data = cached_json(&client, &url, &json_path, true, |v| v.is_array()).await.unwrap();
++            server.join().unwrap();
++            assert_eq!(data[0]["id"], 42);
++            assert_eq!(std::fs::read(&json_path).unwrap(), public);
++        }
++
++        // Valid JSON with trailing whitespace would deserialize successfully
++        // without a pre-parse file bound.
++        let padding = vec![b' '; MAX_CACHE_BYTES + 1];
++        for path in [&github_path, &json_path] {
++            std::fs::OpenOptions::new().append(true).open(path).unwrap().write_all(&padding).unwrap();
++        }
++        assert_eq!(github_index(&client, "http://127.0.0.1:1", &github_path, false).await.len(),
++            parse_github(BUNDLED_GITHUB).unwrap().len());
++        assert!(cached_json(&client, "http://127.0.0.1:1", &json_path, false, |v| v.is_array()).await.is_none());
++        std::fs::write(&json_path, &public).unwrap();
++        assert_eq!(store_cache(&json_path, &padding).unwrap_err().kind(), std::io::ErrorKind::InvalidData);
++        assert_eq!(std::fs::read(&json_path).unwrap(), public);
++        // JSON string escaping must not allocate or promote a cache envelope
++        // beyond its bound even when the original index itself fits.
++        assert!(encode_cache(&json!({"text":"\0".repeat(MAX_CACHE_BYTES / 6 + 1)})).is_err());
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
++    #[test]
++    fn csv_quotes_multiline_flavours_and_repository_deduplication() {
++        let rows = parse_github(CSV_FIXTURE).unwrap();
++        for flavor in [Flavor::Retail, Flavor::Mists, Flavor::Bc, Flavor::Classic, Flavor::Forever] {
++            let entries = github_entries(&rows, flavor);
++            assert_eq!(entries.len(), 1);
++            assert_eq!(entries[0].desc, "Comma, \"quote\"\nand newline");
++            assert_eq!(entries[0].github.as_deref(), Some("Owner/Repo"));
++            let mut base = Catalog::default();
++            base.addons.push(CatalogEntry { id: "existing".into(), name: "Existing".into(),
++                github: Some("owner/repo".into()), ..Default::default() });
++            let cat = compose(flavor, base, entries);
++            assert_eq!(cat.addons.iter().filter(|e| e.github.as_ref()
++                .is_some_and(|r| r.eq_ignore_ascii_case("owner/repo"))).count(), 1);
++            assert!(cat.addons.iter().any(|e| e.id == "existing"));
++        }
++        assert_eq!(github_entries(&rows, Flavor::Wrath).len(), 1);
++        assert!(parse_github("html error").is_err());
++        assert!(parse_github(&CSV_FIXTURE.replace("Owner/Repo", "../escape")).is_err());
++    }
++
++    #[test]
++    fn cache_replacement_preserves_last_good_until_success_and_on_failure() {
++        let dir = std::env::temp_dir().join(format!("af-cache-replace-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("catalogue.json");
++        let old = br#"{"fetched_at":1,"data":[{"id":42}]}"#;
++        let new = br#"{"fetched_at":2,"data":[{"id":43}]}"#;
++        std::fs::write(&path, old).unwrap();
++        store_cache_with(&path, new, |temporary, destination| {
++            assert_eq!(std::fs::read(destination).unwrap(), old);
++            assert_eq!(std::fs::read(temporary).unwrap(), new);
++            std::fs::rename(temporary, destination)
++        }).unwrap();
++        assert_eq!(std::fs::read(&path).unwrap(), new);
++
++        std::fs::write(&path, old).unwrap();
++        let result = store_cache_with(&path, new, |temporary, destination| {
++            assert_eq!(std::fs::read(destination).unwrap(), old);
++            assert_eq!(std::fs::read(temporary).unwrap(), new);
++            Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "forced replacement failure"))
++        });
++        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
++        assert_eq!(std::fs::read(&path).unwrap(), old);
++        assert!(!path.with_extension("tmp").exists());
++        store_cache(&path, new).unwrap();
++        assert_eq!(std::fs::read(&path).unwrap(), new);
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
++    #[tokio::test]
++    async fn github_cache_uses_ttl_etag_304_stale_and_bundled_fallback() {
++        use std::io::{Read, Write};
++        let dir = std::env::temp_dir().join(format!("af-github-cache-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("index.json");
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let server = std::thread::spawn(move || {
++            for i in 0..2 {
++                let (mut stream, _) = listener.accept().unwrap();
++                let mut request = [0;4096]; let count = stream.read(&mut request).unwrap();
++                if i == 0 {
++                    write!(stream, "HTTP/1.1 200 OK\r\nETag: \"fixture\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{CSV_FIXTURE}", CSV_FIXTURE.len()).unwrap();
++                } else {
++                    assert!(String::from_utf8_lossy(&request[..count]).to_lowercase().contains("if-none-match: \"fixture\""));
++                    write!(stream, "HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
++                }
++            }
++        });
++        let client = reqwest::Client::new();
++        assert_eq!(github_index(&client, &url, &path, false).await.len(), 2);
++        assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(), 2);
++        assert_eq!(github_index(&client, &url, &path, true).await.len(), 2);
++        server.join().unwrap();
++        let mut record: CachedGithub = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
++        record.fetched_at = 1;
++        std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
++        assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(), 2);
++        std::fs::remove_file(&path).unwrap();
++        assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(),
++            parse_github(BUNDLED_GITHUB).unwrap().len());
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
++    #[test]
++    fn public_catalogues_filter_current_families_without_guessing() {
++        let files = json!([
++            {"id":1,"title":"Retail","gameVersions":["12.1.5"]},
++            {"id":2,"title":"Mists","gameVersions":["5.5.4"]},
++            {"id":3,"title":"Anniversary","gameVersions":["2.5.6"]},
++            {"id":4,"title":"Era","gameVersions":["1.15.9"]},
++            {"id":5,"title":"Forever","gameVersions":["1.60.1"]},
++            {"id":6,"title":"Unknown","gameVersions":null},
++            {"id":7,"title":"Old retail","gameVersions":["11.2.0"]},
++            {"id":8,"title":"Original MoP","gameVersions":["5.4.8"]},
++            {"id":9,"title":"Shared","gameVersions":["12.1.0","1.15.9"]}
++        ]);
++        let tukui = json!([{"slug":"elvui","name":"ElvUI","patch":["12.1.0","5.5.4","2.5.6","1.15.9"],
++            "directories":["ElvUI"],"url":"https://api.tukui.org/download/fixture"}]);
++        for (flavor, expected) in [(Flavor::Retail, vec![1,9]), (Flavor::Mists, vec![2]),
++            (Flavor::Bc, vec![3]), (Flavor::Classic, vec![4,9]), (Flavor::Forever, vec![5])] {
++            let entries = public_entries(&files, &tukui, flavor);
++            assert_eq!(entries.iter().filter_map(|e| e.wowi).collect::<Vec<_>>(), expected);
++            assert_eq!(entries.iter().filter(|e| e.tukui.is_some()).count(),
++                usize::from(flavor != Flavor::Forever));
++            assert!(entries.iter().all(|e| e.forever == Some(true)));
++        }
++    }
++
++    #[test]
++    fn starter_packs_are_downloadable_and_never_require_a_wago_key() {
++        for flavor in [Flavor::Retail, Flavor::Mists, Flavor::Bc, Flavor::Classic, Flavor::Forever] {
++            let cat = compose(flavor, Catalog::default(), Vec::new());
++            assert!(!cat.addons.is_empty());
++            assert_eq!(cat.bundles.len(), if flavor == Flavor::Forever { 3 } else { 4 });
++            for bundle in &cat.bundles {
++                assert!(!bundle.addons.is_empty());
++                for id in &bundle.addons {
++                    let e = cat.addons.iter().find(|e| &e.id == id).unwrap();
++                    assert!(e.github.is_some() || e.tukui.is_some());
++                    assert!(e.wago.is_none());
++                }
++            }
++            assert_eq!(cat.flavor, flavor.id());
++        }
++    }
++
++    #[tokio::test]
++    async fn cache_ttl_stale_fallback_and_invalid_refresh_preserve_last_good_data() {
++        use std::io::{Read, Write};
++        let dir = std::env::temp_dir().join(format!("af-live-cache-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("files.json");
++        let client = reqwest::Client::new();
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let server = std::thread::spawn(move || {
++            for body in [r#"[{"id":42}]"#, r#"{"error":"bad payload"}"#] {
++                let (mut stream, _) = listener.accept().unwrap();
++                let mut request = [0;4096]; let _ = stream.read(&mut request);
++                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
++            }
++        });
++        let valid = |v: &serde_json::Value| v.as_array().is_some_and(|a| !a.is_empty());
++        let first = cached_json(&client, &url, &path, false, valid).await.unwrap();
++        assert_eq!(first[0]["id"], 42);
++        assert_eq!(cached_json(&client, "http://127.0.0.1:1", &path, false, valid).await.unwrap(), first);
++        assert_eq!(cached_json(&client, &url, &path, true, valid).await.unwrap(), first);
++        server.join().unwrap();
++        let mut old: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
++        old["fetched_at"] = json!(1);
++        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
++        assert_eq!(cached_json(&client, "http://127.0.0.1:1", &path, false, valid).await.unwrap(), first);
++        assert_eq!(serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path).unwrap()).unwrap()["fetched_at"], 1);
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
++    #[tokio::test]
++    #[ignore = "live author endpoints and archive downloads; run build.py --check-catalogue"]
++    async fn qualify_live_catalogue() {
++        use crate::sources::{Source, ResolveOpts};
++        let root = std::env::temp_dir().join(format!("af-catalogue-live-{}", std::process::id()));
++        std::fs::create_dir_all(&root).unwrap();
++        let client = reqwest::Client::builder().user_agent(crate::USER_AGENT)
++            .timeout(Duration::from_secs(120)).build().unwrap();
++        let mut reports = Vec::new();
++        for flavor in [Flavor::Retail, Flavor::Mists, Flavor::Bc, Flavor::Classic, Flavor::Forever] {
++            let (cat, _) = load_for(&client, flavor, &root.join("cache"), false).await;
++            let mut checks = Vec::new();
++            let ids: std::collections::BTreeSet<_> = cat.bundles.iter()
++                .flat_map(|b| b.addons.iter()).collect();
++            for id in ids {
++                let entry = cat.addons.iter().find(|e| &e.id == id).unwrap();
++                let source = entry.github.as_ref().map(|r| Source::Github(r.clone()))
++                    .or_else(|| entry.tukui.as_ref().map(|s| Source::Tukui(s.clone()))).unwrap();
++                let remote = crate::sources::resolve(&client, &source,
++                    ResolveOpts { flavor, asset_hint: entry.asset_hint.as_deref(), ..Default::default() })
++                    .await.unwrap_or_else(|e| panic!("{} {id} resolve: {e}", flavor.id()));
++                assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
++                let zip = crate::install::download(&client, &remote.download_url,
++                    &root.join("downloads"), &remote.filename).await.unwrap();
++                let placed = crate::install::place_timed(&zip,
++                    &root.join(flavor.id()).join(id), flavor)
++                    .unwrap_or_else(|e| panic!("{} {id} archive: {e}", flavor.id()));
++                println!("STARTER_VERIFIED flavor={} id={id} folders={}", flavor.id(), placed.folders.len());
++                checks.push(json!({"id":id,"source":source.kind(),"version":remote.version,
++                    "url":remote.download_url,"folders":placed.folders}));
++            }
++            let wowi = if cat.addons.iter().any(|e| e.wowi == Some(7032)) {
++                let remote = crate::sources::resolve(&client, &Source::Wowi(7032),
++                    ResolveOpts { flavor, ..Default::default() }).await.unwrap();
++                // v4 details currently omits gameVersions (filelist supplies
++                // it). Missing metadata still requires the real archive TOCs.
++                assert_ne!(remote.forever, Some(false));
++                let zip = crate::install::download(&client, &remote.download_url,
++                    &root.join("downloads"), &remote.filename).await.unwrap();
++                let placed = crate::install::place_timed(&zip,
++                    &root.join(flavor.id()).join("wowi-smoke"), flavor).unwrap();
++                json!({"id":7032,"version":remote.version,"url":remote.download_url,"folders":placed.folders})
++            } else { serde_json::Value::Null };
++            let rows: Vec<_> = cat.addons.iter().cloned().map(|entry| crate::CatalogRow {
++                key: format!("cat:{}", entry.id), entry, installed: false,
++                downloads: None, updated_at: None, stat_source: None,
++            }).collect();
++            let response_bytes = serde_json::to_vec(&json!({"ok":true,
++                "result":{"rows":rows,"notice":""}})).unwrap().len();
++            assert!(cat.addons.len() <= 4096 && response_bytes < 2 * 1024 * 1024);
++            let report = json!({"flavor":flavor.id(),"catalogue_count":cat.addons.len(),
++                "find_response_bytes":response_bytes,
++                "github_count":cat.addons.iter().filter(|e| e.github.is_some()).count(),
++                "wowi_count":cat.addons.iter().filter(|e| e.wowi.is_some()).count(),
++                "tukui_count":cat.addons.iter().filter(|e| e.tukui.is_some()).count(),
++                "bundles":cat.bundles,"starter_checks":checks,"wowi_download_check":wowi});
++            println!("CATALOGUE_VERIFIED {report}");
++            reports.push(report);
++        }
++        if let Some(path) = std::env::var_os("ADDONFORGE_CATALOGUE_REPORT") {
++            std::fs::write(path, serde_json::to_vec_pretty(&json!({
++                "checked_at_unix":now(),"github_endpoint":GITHUB_URL,
++                "wowi_endpoint":WOWI_LIST,"tukui_endpoint":TUKUI_LIST,
++                "flavours":reports})).unwrap()).unwrap();
++        }
++        std::fs::remove_dir_all(root).unwrap();
++    }
++}
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -38,6 +38,7 @@
+     state: Mutex<AppState>,
+     wago_valid: Mutex<Option<bool>>,
+     catalog: Mutex<Option<(Catalog, &'static str)>>,
++    catalog_time: Mutex<Option<std::time::Instant>>,
+     stats: Mutex<Option<Stats>>,
+     last_install_timing: Mutex<Option<InstallTiming>>,
+     mutation: Mutex<()>,
+@@ -408,15 +409,21 @@
+ }
+ 
+ async fn catalog_cached(app: &App) -> Catalog {
++    catalog_cached_refresh(app, false).await
++}
++
++async fn catalog_cached_refresh(app: &App, refresh: bool) -> Catalog {
++    let Ok(selected) = current_flavor(app).await else { return Catalog::default() };
+     let mut guard = app.catalog.lock().await;
+-    if guard.is_none() {
+-        let loaded = catalog::load(&app.client).await;
+-        logi!(
+-            "catalogue loaded: {} entries ({})",
+-            loaded.0.addons.len(),
+-            loaded.1
+-        );
++    let mut loaded_at = app.catalog_time.lock().await;
++    if refresh || guard.as_ref().is_none_or(|(cat, _)| cat.flavor != selected.id())
++        || loaded_at.is_some_and(|at| at.elapsed() >= catalog::CACHE_TTL) {
++        let loaded = catalog::load_for(&app.client, selected,
++            &AppState::dir().join("catalogue-cache"), refresh).await;
++        logi!("catalogue loaded: flavour={} entries={} ({})",
++            selected.id(), loaded.0.addons.len(), loaded.1);
+         *guard = Some(loaded);
++        *loaded_at = Some(std::time::Instant::now());
+     }
+     guard.as_ref().unwrap().0.clone()
+ }
+@@ -956,12 +963,12 @@
+         *app.catalog.lock().await = None;
+         *app.stats.lock().await = None;
+     }
+-    let cat = catalog_cached(app).await;
++    let cat = catalog_cached_refresh(app, refresh.unwrap_or(false)).await;
+     let selected = current_flavor(app).await?;
+     if cat.flavor != selected.id() {
+         return Ok(Vec::new());
+     }
+-    let stats = stats_cached(app).await;
++    let stats = if selected == flavor::Flavor::Forever { stats_cached(app).await } else { Stats::default() };
+     let installed_keys: Vec<String> = match scan_packages(app).await {
+         Ok(p) => p.into_iter().map(|p| p.key).collect(),
+         Err(_) => Vec::new(),
+@@ -1586,6 +1593,7 @@
+         state: Mutex::new(st),
+         wago_valid: Mutex::new(None),
+         catalog: Mutex::new(None),
++        catalog_time: Mutex::new(None),
+         stats: Mutex::new(None),
+         last_install_timing: Mutex::new(None),
+         mutation: Mutex::new(()),
+@@ -2359,6 +2367,27 @@
+     use super::*;
+     static STATE_ENV: Mutex<()> = Mutex::const_new(());
+ 
++    fn prime_catalog_cache() {
++        let dir = AppState::dir().join("catalogue-cache");
++        std::fs::create_dir_all(&dir).unwrap();
++        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
++        for (file, data) in [
++            ("wowi-v4.json", serde_json::json!([
++                {"id":80042,"title":"Shared fixture","gameVersions":["12.1.5","1.15.9","2.5.6","5.5.4","1.60.1"]},
++                {"id":80043,"title":"Retail fixture","gameVersions":["12.1.5"]}])),
++            ("tukui-v1.json", serde_json::json!([{"slug":"elvui","name":"ElvUI","patch":["12.1.5","1.15.9","2.5.6","5.5.4"],
++                "url":"https://api.tukui.org/download/fixture"}])),
++            ("forever.json", serde_json::json!({"flavor":"forever","updated":"2099-01-01",
++                "addons":[{"id":"fixture","name":"Fixture","github":"local/fixture","folders":["Fixture"],"forever":true}]})),
++        ] {
++            std::fs::write(dir.join(file), serde_json::to_vec(&serde_json::json!(
++                {"fetched_at":timestamp,"data":data})).unwrap()).unwrap();
++        }
++        let csv = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen\n42,Fixture,known/fixture,https://github.com/known/fixture,Test,2026-10-18,\"mainline,mists,bcc,classic,forever\",,,,True,2026-10-18\n";
++        std::fs::write(dir.join("github-index.json"), serde_json::to_vec(&serde_json::json!(
++            {"fetched_at":timestamp,"etag":null,"text":csv})).unwrap()).unwrap();
++    }
++
+     #[tokio::test]
+     async fn installed_packages_use_selected_flavour_toc_versions_and_source_ids() {
+         let _environment = STATE_ENV.lock().await;
+@@ -2366,7 +2395,7 @@
+         let _ = std::fs::remove_dir_all(&root);
+         std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
+         let app = make_app();
+-        *app.catalog.lock().await = Some((Catalog::default(), "test"));
++        prime_catalog_cache();
+         *app.stats.lock().await = Some(Stats::default());
+         let clients = [
+             ("_retail_", "wow", 12, 1, 5, "Mainline"),
+@@ -2448,8 +2477,7 @@
+         let _ = std::fs::remove_dir_all(&root);
+         std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
+         let app = make_app();
+-        *app.catalog.lock().await = Some((serde_json::from_str(
+-            r#"{"flavor":"forever","addons":[{"id":"fixture","name":"Fixture","github":"local/fixture","folders":["Fixture"],"forever":true}]}"#).unwrap(), "test"));
++        prime_catalog_cache();
+         *app.stats.lock().await = Some(Stats::default());
+         let channels = [
+             ("_retail_", "wow", 12, 1, 5), ("_classic_era_", "wow_classic_era", 1, 15, 9),
+@@ -2473,23 +2501,22 @@
+                 install_local_archive(&app, "github:local/fixture", &Source::Github("local/fixture".into()), version, &zip).await.unwrap();
+                 assert_eq!(scan_packages(&app).await.unwrap()[0].installed_version.as_deref(), Some(version));
+             }
+-            if info.flavor == "forever" {
+-                assert_eq!(catalog_list_impl(&app, None).await.unwrap().len(), 1);
+-            } else {
+-                assert!(catalog_list_impl(&app, None).await.unwrap().is_empty());
+-                assert!(bundles_impl(&app).await.unwrap().is_empty());
+-                let find = dispatch_headless(app.clone(), HeadlessRequest {
+-                    command: "catalog_list".into(), args: serde_json::json!({"refresh": false}),
+-                }).await.unwrap();
+-                assert_eq!(find["rows"], serde_json::json!([]));
+-                assert!(find["notice"].as_str().unwrap().contains("No catalogue data"));
+-                let packs = dispatch_headless(app.clone(), HeadlessRequest {
+-                    command: "bundles".into(), args: serde_json::json!({}),
+-                }).await.unwrap();
+-                assert_eq!(packs["rows"], serde_json::json!([]));
+-                assert!(packs["notice"].as_str().unwrap().contains("No starter packs"));
+-                assert!(install_catalog_impl(&app, "fixture".into(), None).await.err().unwrap().contains("No catalogue data"));
+-            }
++            let rows = catalog_list_impl(&app, None).await.unwrap();
++            assert!(rows.iter().any(|r| r.entry.wowi == Some(80042)));
++            assert_eq!(rows.iter().any(|r| r.entry.wowi == Some(80043)), info.flavor == "retail");
++            assert_eq!(rows.iter().any(|r| r.entry.id == "fixture"), info.flavor == "forever");
++            assert!(!bundles_impl(&app).await.unwrap().is_empty());
++            let find = dispatch_headless(app.clone(), HeadlessRequest {
++                command: "catalog_list".into(), args: serde_json::json!({"refresh": false}),
++            }).await.unwrap();
++            assert!(!find["rows"].as_array().unwrap().is_empty());
++            assert_eq!(find["notice"], "");
++            let packs = dispatch_headless(app.clone(), HeadlessRequest {
++                command: "bundles".into(), args: serde_json::json!({}),
++            }).await.unwrap();
++            assert!(!packs["rows"].as_array().unwrap().is_empty());
++            assert_eq!(packs["notice"], "");
++            assert!(install_catalog_impl(&app, "foreign-fixture".into(), None).await.err().unwrap().contains("Not in the catalogue"));
+         }
+         let retail = root.join("World of Warcraft/_retail_");
+         set_install_path_impl(&app, retail.to_string_lossy().into()).await.unwrap();
+--- a/src-tauri/src/sources/wowi.rs
++++ b/src-tauri/src/sources/wowi.rs
+@@ -5,24 +5,16 @@
+ 
+ #[derive(Deserialize, Debug)]
+ struct FileDetails {
+-    #[serde(default, rename = "UIVersion")]
+     version: String,
+-    #[serde(default, rename = "UIDownload")]
++    #[serde(rename = "downloadUri")]
+     download: String,
+-    #[serde(default, rename = "UIFileName")]
++    #[serde(default, rename = "fileName")]
+     file_name: String,
+-    #[serde(default, rename = "UICompatibility")]
+-    compat: Option<Vec<Compat>>,
++    #[serde(default, rename = "gameVersions")]
++    compat: Option<Vec<String>>,
+ }
+-
+-#[derive(Deserialize, Debug)]
+-struct Compat {
+-    #[serde(default)]
+-    version: String,
+-}
+-
+ pub async fn resolve(client: &reqwest::Client, id: u64, flavor: crate::flavor::Flavor) -> anyhow::Result<Remote> {
+-    let url = format!("https://api.mmoui.com/v3/game/WOW/filedetails/{id}.json");
++    let url = format!("https://api.mmoui.com/v4/game/WOW/filedetails/{id}.json");
+     let resp = client.get(&url).send().await?;
+     if resp.status().as_u16() == 404 {
+         anyhow::bail!("WoWInterface has no addon with id {id}");
+@@ -32,13 +24,17 @@
+         .into_iter()
+         .next()
+         .ok_or_else(|| anyhow::anyhow!("WoWInterface returned nothing for {id}"))?;
++    from_details(d, id, flavor)
++}
++
++fn from_details(d: FileDetails, id: u64, flavor: crate::flavor::Flavor) -> anyhow::Result<Remote> {
+     if d.download.is_empty() {
+         anyhow::bail!("WoWInterface entry has no download link");
+     }
+     let forever = d
+         .compat
+         .as_ref()
+-        .map(|c| c.iter().any(|x| flavor.accepts_patch(&x.version)));
++        .map(|c| c.iter().any(|version| crate::catalog::current_patch(flavor, version)));
+     let filename = if d.file_name.is_empty() {
+         format!("wowi-{id}.zip")
+     } else {
+@@ -52,3 +48,27 @@
+         prerelease: false,
+     })
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn v4_download_and_game_versions_are_authoritative() {
++        let value = serde_json::json!({"version":"42","downloadUri":"https://cdn.wowinterface.com/addon.zip",
++            "fileName":"addon.zip","gameVersions":["5.5.4","1.15.9"]});
++        for (flavor, accepted) in [(crate::flavor::Flavor::Mists, true),
++            (crate::flavor::Flavor::Classic, true), (crate::flavor::Flavor::Forever, false),
++            (crate::flavor::Flavor::Retail, false)] {
++            let d = serde_json::from_value(value.clone()).unwrap();
++            let remote = from_details(d, 42, flavor).unwrap();
++            assert_eq!(remote.forever, Some(accepted));
++            assert_eq!(remote.download_url, "https://cdn.wowinterface.com/addon.zip");
++            assert_eq!(remote.filename, "addon.zip");
++        }
++        let missing_compat = serde_json::from_value(serde_json::json!({
++            "version":"42","downloadUri":"https://cdn.wowinterface.com/addon.zip"})).unwrap();
++        assert_eq!(from_details(missing_compat, 42, crate::flavor::Flavor::Retail).unwrap().forever, None);
++        assert!(serde_json::from_value::<FileDetails>(serde_json::json!({
++            "UIDownload":"https://cdn.wowinterface.com/wrong.zip","UIVersion":"legacy"})).is_err());
++    }
++}

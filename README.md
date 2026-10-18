@@ -199,10 +199,13 @@ helper process instead of blocking Battle.net. Close and reopen **Add-ons** to
 resume; the process limit and Battle.net's updater/game reserve stay unchanged.
 
 Add-ons are checked against the selected channel's product and client version,
-and go into that channel's own `Interface/AddOns` folder. The curated catalogue
-and starter packs currently have Forever data only. Other flavours can use
-**Add from GitHub link…** and manage add-ons whose source is known. The menu
-says when catalogue data is unavailable. Unknown products say “Add-ons aren't
+and go into that channel's own `Interface/AddOns` folder. Find and Starter packs
+cover Retail (including PTR/beta), Classic MoP, Anniversary, Classic Era and
+Forever. Find uses [layday's GitHub add-on catalogue](https://github.com/layday/github-wow-addon-catalogue),
+merged with Forever's curated rows and compatible WoWInterface/Tukui entries.
+The GitHub index is cached for 24 hours, secondary indexes for six hours;
+offline use keeps the last good cache or the build's bundled GitHub snapshot.
+**Add from GitHub link…** remains available. Unknown products say “Add-ons aren't
 supported for this WoW version yet”; they never receive another flavour's files.
 
 For Wago add-ons, choose **Wago key** on the Add-ons page. Get a free personal

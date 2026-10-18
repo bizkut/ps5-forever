@@ -243,6 +243,7 @@ cache_key_addonforge() {
         --path "$wow/ps5/release/Dockerfile" \
         --value "rust-toolchain=1.99.1" \
         --value "rust-target=x86_64-pc-windows-gnullvm" \
+        --value "github-catalogue-sha256=$(sha256sum "$logs/github-catalogue.csv" | cut -d' ' -f1)" \
         --value "rustflags=crt-static,debuginfo-0,no-insert-timestamp,remap-paths"
 }
 cache_key_wine() {
@@ -376,13 +377,15 @@ build_dxvk_cached() {
 }
 build_addonforge_cached() {
     local key
+    python3 ps5/addonforge/build.py --fetch-catalogue "$logs/github-catalogue.csv"
     key=$(cache_key_addonforge)
     cached_build addonforge "$key" \
         ps5-proton/ps5-wow/ps5/build/addonforge -- \
         python3 ps5/addonforge/build.py \
             --source "$root/AddonForge" \
             --output "$wow/ps5/build/addonforge" \
-            --cache "$FOREVER_BUILD_CACHE"
+            --cache "$FOREVER_BUILD_CACHE" \
+            --catalogue-snapshot "$logs/github-catalogue.csv"
 }
 cleanup() {
     local status=$?

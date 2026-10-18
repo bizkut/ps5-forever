@@ -788,7 +788,7 @@ if args.profile == 'b1':
     addonforge_build = here / '../../build/addonforge'
     for name in ('addonforge-core.exe', 'forever-maintenance.exe',
                  'ADDONFORGE-LICENSE.txt', 'THIRD-PARTY-NOTICES.txt',
-                 'build-receipt.json'):
+                 'build-receipt.json', 'github-catalogue.csv'):
         source = addonforge_build / name
         if not source.is_file():
             raise SystemExit(f'missing AddonForge build output {source}')

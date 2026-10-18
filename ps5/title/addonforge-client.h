@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include "forever-menu.h"
 
-#define ADDONFORGE_RESPONSE_BYTES (512u * 1024u)
+#define ADDONFORGE_RESPONSE_BYTES (2u * 1024u * 1024u)
 #define ADDONFORGE_CORE_PORT 31981u
 #define ADDONFORGE_CONTROL_PORT 31980u
 

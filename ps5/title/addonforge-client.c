@@ -729,7 +729,11 @@ int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
         while (at < end && (isspace((unsigned char)*at) || *at == ',')) at++;
         if (at >= end || *at == ']') break;
         if (!object_end(at, end, &after)) return -EPROTO;
-        if (snapshot->count < FOREVER_ADDON_ROWS)
+        if (snapshot->count >= FOREVER_ADDON_ROWS)
+        {
+            snprintf(error, error_size, "The add-on list is too large to display.");
+            return -EOVERFLOW;
+        }
         {
             struct forever_addon_row row;
             if (parse_row(tab, at, after, &row) &&
