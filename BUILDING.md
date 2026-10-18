@@ -219,6 +219,8 @@ remain in force.
   builds in two empty target directories and refuses unequal
   `addonforge-core.exe` SHA-256 values. The staged `build-receipt.json` records
   both hashes.
+  Rust source paths map to `/usr/src/addonforge` and vendor-cache paths to
+  `/cache`, so the CI cache's physical location does not change the executable.
 - `wine-title/addonforge/addonforge-core.exe` and
   `forever-maintenance.exe` are Windows PE executables run by Wine. The homebrew
   catalog scan rejects payload ELF executables; it does not classify these PEs

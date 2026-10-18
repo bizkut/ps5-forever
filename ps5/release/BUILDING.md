@@ -502,6 +502,11 @@ Classic Era failure is not established.
   builds in two empty target directories and refuses unequal
   `addonforge-core.exe` SHA-256 values. The
   staged `build-receipt.json` records both hashes.
+  Rust source paths map to `/usr/src/addonforge` and vendor-cache paths to
+  `/cache`, including panic-location strings. The first pre-tag CI build exposed
+  the missing vendor remap: `/sources/.cache` produced different bytes from a
+  private `/cache` build despite matching source, patches, lockfile and CSV.
+  The explicit cache remap removes that physical-path dependency.
   The 0008 receipt includes patch SHA-256
   `2e47655f98d1cd7702ffd9b372711d5c7ed340bdbe290ac315be5881a8539a2b`;
   its two cold Windows builds both produced

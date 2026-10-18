@@ -125,13 +125,14 @@ def cargo_environment(cargo_home, target_dir):
     return environment
 
 
-def cargo_build(source, cargo_home, target_dir):
+def cargo_build(source, cargo_home, target_dir, cache):
     environment = cargo_environment(cargo_home, target_dir)
     logical = '/usr/src/addonforge'
     environment['RUSTFLAGS'] = (
         '-C target-feature=+crt-static -C debuginfo=0 '
         '-C link-arg=-Wl,--no-insert-timestamp '
-        f'--remap-path-prefix={source}={logical}')
+        f'--remap-path-prefix={source}={logical} '
+        f'--remap-path-prefix={cache}=/cache')
     run(['/opt/cargo/bin/cargo', 'build', '--offline', '--locked', '--release',
          '--target', TARGET, '--no-default-features', '--features', 'headless',
          '--bin', 'addonforge-core', '--manifest-path', source / 'src-tauri/Cargo.toml'],
@@ -201,8 +202,8 @@ def main():
     second_dir = output.with_name(output.name + '-cold-b')
     shutil.rmtree(first_dir, ignore_errors=True)
     shutil.rmtree(second_dir, ignore_errors=True)
-    first = cargo_build(work, offline_home, first_dir)
-    second = cargo_build(work, offline_home, second_dir)
+    first = cargo_build(work, offline_home, first_dir, args.cache.resolve())
+    second = cargo_build(work, offline_home, second_dir, args.cache.resolve())
     first_hash, second_hash = sha256(first), sha256(second)
     if first_hash != second_hash:
         raise SystemExit(f'AddonForge cold builds differ: {first_hash} != {second_hash}')
