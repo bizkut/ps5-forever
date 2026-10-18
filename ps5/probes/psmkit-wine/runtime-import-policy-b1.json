@@ -2294,13 +2294,6 @@
       "binding": "strong",
       "module": "ntdll.so",
       "owner": "fself_public_or_platform",
-      "symbol": "pthread_detach",
-      "target": "pthread_detach"
-    },
-    {
-      "binding": "strong",
-      "module": "ntdll.so",
-      "owner": "fself_public_or_platform",
       "symbol": "pthread_exit",
       "target": "pthread_exit"
     },

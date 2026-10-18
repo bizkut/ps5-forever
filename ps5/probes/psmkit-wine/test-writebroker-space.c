@@ -21,12 +21,17 @@
 #include <unistd.h>
 
 #include "wine/ps5_writebroker.h"
+static int client_mutex_lock(pthread_mutex_t *mutex);
+#define pthread_mutex_lock(mutex) client_mutex_lock(mutex)
+#include "wine/ps5_title_private.h"
+#undef pthread_mutex_lock
 #include "writebroker-menu.h"
 
 #define WB_CHUNK (1u << 20)
 static unsigned char token[WB_TOKEN_BYTES];
 static unsigned long long served_writes, served_bytes;
 static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
+sigset_t ps5_title_block_set;
 static char directory[] = "/tmp/writebroker-space-XXXXXX";
 static char menu_prefix_root[1024];
 static char token_path[1024];
@@ -680,7 +685,6 @@ static size_t virtual_uninterrupted_read_memory(const void *source, void *destin
     return length;
 }
 
-static int client_mutex_lock(pthread_mutex_t *mutex);
 
 /* Exercise the title's statvfs branch, including the existing shim fallback. */
 #undef linux
@@ -933,6 +937,7 @@ int main(void)
 {
     int fd;
     assert(WB_VERSION == 6);
+    wine_ps5_title_critical_signals(&ps5_title_block_set);
     assert(mkdtemp(directory));
     snprintf(token_path, sizeof(token_path), "%s/token", directory);
     snprintf(writes_path, sizeof(writes_path), "%s/writes", directory);

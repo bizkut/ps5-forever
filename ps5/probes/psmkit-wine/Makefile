@@ -117,7 +117,7 @@ $(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-staged-runtime.c elf-runtime.c -o $@
 
 test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wine-title \
-		$(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
+		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
 		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch \
 		$(HOST_OUT)/test-battlenet-restart $(HOST_OUT)/test-audio-mixer \
@@ -134,6 +134,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-protocol
 	$(HOST_OUT)/test-elf-runtime
 	$(HOST_OUT)/test-wine-title
+	$(HOST_OUT)/test-write-buffer
 	$(HOST_OUT)/test-loader-path
 	$(HOST_OUT)/test-runtime-imports
 	$(HOST_OUT)/test-runtime-input
@@ -316,6 +317,10 @@ $(HOST_OUT)/test-elf-runtime: test-elf-runtime.c elf-runtime.c elf-runtime.h sha
 $(HOST_OUT)/test-wine-title: $(WINE_SRC)/loader/tests/ps5_title.c $(WINE_SRC)/include/wine/ps5_title.h $(WINE_SRC)/include/wine/ps5_title_private.h $(WINE_SRC)/include/wine/ps5_suspend.h $(WINE_SRC)/include/wine/ps5_desktop.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -pthread -I "$(WINE_SRC)/include" $< -o $@
+$(HOST_OUT)/test-write-buffer: test-write-buffer.c build-write-buffer-test.py \
+		$(WINE_SRC)/dlls/ntdll/unix/file.c $(WINE_SRC)/include/wine/ps5_title_private.h
+	python3 build-write-buffer-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
 
 $(HOST_OUT)/test-loader-path: test-loader-path.c build-path-test.py $(WINE_SRC)/loader/main.h $(PLATFORM_SRC)/src/libc.c $(PLATFORM_SRC)/include/ps5platform/libc.h
 	mkdir -p $(HOST_OUT)
