@@ -6,11 +6,13 @@
 #define FOREVER_MENU_TEXT_BYTES 4096
 #define FOREVER_MENU_STATUS_BYTES 256
 #define FOREVER_ADDON_ROWS 128
-#define FOREVER_ADDON_KEY_BYTES 96
+#define FOREVER_ADDON_VIEW_ROWS (FOREVER_ADDON_ROWS + 2)
+#define FOREVER_ADDON_KEY_BYTES 224
 #define FOREVER_ADDON_NAME_BYTES 96
 #define FOREVER_ADDON_DETAIL_BYTES 240
 #define FOREVER_ADDON_SOURCE_BYTES 80
 #define FOREVER_ADDON_DATE_BYTES 32
+#define FOREVER_ADDON_QUERY_BYTES 65
 
 /* Text rows used by the compositor and mouse hit testing. */
 #define FOREVER_MENU_LINE_FRAME_GENERATION 2
@@ -66,6 +68,9 @@ enum forever_menu_command
     FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL,
     FOREVER_MENU_COMMAND_ADDONS_REMOVE,
     FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK,
+    FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB,
+    FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME,
+    FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME,
 };
 
 enum forever_frame_generation
@@ -107,6 +112,8 @@ struct forever_addon_row
     char name[FOREVER_ADDON_NAME_BYTES];
     char status[48];
     char description[FOREVER_ADDON_DETAIL_BYTES];
+    char filter_name[FOREVER_ADDON_NAME_BYTES];
+    char filter_description[FOREVER_ADDON_DETAIL_BYTES];
     char source[FOREVER_ADDON_SOURCE_BYTES];
     char updated[FOREVER_ADDON_DATE_BYTES];
     unsigned long long downloads;
@@ -153,7 +160,12 @@ struct forever_menu_state
     size_t addon_count;
     int addon_loading;
     enum forever_menu_command addon_confirmation;
-    struct forever_addon_row addon_rows[FOREVER_ADDON_ROWS];
+    struct forever_addon_row addon_rows[FOREVER_ADDON_VIEW_ROWS];
+    struct forever_addon_row addon_catalog_rows[FOREVER_ADDON_ROWS];
+    size_t addon_catalog_count;
+    size_t addon_match_count;
+    int addon_pending_github;
+    char addon_query[FOREVER_ADDON_QUERY_BYTES];
     char status[FOREVER_MENU_STATUS_BYTES];
 };
 
@@ -171,6 +183,16 @@ struct forever_menu_result forever_menu_back(struct forever_menu_state *menu);
 struct forever_menu_result forever_menu_click_line(struct forever_menu_state *menu, int line);
 void forever_menu_commit(struct forever_menu_state *menu, enum forever_menu_command command, int enabled);
 void forever_menu_status(struct forever_menu_state *menu, const char *text);
+int forever_menu_find_set_query(struct forever_menu_state *menu, const char *query);
+int forever_menu_find_append(struct forever_menu_state *menu, const char *text);
+int forever_menu_find_backspace(struct forever_menu_state *menu);
+void forever_menu_find_ime(struct forever_menu_state *menu, const char *text, int accepted);
+int forever_menu_github_repo(const char *input, char *repo, size_t repo_size,
+                             char *error, size_t error_size);
+struct forever_menu_result forever_menu_github_ime(
+    struct forever_menu_state *menu, const char *text, int accepted);
+int forever_menu_hint_seen(const char *path);
+int forever_menu_hint_mark_seen(const char *path);
 void forever_menu_progress(struct forever_menu_state *menu, const char *text);
 void forever_menu_notice(struct forever_menu_state *menu, const char *text);
 void forever_menu_close(struct forever_menu_state *menu);

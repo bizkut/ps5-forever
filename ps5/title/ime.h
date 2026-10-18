@@ -5,6 +5,7 @@
 #ifndef PS5_TITLE_IME_H
 #define PS5_TITLE_IME_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define IME_MAX_TEXT 512
@@ -17,11 +18,16 @@ struct ime_edit
     unsigned length;
     uint16_t text[IME_MAX_TEXT];
     int enter;
+    int cancel;
 };
 
 /* Opens the keyboard for the user (show), or closes it; 0, or the failing
  * call's result. Opening an open keyboard keeps its text. */
 int ime_show(int user, int show);
+/* Opens with UTF-8 initial text, replacing the keyboard's previous contents. */
+int ime_show_text(int user, const char *text);
+/* Copies the keyboard's complete current contents as UTF-8; returns bytes copied. */
+size_t ime_copy_text(char *text, size_t size);
 /* Opens the keyboard, or closes it when it is open (the pad's L3+R3). */
 int ime_start(int user);
 /* GPU shortcut: open again with the last inline text for corrections. */

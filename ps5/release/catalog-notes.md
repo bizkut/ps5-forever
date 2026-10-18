@@ -2,16 +2,26 @@
 
 ## Record description (`apps/PPSA99030.json`, `description`)
 
-Battle.net launcher for World of Warcraft: Forever; works with a USB keyboard and mouse or the controller; press L3+R3 together to open the on-screen keyboard.
+Battle.net launcher for WoW: Forever. Options opens the Forever menu; L3+R3 opens the on-screen keyboard. USB keyboard and mouse work too.
 
 ## Release notes (GitHub release description, shown by the catalog)
+
+### Forever Launcher 01.000.013
+
+- Options opens the Forever menu over Battle.net; F12 opens it from a USB keyboard. The menu controls frame generation, HDR, the performance overlay and Add-ons, and can Reinstall or Uninstall Battle.net.
+- L2 is now Back in Battle.net. The old in-WoW overlay hold has been removed.
+- Add-ons can search the loaded catalogue by name or description and install from an `owner/repo` or GitHub link.
+- A short start-up hint shows the Options menu and L2 Back controls until the Forever menu has been opened once.
+- The recommended `Config.wtf` now uses `RenderFormat 1`.
+- Start-up repairs stale root-owned permissions under `/data/forever` without following symbolic links or changing hard-linked files.
+- Reinstall/Uninstall Battle.net has not been tested on a console yet.
 
 ### Forever Launcher 01.000.012
 
 - Fixes WoW freezing on the loading screen about half the time at start (a startup crash): the app now keeps Wine's system DLLs in `/data/forever` identical to the ones it loads. The first start after updating copies these files once and takes about 2 minutes.
 - Battle.net no longer asks to update installed games on every start: Wine now reports the folder permissions its Agent expects.
 - WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and Battle.net's text and link cursors, with the click point in the right place.
-- On most Battle.net pages, the controller's D-pad moves between buttons and links; Triangle presses and Options goes back.
+- On most Battle.net pages, the controller's D-pad moves between buttons and links, and Triangle presses.
 - World of Warcraft Classic beta is the default game again; the final WoW: Forever channel still works when selected in Battle.net.
 - Fixes the final channel's executable name (`_forever_/Wow.exe`), so its recommended settings install and direct start finds it.
 - Faster parallel file writes: write-broker requests now use 16 connections instead of one shared by all Windows threads. PS5 benchmark: 32 KiB writes from 4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.

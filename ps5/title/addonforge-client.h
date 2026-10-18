@@ -18,6 +18,8 @@ struct addonforge_client
 int addonforge_http_health(const struct addonforge_client *client);
 int addonforge_http_command(const struct addonforge_client *client, const char *command,
                             const char *arguments, char *response, size_t response_size);
+int addonforge_install_github(const struct addonforge_client *client, const char *repo,
+                              char *response, size_t response_size);
 int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
                               struct forever_addon_snapshot *snapshot,
                               char *error, size_t error_size);

@@ -455,3 +455,35 @@ index 16eda62..7b0dcff 100644
 +        let _ = fs::remove_dir_all(root);
 +    }
  }
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1135,6 +1135,28 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
+             let allow = args.get("allow_non_forever").and_then(Value::as_bool);
+             serde_json::to_value(install_catalog_impl(&app, id, allow).await?).map_err(err)
+         }
++        "install_github" => {
++            let repo = string_arg(args, "repo")?;
++            let allow = args.get("allow_non_forever").and_then(Value::as_bool);
++            let repo = sources::parse_github_repo(&repo)
++                .ok_or_else(|| "Enter a GitHub repo as owner/name or paste its URL".to_string())?;
++            let catalog = catalog_cached(&app).await;
++            let key = catalog
++                .addons
++                .iter()
++                .find(|entry| {
++                    entry
++                        .github
++                        .as_deref()
++                        .map(|known| known.eq_ignore_ascii_case(&repo))
++                        .unwrap_or(false)
++                })
++                .map(|entry| format!("cat:{}", entry.id))
++                .unwrap_or_else(|| format!("github:{repo}"));
++            let source = Source::Github(repo);
++            install_from(&app, &key, &source, None, allow.unwrap_or(false)).await?;
++            serde_json::to_value(refreshed(&app, &key).await?).map_err(err)
++        }
+         "install_bundle" => {
+             let id = string_arg(args, "id")?;
+             serde_json::to_value(install_bundle_impl(&app, id).await?).map_err(err)

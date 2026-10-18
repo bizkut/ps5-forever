@@ -18,6 +18,12 @@ void compositor_cursor_shape(const void *message);
 /* Font and message panel adapted from ps5-forever examples/battlenet/cpu_desktop.c
  * (commit 6cf23f2d, Copyright (C) 2026 Mihawk, MIT) */
 void compositor_message(const char *text);
+void compositor_hint_start(uint64_t now_us);
+void compositor_hint_tick(uint64_t now_us);
+void compositor_hint_stop(void);
+int compositor_hint_active(void);
+int compositor_hint_bounds(struct display_rect *rect);
+int compositor_message_bounds(struct display_rect *rect);
 /* The interactive Forever menu uses the build-time Noto glyph table and its
  * own large-screen geometry above compositor_message. */
 void compositor_menu(const char *text);
@@ -26,6 +32,7 @@ int compositor_menu_line_bounds(int line, struct display_rect *rect);
 int compositor_menu_value_bounds(int line, struct display_rect *rect);
 int compositor_menu_text_supported(const char *text);
 int compositor_menu_footer_fits(void);
+int compositor_menu_title_fits(void);
 /* Recompose dirty rectangles and report them to display_damage(). Presenting
  * and the vblank wait belong to the main loop. */
 void compositor_compose(void);

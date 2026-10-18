@@ -238,6 +238,23 @@ int addonforge_http_command(const struct addonforge_client *client, const char *
     return http_request(client, "POST", "/command", body, response, response_size);
 }
 
+int addonforge_install_github(const struct addonforge_client *client, const char *repo,
+                              char *response, size_t response_size)
+{
+    char arguments[FOREVER_ADDON_KEY_BYTES + 64];
+    size_t length;
+    int written;
+    if (!repo || !(length = strlen(repo)) || length >= FOREVER_ADDON_KEY_BYTES ||
+        strspn(repo, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-/") !=
+            length)
+        return -EINVAL;
+    written = snprintf(arguments, sizeof(arguments),
+                       "{\"repo\":\"%s\",\"allow_non_forever\":false}", repo);
+    if (written < 0 || (size_t)written >= sizeof(arguments)) return -EFBIG;
+    return addonforge_http_command(client, "install_github", arguments,
+                                   response, response_size);
+}
+
 
 static void json_space(const char **cursor, const char *end)
 {
@@ -401,8 +418,8 @@ static void sanitize_menu_text(char *text)
     *target = 0;
 }
 
-static int json_string(const char *begin, const char *end, const char *key,
-                       char *output, size_t size)
+static int json_string_raw(const char *begin, const char *end, const char *key,
+                           char *output, size_t size)
 {
     const char *at = json_value(begin, end, key);
     size_t used = 0;
@@ -437,6 +454,13 @@ static int json_string(const char *begin, const char *end, const char *key,
     }
     if (at >= end || *at != '"') return 0;
     output[used] = 0;
+    return 1;
+}
+
+static int json_string(const char *begin, const char *end, const char *key,
+                       char *output, size_t size)
+{
+    if (!json_string_raw(begin, end, key, output, size)) return 0;
     sanitize_menu_text(output);
     return 1;
 }
@@ -527,10 +551,18 @@ static int parse_row(enum forever_addon_tab tab, const char *begin, const char *
     const char *source_object, *source_end;
     int github, wago, wowi, tukui, curse;
     memset(row, 0, sizeof(*row));
-    if (!json_string(begin, end, "name", row->name, sizeof(row->name))) return 0;
+    if (!json_string_raw(begin, end, "name", row->filter_name,
+                         sizeof(row->filter_name))) return 0;
+    memcpy(row->name, row->filter_name, sizeof(row->name));
+    sanitize_menu_text(row->name);
     json_string(begin, end, "key", row->key, sizeof(row->key));
-    json_string(begin, end, "desc", row->description, sizeof(row->description));
-    if (!row->description[0]) json_string(begin, end, "notes", row->description, sizeof(row->description));
+    json_string_raw(begin, end, "desc", row->filter_description,
+                    sizeof(row->filter_description));
+    if (!row->filter_description[0])
+        json_string_raw(begin, end, "notes", row->filter_description,
+                        sizeof(row->filter_description));
+    memcpy(row->description, row->filter_description, sizeof(row->description));
+    sanitize_menu_text(row->description);
     json_string(begin, end, "source_label", row->source, sizeof(row->source));
     json_string(begin, end, "updated_at", updated, sizeof(updated));
     json_string(begin, end, "note", update_note, sizeof(update_note));

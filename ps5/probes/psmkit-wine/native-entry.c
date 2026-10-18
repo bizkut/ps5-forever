@@ -2212,6 +2212,15 @@ static int forever_addons_mutate(
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL)
         return forever_addons_command(client, "update_all", "{}", 600000, plain, plain_size);
     if (!forever_addons_safe_key(key)) return -EINVAL;
+    if (request->command == FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB)
+    {
+        int error;
+        client->timeout_ms = 600000;
+        error = addonforge_install_github(client, key, forever_addons.response,
+                                          sizeof(forever_addons.response));
+        if (error) return error;
+        return addonforge_response_error(forever_addons.response, plain, plain_size);
+    }
     switch (request->command)
     {
     case FOREVER_MENU_COMMAND_ADDONS_INSTALL:

@@ -350,9 +350,9 @@ static void test_menu_overlay(void)
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
     struct forever_addon_snapshot snapshot = {0};
     struct display_rect panel, title, selected, hdr, fg_value, hdr_value, hud_value, addons_value;
-    struct display_rect addon_row, addon_value;
+    struct display_rect addon_row, addon_value, hint, status, query_line;
     char text[FOREVER_MENU_TEXT_BYTES];
-    unsigned antialiased = 0, title_pixels = 0;
+    unsigned antialiased = 0, title_pixels = 0, hint_text_pixels = 0;
     check(compositor_menu_text_supported("\xe2\x80\x94 \xe2\x80\xa6 \xe2\x80\x99 "
                                          "\xe2\x86\x92 \xe2\x97\x8b \xe2\x9c\x95"),
           "all static non-ASCII menu characters have exact glyphs");
@@ -362,6 +362,34 @@ static void test_menu_overlay(void)
     forever_menu_render(&menu, text, sizeof(text));
     compositor_reset();
     compositor_init(0, 0);
+    check(compositor_menu_text_supported("OPTIONS  Forever menu      L2  Back"),
+          "start-up hint has no fallback glyphs");
+    compositor_hint_start(1000);
+    compositor_compose();
+    check(compositor_hint_active() && compositor_hint_bounds(&hint),
+          "start-up hint is shown when started");
+    check(hint.bottom < DISPLAY_HEIGHT && hint.top > DISPLAY_HEIGHT / 2,
+          "start-up hint is bottom-centred");
+    check(compositor_menu_line_at((hint.left + hint.right) / 2,
+                                  (hint.top + hint.bottom) / 2) == -1,
+          "start-up hint does not participate in click hit testing");
+    for (int y = hint.top + 2; y < hint.bottom - 2; y++)
+        for (int x = hint.left + 2; x < hint.right - 2; x++)
+            if (image[(size_t)y * DISPLAY_WIDTH + x] != MENU_PANEL)
+                hint_text_pixels++;
+    check(hint_text_pixels > 100, "start-up hint draws visible Noto text inside its panel");
+    write_addon_preview("startup-hint");
+    compositor_message("Downloading the Battle.net installer: 12.0 of 150.0 MB");
+    compositor_compose();
+    check(compositor_hint_bounds(&hint) && compositor_message_bounds(&status) &&
+          (hint.right <= status.left || hint.left >= status.right ||
+           hint.bottom <= status.top || hint.top >= status.bottom),
+          "start-up hint and installer status panel do not overlap");
+    compositor_hint_tick(8001000);
+    compositor_compose();
+    check(!compositor_hint_active() && !compositor_hint_bounds(&hint),
+          "start-up hint is removed after eight seconds");
+    compositor_message("");
     compositor_menu(text);
     compositor_compose();
     panel = menu_rect;
@@ -438,6 +466,48 @@ static void test_menu_overlay(void)
               "add-on statuses use the main menu's right-aligned value column");
         write_addon_preview(names[tab]);
     }
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.tab = FOREVER_ADDON_FIND;
+    snapshot.count = 1;
+    snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "cat:bags");
+    snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "Better Bags");
+    snprintf(snapshot.rows[0].description, sizeof(snapshot.rows[0].description),
+             "Organizes inventory and bank bags.");
+    snapshot.rows[0].installable = 1;
+    snprintf(snapshot.rows[0].source, sizeof(snapshot.rows[0].source), "GitHub");
+    snprintf(snapshot.rows[0].updated, sizeof(snapshot.rows[0].updated), "2026-10-18");
+    menu.addon_tab = FOREVER_ADDON_FIND;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    assert(forever_menu_find_set_query(&menu, "bags"));
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_title_fits(), "Find title fits without panel overlap");
+    check(compositor_menu_line_bounds(0, &title) &&
+          compositor_menu_line_bounds(1, &query_line) &&
+          query_line.bottom - query_line.top < title.bottom - title.top,
+          "active Find query uses a smaller line below the title");
+    check(compositor_menu_text_supported(text),
+          "active-query Find page has no fallback glyphs");
+    write_addon_preview("find-search");
+
+    assert(forever_menu_find_set_query(&menu, "nothing"));
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(strstr(text, "No add-ons match \"nothing\"") != NULL,
+          "empty Find result has the plain no-match message");
+    check(compositor_menu_title_fits(), "no-result Find title fits without panel overlap");
+    check(compositor_menu_text_supported(text),
+          "no-result Find page has no fallback glyphs");
+    write_addon_preview("find-no-results");
+    assert(forever_menu_find_set_query(
+        &menu, "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"));
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    check(compositor_menu_title_fits(), "maximum-byte Find query uses a separate fitting line");
+    check(strstr(text, "\n Find: \"WWWW") != NULL,
+          "long Find query is separated from the title");
     forever_menu_notice(
         &menu,
         "Could not remove all Battle.net files (error 13). Your games were not touched.");

@@ -7,15 +7,15 @@
 
 static uint32_t pending_events[4];
 static unsigned pending_count;
-static int opens, closes, loads;
+static int opens, closes, loads, param_inits;
 
 int sceKernelLoadStartModule(const char *path, size_t args, const void *argp,
                              uint32_t flags, const void *option, int *result)
 {
     assert(strstr(path, "/sandbox/common/lib/libSceIme.sprx"));
+    loads++;
     assert(!args && !argp && !flags && !option && result);
     *result = 0;
-    loads++;
     return 9;
 }
 
@@ -26,10 +26,10 @@ int sceKernelDebugOutText(int channel, const char *text)
     return 0;
 }
 
-int sceImeParamInit(struct ime_param *param)
+void sceImeParamInit(struct ime_param *param)
 {
     memset(param, 0, sizeof(*param));
-    return 0;
+    param_inits++;
 }
 
 int sceImeOpen(const struct ime_param *param, const void *extended)
@@ -67,7 +67,7 @@ int main(void)
     struct ime_edit edit;
 
     assert(!ime_show(77, 1) && ime_is_open());
-    assert(loads == 1 && opens == 1);
+    assert(loads == 1 && param_inits == 1 && opens == 1);
     buffer[0] = 'h';
     buffer[1] = 'i';
     schedule(EVENT_TEXT, EVENT_CLOSE);
@@ -75,12 +75,15 @@ int main(void)
     assert(!edit.erase && edit.length == 2 && edit.text[0] == 'h' && edit.text[1] == 'i');
     assert(edit.enter && closes == 1 && !ime_is_open());
 
-    assert(!ime_show(77, 1) && ime_is_open());
+    assert(!ime_show_text(77, "old") && ime_is_open());
+    assert(buffer[0] == 'o' && buffer[1] == 'l' && buffer[2] == 'd' && !buffer[3]);
+    assert(!memcmp(buffer, shown, sizeof(buffer)));
     buffer[0] = 'x';
+    buffer[1] = 0;
     schedule(EVENT_TEXT, EVENT_ABORT);
     assert(ime_poll(&edit));
-    assert(edit.length == 1 && edit.text[0] == 'x');
-    assert(!edit.enter && closes == 2 && !ime_is_open());
+    assert(edit.erase == 3 && edit.length == 1 && edit.text[0] == 'x');
+    assert(!edit.enter && edit.cancel && closes == 2 && !ime_is_open());
 
     assert(!ime_show(77, 1) && ime_is_open());
     schedule(EVENT_DONE, UINT32_MAX);
@@ -91,7 +94,7 @@ int main(void)
     schedule(EVENT_ENTER, UINT32_MAX);
     assert(ime_poll(&edit) && edit.enter);
     assert(closes == 4 && !ime_is_open());
-    assert(loads == 1 && opens == 4);
+    assert(loads == 1 && param_inits == 4 && opens == 4);
 
     /* Native lengths count UTF-16 units, not UTF-8 bytes or code points.
      * Preserve non-ASCII text and the two units of a supplementary character. */
@@ -108,6 +111,15 @@ int main(void)
     assert(ime_poll(&edit) && edit.erase == 2 && !edit.length && !edit.enter);
     schedule(EVENT_CLOSE, UINT32_MAX);
     assert(ime_poll(&edit) && edit.enter && closes == 5 && !ime_is_open());
+
+    {
+        char text[32];
+        assert(!ime_show_text(77, "Caf\xc3\xa9 \xf0\x9f\x98\x80") && ime_is_open());
+        assert(ime_copy_text(text, sizeof(text)) == strlen("Caf\xc3\xa9 \xf0\x9f\x98\x80"));
+        assert(!strcmp(text, "Caf\xc3\xa9 \xf0\x9f\x98\x80"));
+        schedule(EVENT_ABORT, UINT32_MAX);
+        assert(ime_poll(&edit) && edit.cancel && !edit.enter);
+    }
 
     puts("title IME confirm/cancel mapping: PASS");
     return 0;

@@ -40,7 +40,7 @@ with HDR and frame generation.
 - WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and
   Battle.net's text and link cursors, with the click point in the right place.
 - On most Battle.net pages, the controller's D-pad moves between buttons and
-  links; Triangle presses and Options goes back.
+  links, and Triangle presses.
 - World of Warcraft Classic beta is the default game again; the final
   WoW: Forever channel still works when selected in Battle.net.
 - Fixes the final channel's executable name (`_forever_/Wow.exe`), so its
@@ -143,13 +143,18 @@ close, or click with a mouse. The menu can:
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
 
+Until you open the Forever menu once, each start shows an eight-second hint for
+**Options** and **L2**.
+
 Open **Add-ons** before pressing Play. L1/R1 switches between installed beta
 (`_classic_beta_`) and final (`_forever_`); Left/Right switches Installed,
 Updates, Find and Starter packs. Cross opens or installs, Square updates the
 selected add-on, Triangle updates all, and R3 removes after a confirmation whose
-default is Cancel. CurseForge-only rows say so and cannot be installed. GitHub,
-WoWInterface and TukUI entries work without a key. Changes load the next time
-WoW starts, or after typing `/reload` in WoW.
+default is Cancel. In Find, type on a USB keyboard or choose **Search…** for the
+on-screen keyboard; **Add from GitHub link…** accepts `owner/repo` or its GitHub
+URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
+and TukUI entries work without a key. Changes load the next time WoW starts, or
+after typing `/reload` in WoW.
 
 If frame generation currently uses `fg=auto`, selecting it turns it off;
 selecting it again turns it on. Frame generation and the performance overlay

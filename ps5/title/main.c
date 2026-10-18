@@ -51,6 +51,9 @@ static char pending_addon_error[FOREVER_MENU_STATUS_BYTES];
 static int pending_menu_status_kind, pending_addon_kind, input_draining;
 static uint8_t physical_keys[256], forwarded_keys[256];
 static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
+static enum forever_menu_command menu_ime_command;
+#define FOREVER_MENU_SEEN_PATH "/data/forever/.forever-menu-seen"
+static int menu_hint_eligible, menu_hint_started;
 
 int forever_title_menu_load(struct forever_menu_values *);
 int forever_title_addons_action(enum forever_menu_command, enum forever_addon_channel,
@@ -322,6 +325,15 @@ done:
 }
 #endif
 
+#ifdef PS5_TITLE_EMBEDDED
+static void maybe_start_menu_hint(uint64_t now)
+{
+    if (!menu_hint_eligible || menu_hint_started) return;
+    menu_hint_started = 1;
+    compositor_hint_start(now);
+}
+#endif
+
 static void on_hub_message(const void *message, void *context)
 {
     struct ps5_desktop_header header;
@@ -334,6 +346,9 @@ static void on_hub_message(const void *message, void *context)
         struct ps5_desktop_window window;
         memcpy(&window, message, sizeof(window));
         compositor_window(&window);
+#ifdef PS5_TITLE_EMBEDDED
+        maybe_start_menu_hint(now_us());
+#endif
         break;
     }
     case PS5_DESKTOP_DESTROY:
@@ -403,6 +418,7 @@ static uint32_t mouse_button(uint32_t code)
 #ifdef PS5_TITLE_EMBEDDED
 #define KEY_ENTER 0x28u
 #define KEY_ESCAPE 0x29u
+#define KEY_BACKSPACE 0x2au
 #define KEY_F12 0x45u
 #define KEY_RIGHT 0x4fu
 #define KEY_LEFT 0x50u
@@ -414,6 +430,7 @@ static void close_menu(void);
 static void open_menu(void);
 static void apply_menu_result(struct forever_menu_result result);
 static void menu_key(uint32_t usage);
+static void menu_ime_finish(const char *text, int accepted);
 #ifdef FOREVER_MENU_DIAG
 static void menu_diag_log_state(const char *event);
 #endif
@@ -524,6 +541,7 @@ static void on_input(const struct input_event *event, void *context)
         }
         return;
     }
+    if (menu_ime_command) return;
     if (event->kind == INPUT_PAD && (physical_pad & PAD_OPTIONS) &&
         !(previous_pad & PAD_OPTIONS))
     {
@@ -693,6 +711,16 @@ static void menu_diag_step(uint64_t now)
             snprintf(menu_diag.dump_name, sizeof(menu_diag.dump_name), "%s", command.name);
             menu_diag.dump_pending = 1;
             return;
+        case FOREVER_MENU_DIAG_TEXT:
+            if (menu_ime_command)
+            {
+                ime_show(user, 0);
+                menu_ime_finish(command.text, 1);
+                io_log("menu diag text confirmed bytes=%zu", strlen(command.text));
+            }
+            else
+                io_log("menu diag text ignored no-menu-ime");
+            break;
         case FOREVER_MENU_DIAG_ADDON:
         {
             size_t selected;
@@ -803,6 +831,8 @@ static void close_menu(void)
     if (menu.page == FOREVER_MENU_ADDON_PAGE || menu.page == FOREVER_MENU_ADDON_CONFIRM)
         forever_title_addons_action(FOREVER_MENU_COMMAND_ADDONS_CLOSE,
                                     menu.addon_channel, menu.addon_tab, NULL);
+    if (menu_ime_command && user >= 0) ime_show(user, 0);
+    menu_ime_command = FOREVER_MENU_COMMAND_NONE;
     release_forwarded_input();
     forever_menu_close(&menu);
     compositor_menu(NULL);
@@ -818,7 +848,15 @@ static void open_menu(void)
 {
     struct forever_menu_values values = {FOREVER_FG_ON, 1, 0};
     int error;
+    compositor_hint_stop();
+    if (menu_hint_eligible)
+    {
+        (void)forever_menu_hint_mark_seen(FOREVER_MENU_SEEN_PATH);
+        menu_hint_eligible = 0;
+        menu_hint_started = 1;
+    }
     if (user >= 0) ime_show(user, 0);
+    menu_ime_command = FOREVER_MENU_COMMAND_NONE;
     release_forwarded_input();
     pointer_cancel();
     error = forever_title_menu_load(&values);
@@ -855,8 +893,25 @@ static void apply_menu_result(struct forever_menu_result result)
         close_menu();
         return;
     }
+    if (result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME ||
+        result.command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME)
+    {
+        const char *initial = result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME ?
+            menu.addon_query : "https://github.com/";
+        error = user >= 0 ? ime_show_text(user, initial) : -ENODEV;
+        if (error)
+        {
+            snprintf(status, sizeof(status),
+                     "Could not open the on-screen keyboard (error %d).", -error);
+            forever_menu_status(&menu, status);
+        }
+        else
+            menu_ime_command = result.command;
+        render_menu();
+        return;
+    }
     if (result.command >= FOREVER_MENU_COMMAND_ADDONS_OPEN &&
-        result.command <= FOREVER_MENU_COMMAND_ADDONS_INSTALL_PACK)
+        result.command <= FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB)
     {
         error = forever_title_addons_action(result.command, result.channel, result.tab,
                                             result.key[0] ? result.key : NULL);
@@ -906,8 +961,73 @@ static void apply_menu_result(struct forever_menu_result result)
     render_menu();
 }
 
+static void menu_ime_finish(const char *text, int accepted)
+{
+    enum forever_menu_command command = menu_ime_command;
+    struct forever_menu_result result = {0};
+    menu_ime_command = FOREVER_MENU_COMMAND_NONE;
+    /* IME owns the pad while open. Forget the stale Cross edge used to open
+     * it, including the release consumed by the system keyboard. */
+    menu_pad = physical_pad;
+    if (command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME)
+        forever_menu_find_ime(&menu, text, accepted);
+    else if (command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME)
+        result = forever_menu_github_ime(&menu, text, accepted);
+    apply_menu_result(result);
+}
+
+static char menu_usb_character(uint32_t usage)
+{
+    int shift = physical_keys[0xe1] || physical_keys[0xe5];
+    if (physical_keys[0xe0] || physical_keys[0xe2] || physical_keys[0xe3] ||
+        physical_keys[0xe4] || physical_keys[0xe6] || physical_keys[0xe7]) return 0;
+    if (usage >= 0x04 && usage <= 0x1d)
+        return (char)((shift ? 'A' : 'a') + usage - 0x04);
+    if (usage >= 0x1e && usage <= 0x27)
+    {
+        static const char plain[] = "1234567890";
+        static const char shifted[] = "!@#$%^&*()";
+        return shift ? shifted[usage - 0x1e] : plain[usage - 0x1e];
+    }
+    switch (usage)
+    {
+    case 0x2c: return ' ';
+    case 0x2d: return shift ? '_' : '-';
+    case 0x2e: return shift ? '+' : '=';
+    case 0x2f: return shift ? '{' : '[';
+    case 0x30: return shift ? '}' : ']';
+    case 0x31: return shift ? '|' : '\\';
+    case 0x32: return shift ? '~' : '#';
+    case 0x33: return shift ? ':' : ';';
+    case 0x34: return shift ? '"' : '\'';
+    case 0x35: return shift ? '~' : '`';
+    case 0x36: return shift ? '<' : ',';
+    case 0x37: return shift ? '>' : '.';
+    case 0x38: return shift ? '?' : '/';
+    default: return 0;
+    }
+}
+
 static void menu_key(uint32_t usage)
 {
+    if (menu.page == FOREVER_MENU_ADDON_PAGE &&
+        menu.addon_tab == FOREVER_ADDON_FIND && !menu.addon_loading)
+    {
+        char character = menu_usb_character(usage);
+        if (usage == KEY_BACKSPACE)
+        {
+            forever_menu_find_backspace(&menu);
+            render_menu();
+            return;
+        }
+        if (character)
+        {
+            char text[2] = {character, 0};
+            forever_menu_find_append(&menu, text);
+            render_menu();
+            return;
+        }
+    }
     if (usage == KEY_UP) forever_menu_move(&menu, -1);
     else if (usage == KEY_DOWN) forever_menu_move(&menu, 1);
     else if (usage == KEY_LEFT)
@@ -995,6 +1115,9 @@ static int desktop_open(void)
     memset(forwarded_keys, 0, sizeof(forwarded_keys));
     physical_pad = menu_pad = physical_mouse = forwarded_mouse = 0;
     input_draining = pending_menu_status_kind = pending_addon_kind = 0;
+    menu_ime_command = FOREVER_MENU_COMMAND_NONE;
+    menu_hint_eligible = !forever_menu_hint_seen(FOREVER_MENU_SEEN_PATH);
+    menu_hint_started = 0;
 #ifdef FOREVER_MENU_DIAG
     memset(&menu_diag, 0, sizeof(menu_diag));
 #endif
@@ -1018,6 +1141,9 @@ static void desktop_frame(void)
     if (message_pending)
     {
         compositor_message(pending_message);
+#ifdef PS5_TITLE_EMBEDDED
+        if (pending_message[0]) maybe_start_menu_hint(now);
+#endif
         message_pending = 0;
     }
 #ifdef PS5_TITLE_EMBEDDED
@@ -1039,6 +1165,9 @@ static void desktop_frame(void)
     }
 #endif
     pthread_mutex_unlock(&message_mutex);
+#ifdef PS5_TITLE_EMBEDDED
+    compositor_hint_tick(now);
+#endif
 
     input_poll(on_input, NULL);
 #if defined(PS5_TITLE_EMBEDDED) && defined(FOREVER_MENU_DIAG)
@@ -1048,7 +1177,16 @@ static void desktop_frame(void)
     if (ime_poll(&edit))
     {
 #ifdef PS5_TITLE_EMBEDDED
-        if (!forever_menu_is_open(&menu) && !input_draining)
+        if (menu_ime_command)
+        {
+            if (edit.enter || edit.cancel)
+            {
+                char text[IME_MAX_TEXT * 4 + 1];
+                ime_copy_text(text, sizeof(text));
+                menu_ime_finish(text, edit.enter && !edit.cancel);
+            }
+        }
+        else if (!forever_menu_is_open(&menu) && !input_draining)
 #endif
         {
             for (unsigned i = 0; i < edit.erase; i++) send_key(0x2a); /* Backspace */

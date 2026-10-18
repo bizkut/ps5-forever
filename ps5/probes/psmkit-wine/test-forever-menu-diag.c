@@ -40,10 +40,13 @@ int main(void)
     command = parse("addon cat:arc-lfg-filter");
     assert(command.kind == FOREVER_MENU_DIAG_ADDON &&
            !strcmp(command.name, "cat:arc-lfg-filter"));
+    command = parse("text https://github.com/Owner/r\xc3\xa9po.git");
+    assert(command.kind == FOREVER_MENU_DIAG_TEXT &&
+           !strcmp(command.text, "https://github.com/Owner/r\xc3\xa9po.git"));
     static const char *const invalid[] = {
         "pad R2", "pad options", "key A", "wait -1", "wait 60001",
         "click 1920 0", "click 0 1080", "click 1", "dump ../escape",
-        "dump has.dot", "dump ", "addon ../escape", "addon ", "unknown value", "",
+        "dump has.dot", "dump ", "addon ../escape", "addon ", "text ", "unknown value", "",
     };
     for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
         assert(forever_menu_diag_parse(invalid[i], strlen(invalid[i]), &command) == -EINVAL);

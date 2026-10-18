@@ -40,7 +40,7 @@ struct ime_param
 };
 _Static_assert(sizeof(struct ime_param) == 0x60, "ime param");
 
-int sceImeParamInit(struct ime_param *param);
+void sceImeParamInit(struct ime_param *param);
 int sceImeOpen(const struct ime_param *param, const void *extended);
 int sceImeUpdate(void (*handler)(void *, const void *));
 int sceImeClose(void);
@@ -50,7 +50,7 @@ enum { EVENT_OPEN = 0, EVENT_TEXT = 1, EVENT_DONE = 4, EVENT_CLOSE = 5, EVENT_EN
 static uint16_t buffer[IME_MAX_TEXT + 1], shown[IME_MAX_TEXT + 1];
 static uint8_t work[0x40000] __attribute__((aligned(0x4000)));
 /* Not "open": the B1 import audit rejects a native definition of libc's name. */
-static int loaded, showing, changed, entered, ended;
+static int loaded, showing, changed, entered, canceled, ended;
 
 int sceKernelDebugOutText(int channel, const char *text);
 
@@ -72,7 +72,7 @@ static void on_event(void *arg, const void *event)
     case EVENT_DONE:
     case EVENT_CLOSE:
     case EVENT_ENTER: entered = 1; ended = 1; break;
-    case EVENT_ABORT: ended = 1; break;
+    case EVENT_ABORT: canceled = 1; ended = 1; break;
     }
 }
 
@@ -86,6 +86,8 @@ static int load(void)
     word = sceKernelGetFsSandboxRandomWord();
     snprintf(path, sizeof(path), "/%s/common/lib/libSceIme.sprx", word ? word : "system");
     module = sceKernelLoadStartModule(path, 0, NULL, 0, NULL, &status);
+    note("module load", module);
+    note("module status", status);
     if (module < 0) return module;
     loaded = 1;
     return 0;
@@ -98,13 +100,21 @@ static int show_keyboard(int user, int show, int preserve)
 
     if (!show)
     {
-        if (showing) sceImeClose();
+        if (showing)
+        {
+            r = sceImeClose();
+            note("close", r);
+        }
         showing = 0;
         return 0;
     }
-    if (showing) return 0;
-    if ((r = load())) return r;
-    if ((r = sceImeParamInit(&param))) return r;
+    if (showing) { note("already open", 0); return 0; }
+    note("show", preserve);
+    r = load();
+    note("load result", r);
+    if (r) return r;
+    sceImeParamInit(&param);
+    note("param init", 0);
     if (!preserve)
     {
         memset(buffer, 0, sizeof(buffer));
@@ -125,13 +135,121 @@ static int show_keyboard(int user, int show, int preserve)
     note("open", r);
     if (r) return r;
     showing = 1;
-    changed = entered = ended = 0;
+    changed = entered = canceled = ended = 0;
     return 0;
 }
 
 int ime_show(int user, int show)
 {
     return show_keyboard(user, show, 0);
+}
+
+static size_t utf8_to_utf16(const char *input, uint16_t *output, size_t capacity)
+{
+    const unsigned char *text = (const unsigned char *)(input ? input : "");
+    size_t used = 0, remaining = strlen((const char *)text);
+    while (remaining && used < capacity)
+    {
+        uint32_t codepoint;
+        size_t bytes;
+        if (text[0] < 0x80) { codepoint = text[0]; bytes = 1; }
+        else if (remaining >= 2 && (text[0] & 0xe0) == 0xc0 &&
+                 (text[1] & 0xc0) == 0x80)
+        {
+            codepoint = ((uint32_t)(text[0] & 0x1f) << 6) | (text[1] & 0x3f);
+            bytes = codepoint >= 0x80 ? 2 : 1;
+            if (bytes == 1) codepoint = '?';
+        }
+        else if (remaining >= 3 && (text[0] & 0xf0) == 0xe0 &&
+                 (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80)
+        {
+            codepoint = ((uint32_t)(text[0] & 0x0f) << 12) |
+                        ((uint32_t)(text[1] & 0x3f) << 6) | (text[2] & 0x3f);
+            bytes = codepoint >= 0x800 && (codepoint < 0xd800 || codepoint > 0xdfff) ? 3 : 1;
+            if (bytes == 1) codepoint = '?';
+        }
+        else if (remaining >= 4 && (text[0] & 0xf8) == 0xf0 &&
+                 (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80 &&
+                 (text[3] & 0xc0) == 0x80)
+        {
+            codepoint = ((uint32_t)(text[0] & 7) << 18) |
+                        ((uint32_t)(text[1] & 0x3f) << 12) |
+                        ((uint32_t)(text[2] & 0x3f) << 6) | (text[3] & 0x3f);
+            bytes = codepoint >= 0x10000 && codepoint <= 0x10ffff ? 4 : 1;
+            if (bytes == 1) codepoint = '?';
+        }
+        else { codepoint = '?'; bytes = 1; }
+        text += bytes;
+        remaining -= bytes;
+        if (codepoint <= 0xffff)
+            output[used++] = (uint16_t)codepoint;
+        else
+        {
+            if (used + 2 > capacity) break;
+            codepoint -= 0x10000;
+            output[used++] = (uint16_t)(0xd800 + (codepoint >> 10));
+            output[used++] = (uint16_t)(0xdc00 + (codepoint & 0x3ff));
+        }
+    }
+    return used;
+}
+
+int ime_show_text(int user, const char *text)
+{
+    size_t length;
+    if (showing) return 0;
+    memset(buffer, 0, sizeof(buffer));
+    length = utf8_to_utf16(text, buffer, IME_MAX_TEXT);
+    buffer[length] = 0;
+    memcpy(shown, buffer, sizeof(shown));
+    return show_keyboard(user, 1, 1);
+}
+
+size_t ime_copy_text(char *text, size_t size)
+{
+    size_t source = 0, used = 0;
+    if (!text || !size) return 0;
+    while (source < IME_MAX_TEXT && buffer[source])
+    {
+        uint32_t codepoint = buffer[source++];
+        unsigned char encoded[4];
+        size_t bytes;
+        if (codepoint >= 0xd800 && codepoint <= 0xdbff &&
+            source < IME_MAX_TEXT && buffer[source] >= 0xdc00 && buffer[source] <= 0xdfff)
+        {
+            codepoint = 0x10000 + ((codepoint - 0xd800) << 10) +
+                        (buffer[source++] - 0xdc00);
+        }
+        else if (codepoint >= 0xd800 && codepoint <= 0xdfff)
+            codepoint = '?';
+        if (codepoint < 0x80) { encoded[0] = (unsigned char)codepoint; bytes = 1; }
+        else if (codepoint < 0x800)
+        {
+            encoded[0] = (unsigned char)(0xc0 | (codepoint >> 6));
+            encoded[1] = (unsigned char)(0x80 | (codepoint & 0x3f));
+            bytes = 2;
+        }
+        else if (codepoint < 0x10000)
+        {
+            encoded[0] = (unsigned char)(0xe0 | (codepoint >> 12));
+            encoded[1] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
+            encoded[2] = (unsigned char)(0x80 | (codepoint & 0x3f));
+            bytes = 3;
+        }
+        else
+        {
+            encoded[0] = (unsigned char)(0xf0 | (codepoint >> 18));
+            encoded[1] = (unsigned char)(0x80 | ((codepoint >> 12) & 0x3f));
+            encoded[2] = (unsigned char)(0x80 | ((codepoint >> 6) & 0x3f));
+            encoded[3] = (unsigned char)(0x80 | (codepoint & 0x3f));
+            bytes = 4;
+        }
+        if (used + bytes >= size) break;
+        memcpy(text + used, encoded, bytes);
+        used += bytes;
+    }
+    text[used] = 0;
+    return used;
 }
 
 int ime_resume(int user)
@@ -173,11 +291,12 @@ int ime_poll(struct ime_edit *edit)
         memcpy(shown, buffer, sizeof(shown));
     }
     edit->enter = entered;
+    edit->cancel = canceled;
     entered = 0;
     if (ended)
     {
         sceImeClose();
-        showing = ended = 0;
+        showing = ended = canceled = 0;
     }
-    return edit->erase || edit->length || edit->enter;
+    return edit->erase || edit->length || edit->enter || edit->cancel;
 }

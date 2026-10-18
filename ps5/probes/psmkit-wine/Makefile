@@ -245,10 +245,12 @@ $(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h write
 		../../title/forever-menu.c -o $@
 
 $(HOST_OUT)/test-addonforge-client: test-addonforge-client.c \
-		../../title/addonforge-client.c ../../title/addonforge-client.h ../../title/forever-menu.h
+		../../title/addonforge-client.c ../../title/addonforge-client.h \
+		../../title/forever-menu.c ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread \
-		test-addonforge-client.c ../../title/addonforge-client.c -o $@
+		test-addonforge-client.c ../../title/addonforge-client.c \
+		../../title/forever-menu.c -o $@
 
 $(HOST_OUT)/test-forever-menu-diag: test-forever-menu-diag.c ../../title/menu-diag.h \
 		../../title/input.h

@@ -15,6 +15,7 @@ enum forever_menu_diag_kind
     FOREVER_MENU_DIAG_WAIT,
     FOREVER_MENU_DIAG_DUMP,
     FOREVER_MENU_DIAG_ADDON,
+    FOREVER_MENU_DIAG_TEXT,
 };
 
 struct forever_menu_diag_command
@@ -24,6 +25,7 @@ struct forever_menu_diag_command
     int x, y;
     unsigned milliseconds;
     char name[49];
+    char text[256];
 };
 
 static inline int forever_menu_diag_number(const char *text, long minimum, long maximum, long *value)
@@ -50,7 +52,7 @@ static inline int forever_menu_diag_parse(
         {"F12", 0x45}, {"ESCAPE", 0x29}, {"ENTER", 0x28},
         {"UP", 0x52}, {"DOWN", 0x51},
     };
-    char line[160], *verb, *first, *second;
+    char line[320], *verb, *first, *second;
     long number;
 
     if (!input || !command || !length || length >= sizeof(line)) return -EINVAL;
@@ -100,6 +102,14 @@ static inline int forever_menu_diag_parse(
         if (forever_menu_diag_number(second, 0, 1079, &number)) return -EINVAL;
         command->y = (int)number;
         command->kind = FOREVER_MENU_DIAG_CLICK;
+        return 0;
+    }
+    if (!strcmp(verb, "text"))
+    {
+        length = strlen(first);
+        if (!length || length >= sizeof(command->text)) return -EINVAL;
+        memcpy(command->text, first, length + 1);
+        command->kind = FOREVER_MENU_DIAG_TEXT;
         return 0;
     }
     if (!strcmp(verb, "addon"))

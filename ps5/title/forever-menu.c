@@ -1,6 +1,10 @@
+#include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "forever-menu.h"
 
 #define ADDON_VISIBLE_ROWS 5
@@ -100,26 +104,103 @@ static const struct forever_addon_row *selected_addon(const struct forever_menu_
         &menu->addon_rows[menu->addon_selected] : NULL;
 }
 
-static void sort_addons(struct forever_menu_state *menu)
+static int ascii_equal(unsigned char left, unsigned char right)
 {
-    for (size_t i = 1; i < menu->addon_count; i++)
+    if (left >= 'A' && left <= 'Z') left = (unsigned char)(left + ('a' - 'A'));
+    if (right >= 'A' && right <= 'Z') right = (unsigned char)(right + ('a' - 'A'));
+    return left == right;
+}
+
+static int ascii_contains(const char *text, const char *query)
+{
+    size_t text_length = strlen(text), query_length = strlen(query);
+    if (!query_length) return 1;
+    if (query_length > text_length) return 0;
+    for (size_t start = 0; start + query_length <= text_length; start++)
     {
-        struct forever_addon_row row = menu->addon_rows[i];
+        size_t at = 0;
+        while (at < query_length &&
+               ascii_equal((unsigned char)text[start + at], (unsigned char)query[at])) at++;
+        if (at == query_length) return 1;
+    }
+    return 0;
+}
+
+static void sort_rows(struct forever_addon_row *rows, size_t count, int downloads)
+{
+    for (size_t i = 1; i < count; i++)
+    {
+        struct forever_addon_row row = rows[i];
         size_t position = i;
         while (position)
         {
-            const struct forever_addon_row *previous = &menu->addon_rows[position - 1];
-            int before = menu->addon_sort_downloads ?
+            const struct forever_addon_row *previous = &rows[position - 1];
+            int before = downloads ?
                 (row.downloads > previous->downloads ||
                  (row.downloads == previous->downloads &&
                   strcmp(row.name, previous->name) < 0)) :
                 strcmp(row.name, previous->name) < 0;
             if (!before) break;
-            menu->addon_rows[position] = *previous;
+            rows[position] = *previous;
             position--;
         }
-        menu->addon_rows[position] = row;
+        rows[position] = row;
     }
+}
+
+static int find_special(const struct forever_addon_row *row, const char *key)
+{
+    return row && !strcmp(row->key, key);
+}
+
+static void rebuild_find(struct forever_menu_state *menu, int reset_selection)
+{
+    char selected_key[FOREVER_ADDON_KEY_BYTES] = {0};
+    size_t count = 0;
+    if (!reset_selection)
+    {
+        const struct forever_addon_row *selected = selected_addon(menu);
+        if (selected) snprintf(selected_key, sizeof(selected_key), "%s", selected->key);
+    }
+    menu->addon_rows[count] = (struct forever_addon_row){0};
+    snprintf(menu->addon_rows[count].key, sizeof(menu->addon_rows[count].key), "menu:search");
+    snprintf(menu->addon_rows[count].name, sizeof(menu->addon_rows[count].name),
+             "Search\xe2\x80\xa6");
+    snprintf(menu->addon_rows[count].status, sizeof(menu->addon_rows[count].status),
+             "%s", menu->addon_query[0] ? "Edit query" : "Type or press Cross");
+    count++;
+    menu->addon_match_count = 0;
+    for (size_t i = 0; i < menu->addon_catalog_count; i++)
+    {
+        const struct forever_addon_row *row = &menu->addon_catalog_rows[i];
+        const char *name = row->filter_name[0] ? row->filter_name : row->name;
+        const char *description = row->filter_description[0] ?
+            row->filter_description : row->description;
+        if (!ascii_contains(name, menu->addon_query) &&
+            !ascii_contains(description, menu->addon_query)) continue;
+        if (count >= FOREVER_ADDON_VIEW_ROWS - 1) break;
+        menu->addon_rows[count++] = *row;
+        menu->addon_match_count++;
+    }
+    menu->addon_rows[count] = (struct forever_addon_row){0};
+    snprintf(menu->addon_rows[count].key, sizeof(menu->addon_rows[count].key), "menu:github");
+    snprintf(menu->addon_rows[count].name, sizeof(menu->addon_rows[count].name),
+             "Add from GitHub link\xe2\x80\xa6");
+    snprintf(menu->addon_rows[count].status, sizeof(menu->addon_rows[count].status),
+             "owner/repo or github.com link");
+    menu->addon_count = ++count;
+    menu->addon_selected = 0;
+    if (reset_selection && menu->addon_query[0] && menu->addon_match_count)
+        menu->addon_selected = 1;
+    else if (!reset_selection && selected_key[0])
+        for (size_t i = 0; i < menu->addon_count; i++)
+            if (!strcmp(menu->addon_rows[i].key, selected_key))
+            {
+                menu->addon_selected = i;
+                break;
+            }
+    menu->addon_scroll = menu->addon_selected >= ADDON_VISIBLE_ROWS ?
+        menu->addon_selected - ADDON_VISIBLE_ROWS + 1 : 0;
 }
 
 static void addon_working(struct forever_menu_state *menu, const char *status)
@@ -161,6 +242,10 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
         if (!row || menu->addon_loading) return none();
         if (menu->addon_tab == FOREVER_ADDON_FIND)
         {
+            if (find_special(row, "menu:search"))
+                return addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME, NULL);
+            if (find_special(row, "menu:github"))
+                return addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME, NULL);
             if (row->curse_only)
             {
                 copy_status(menu, "Available on CurseForge only. There is no install action.");
@@ -205,6 +290,9 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
         menu->addon_tab = FOREVER_ADDON_INSTALLED;
         menu->addon_sort_downloads = 0;
         menu->addon_selected = menu->addon_scroll = menu->addon_count = 0;
+        menu->addon_catalog_count = menu->addon_match_count = 0;
+        menu->addon_query[0] = 0;
+        menu->addon_pending_github = 0;
         addon_working(menu, "Starting the add-on service...");
         return addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_OPEN, NULL);
     case FOREVER_MENU_REINSTALL:
@@ -252,8 +340,9 @@ struct forever_menu_result forever_menu_addon_button(
         if (menu->addon_tab == FOREVER_ADDON_FIND)
         {
             menu->addon_sort_downloads = !menu->addon_sort_downloads;
-            sort_addons(menu);
-            menu->addon_selected = menu->addon_scroll = 0;
+            sort_rows(menu->addon_catalog_rows, menu->addon_catalog_count,
+                      menu->addon_sort_downloads);
+            rebuild_find(menu, 0);
             copy_status(menu, menu->addon_sort_downloads ?
                         "Catalogue sorted by downloads." : "Catalogue sorted by name.");
             return none();
@@ -298,24 +387,43 @@ void forever_menu_addon_snapshot(
         snapshot->tab != menu->addon_tab) return;
     selected = selected_addon(menu);
     if (selected) snprintf(selected_key, sizeof(selected_key), "%s", selected->key);
-    menu->addon_count = snapshot->count < FOREVER_ADDON_ROWS ?
-        snapshot->count : FOREVER_ADDON_ROWS;
-    memcpy(menu->addon_rows, snapshot->rows,
-           menu->addon_count * sizeof(menu->addon_rows[0]));
-    if (menu->addon_tab == FOREVER_ADDON_FIND && menu->addon_sort_downloads)
-        sort_addons(menu);
-    menu->addon_selected = menu->addon_scroll = 0;
-    if (selected_key[0])
-        for (size_t i = 0; i < menu->addon_count; i++)
-            if (!strcmp(menu->addon_rows[i].key, selected_key))
-            {
-                menu->addon_selected = i;
-                menu->addon_scroll = i >= ADDON_VISIBLE_ROWS ?
-                    i - ADDON_VISIBLE_ROWS + 1 : 0;
-                break;
-            }
+    if (menu->addon_tab == FOREVER_ADDON_FIND)
+    {
+        menu->addon_catalog_count = snapshot->count < FOREVER_ADDON_ROWS ?
+            snapshot->count : FOREVER_ADDON_ROWS;
+        memcpy(menu->addon_catalog_rows, snapshot->rows,
+               menu->addon_catalog_count * sizeof(menu->addon_catalog_rows[0]));
+        sort_rows(menu->addon_catalog_rows, menu->addon_catalog_count,
+                  menu->addon_sort_downloads);
+        rebuild_find(menu, 0);
+    }
+    else
+    {
+        menu->addon_count = snapshot->count < FOREVER_ADDON_VIEW_ROWS ?
+            snapshot->count : FOREVER_ADDON_VIEW_ROWS;
+        memcpy(menu->addon_rows, snapshot->rows,
+               menu->addon_count * sizeof(menu->addon_rows[0]));
+        menu->addon_selected = menu->addon_scroll = 0;
+        if (selected_key[0])
+            for (size_t i = 0; i < menu->addon_count; i++)
+                if (!strcmp(menu->addon_rows[i].key, selected_key))
+                {
+                    menu->addon_selected = i;
+                    menu->addon_scroll = i >= ADDON_VISIBLE_ROWS ?
+                        i - ADDON_VISIBLE_ROWS + 1 : 0;
+                    break;
+                }
+    }
     menu->addon_loading = 0;
-    copy_status(menu, menu->addon_count ? "" : "No add-ons found for this view.");
+    if (menu->addon_pending_github)
+    {
+        menu->addon_pending_github = 0;
+        copy_status(menu, "Installed from GitHub.");
+    }
+    else if (menu->addon_tab != FOREVER_ADDON_FIND)
+        copy_status(menu, menu->addon_count ? "" : "No add-ons found for this view.");
+    else
+        menu->status[0] = 0;
 }
 
 void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
@@ -324,6 +432,222 @@ void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
         menu->page != FOREVER_MENU_ADDON_CONFIRM) return;
     menu->addon_loading = 0;
     copy_status(menu, text && *text ? text : "The add-on operation failed.");
+    menu->addon_pending_github = 0;
+}
+
+static size_t utf8_size(const unsigned char *text, size_t available)
+{
+    if (!available) return 0;
+    if (text[0] < 0x80) return 1;
+    if ((text[0] & 0xe0) == 0xc0 && available >= 2 &&
+        (text[1] & 0xc0) == 0x80) return 2;
+    if ((text[0] & 0xf0) == 0xe0 && available >= 3 &&
+        (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80) return 3;
+    if ((text[0] & 0xf8) == 0xf0 && available >= 4 &&
+        (text[1] & 0xc0) == 0x80 && (text[2] & 0xc0) == 0x80 &&
+        (text[3] & 0xc0) == 0x80) return 4;
+    return 0;
+}
+
+static void normalize_query(const char *input, char output[FOREVER_ADDON_QUERY_BYTES])
+{
+    const unsigned char *text = (const unsigned char *)(input ? input : "");
+    size_t input_length = strlen((const char *)text), source = 0, used = 0;
+    while (source < input_length && used < FOREVER_ADDON_QUERY_BYTES - 1)
+    {
+        size_t bytes = utf8_size(text + source, input_length - source);
+        if (!bytes) { source++; continue; }
+        if (text[source] < 0x20 || text[source] == 0x7f) { source += bytes; continue; }
+        if (used + bytes > FOREVER_ADDON_QUERY_BYTES - 1) break;
+        memcpy(output + used, text + source, bytes);
+        used += bytes;
+        source += bytes;
+    }
+    output[used] = 0;
+}
+
+int forever_menu_find_set_query(struct forever_menu_state *menu, const char *query)
+{
+    char normalized[FOREVER_ADDON_QUERY_BYTES];
+    if (!menu || menu->page != FOREVER_MENU_ADDON_PAGE ||
+        menu->addon_tab != FOREVER_ADDON_FIND) return 0;
+    normalize_query(query, normalized);
+    if (!strcmp(menu->addon_query, normalized)) return 0;
+    memcpy(menu->addon_query, normalized, sizeof(menu->addon_query));
+    rebuild_find(menu, 1);
+    menu->status[0] = 0;
+    return 1;
+}
+
+int forever_menu_find_append(struct forever_menu_state *menu, const char *text)
+{
+    char combined[FOREVER_ADDON_QUERY_BYTES * 2];
+    if (!menu || !text) return 0;
+    snprintf(combined, sizeof(combined), "%s%s", menu->addon_query, text);
+    return forever_menu_find_set_query(menu, combined);
+}
+
+int forever_menu_find_backspace(struct forever_menu_state *menu)
+{
+    char query[FOREVER_ADDON_QUERY_BYTES];
+    size_t length;
+    if (!menu || !menu->addon_query[0]) return 0;
+    memcpy(query, menu->addon_query, sizeof(query));
+    length = strlen(query);
+    do length--; while (length && ((unsigned char)query[length] & 0xc0) == 0x80);
+    query[length] = 0;
+    return forever_menu_find_set_query(menu, query);
+}
+
+void forever_menu_find_ime(struct forever_menu_state *menu, const char *text, int accepted)
+{
+    if (accepted) forever_menu_find_set_query(menu, text);
+}
+
+static int ascii_prefix(const char *text, const char *prefix)
+{
+    while (*prefix)
+    {
+        if (!*text || !ascii_equal((unsigned char)*text, (unsigned char)*prefix)) return 0;
+        text++;
+        prefix++;
+    }
+    return 1;
+}
+
+static int repo_character(unsigned char character)
+{
+    return (character >= 'a' && character <= 'z') ||
+           (character >= 'A' && character <= 'Z') ||
+           (character >= '0' && character <= '9') ||
+           character == '.' || character == '_' || character == '-';
+}
+
+static int github_input_error(char *error, size_t error_size)
+{
+    if (error && error_size)
+        snprintf(error, error_size,
+                 "Enter owner/repo or an https://github.com/owner/repo link.");
+    return -1;
+}
+
+int forever_menu_github_repo(const char *input, char *repo, size_t repo_size,
+                             char *error, size_t error_size)
+{
+    static const char github[] = "https://github.com/";
+    static const char github_www[] = "https://www.github.com/";
+    const char *path, *owner, *repository, *after;
+    size_t owner_length, repository_length;
+    int url = 0;
+    if (!input || !repo || !repo_size || !*input)
+        return github_input_error(error, error_size);
+    if (ascii_prefix(input, github_www))
+    {
+        path = input + sizeof(github_www) - 1;
+        url = 1;
+    }
+    else if (ascii_prefix(input, github))
+    {
+        path = input + sizeof(github) - 1;
+        url = 1;
+    }
+    else
+    {
+        if (strstr(input, "://")) return github_input_error(error, error_size);
+        path = input;
+    }
+    owner = path;
+    after = strchr(owner, '/');
+    if (!after) return github_input_error(error, error_size);
+    owner_length = (size_t)(after - owner);
+    repository = after + 1;
+    after = strchr(repository, '/');
+    repository_length = after ? (size_t)(after - repository) : strlen(repository);
+    if (repository_length >= 4 &&
+        repository[repository_length - 4] == '.' &&
+        ascii_equal((unsigned char)repository[repository_length - 3], 'g') &&
+        ascii_equal((unsigned char)repository[repository_length - 2], 'i') &&
+        ascii_equal((unsigned char)repository[repository_length - 1], 't'))
+        repository_length -= 4;
+    if (!owner_length || owner_length > 100 ||
+        !repository_length || repository_length > 100)
+        return github_input_error(error, error_size);
+    for (size_t i = 0; i < owner_length; i++)
+        if (!repo_character((unsigned char)owner[i]))
+            return github_input_error(error, error_size);
+    for (size_t i = 0; i < repository_length; i++)
+        if (!repo_character((unsigned char)repository[i]))
+            return github_input_error(error, error_size);
+    if (after)
+    {
+        if (!url && after[1]) return github_input_error(error, error_size);
+        for (const char *extra = after + 1; url && *extra; extra++)
+            if (!repo_character((unsigned char)*extra) && *extra != '/')
+                return github_input_error(error, error_size);
+    }
+    if (owner_length + 1 + repository_length >= repo_size)
+        return github_input_error(error, error_size);
+    memcpy(repo, owner, owner_length);
+    repo[owner_length] = '/';
+    memcpy(repo + owner_length + 1, repository, repository_length);
+    repo[owner_length + 1 + repository_length] = 0;
+    if (error && error_size) error[0] = 0;
+    return 0;
+}
+
+struct forever_menu_result forever_menu_github_ime(
+    struct forever_menu_state *menu, const char *text, int accepted)
+{
+    char repo[FOREVER_ADDON_KEY_BYTES], error[FOREVER_MENU_STATUS_BYTES];
+    struct forever_menu_result result;
+    if (!accepted || !menu || menu->page != FOREVER_MENU_ADDON_PAGE ||
+        menu->addon_tab != FOREVER_ADDON_FIND) return none();
+    if (forever_menu_github_repo(text, repo, sizeof(repo), error, sizeof(error)))
+    {
+        copy_status(menu, error);
+        return none();
+    }
+    menu->addon_tab = FOREVER_ADDON_INSTALLED;
+    menu->addon_selected = menu->addon_scroll = menu->addon_count = 0;
+    menu->addon_pending_github = 1;
+    addon_working(menu, "Installing from GitHub...");
+    result = addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB, repo);
+    return result;
+}
+
+int forever_menu_hint_seen(const char *path)
+{
+    struct stat status;
+    return path && !stat(path, &status);
+}
+
+int forever_menu_hint_mark_seen(const char *path)
+{
+    static const char content[] = "seen\n";
+    char temporary[512];
+    size_t done = 0;
+    int fd, error = 0, length;
+    if (!path || !*path) return -EINVAL;
+    if (forever_menu_hint_seen(path)) return 0;
+    length = snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+    if (length < 0 || (size_t)length >= sizeof(temporary)) return -ENAMETOOLONG;
+    fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) return -errno;
+    while (done < sizeof(content) - 1)
+    {
+        ssize_t count = write(fd, content + done, sizeof(content) - 1 - done);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { error = count < 0 ? errno : EIO; break; }
+        done += (size_t)count;
+    }
+    if (close(fd) && !error) error = errno;
+    if (!error && rename(temporary, path)) error = errno;
+    if (error)
+    {
+        unlink(temporary);
+        return -error;
+    }
+    return 0;
 }
 
 struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
@@ -337,6 +661,9 @@ struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
+        if (menu->addon_tab == FOREVER_ADDON_FIND && menu->addon_query[0] &&
+            forever_menu_find_set_query(menu, ""))
+            return none();
         menu->page = FOREVER_MENU_MAIN;
         menu->selected = FOREVER_MENU_ADDONS;
         menu->addon_loading = 0;
@@ -354,6 +681,11 @@ struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
     if (menu->page == FOREVER_MENU_MAIN || menu->page == FOREVER_MENU_NOTICE)
         return (struct forever_menu_result){.command = FOREVER_MENU_COMMAND_CLOSE};
     return none();
+}
+
+static int find_query_separate(const struct forever_menu_state *menu)
+{
+    return menu->addon_tab == FOREVER_ADDON_FIND && menu->addon_query[0];
 }
 
 struct forever_menu_result forever_menu_click_line(struct forever_menu_state *menu, int line)
@@ -375,12 +707,14 @@ struct forever_menu_result forever_menu_click_line(struct forever_menu_state *me
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
-        if (line == FOREVER_MENU_LINE_ADDON_TABS)
+        int offset = find_query_separate(menu) ? 1 : 0;
+        if (line == FOREVER_MENU_LINE_ADDON_TABS + offset)
             return forever_menu_addon_button(menu, FOREVER_ADDON_RIGHT);
-        if (line >= FOREVER_MENU_LINE_ADDON_FIRST && line <= FOREVER_MENU_LINE_ADDON_LAST)
+        if (line >= FOREVER_MENU_LINE_ADDON_FIRST + offset &&
+            line <= FOREVER_MENU_LINE_ADDON_LAST + offset)
         {
             size_t selected = menu->addon_scroll +
-                (size_t)(line - FOREVER_MENU_LINE_ADDON_FIRST);
+                (size_t)(line - FOREVER_MENU_LINE_ADDON_FIRST - offset);
             if (selected >= menu->addon_count) return none();
             menu->addon_selected = selected;
             menu->status[0] = 0;
@@ -483,6 +817,8 @@ static void render_addons(const struct forever_menu_state *menu, char *text, siz
     const char *channel = menu->addon_channel == FOREVER_ADDON_FINAL ?
         "WoW: Forever (final)" : "WoW: Forever (beta)";
     append(&writer, " Add-ons \xe2\x80\x94 %s\n", channel);
+    if (find_query_separate(menu))
+        append(&writer, " Find: \"%s\"\n", menu->addon_query);
     append(&writer, " ---------------------------------------------\n ");
     for (int tab = 0; tab < FOREVER_ADDON_TAB_COUNT; tab++)
         append(&writer, "%s%s%s%s", tab ? "   " : "",
@@ -510,7 +846,8 @@ static void render_addons(const struct forever_menu_state *menu, char *text, siz
         else
             append(&writer, " \n");
     }
-    if (selected)
+    if (selected && !find_special(selected, "menu:search") &&
+        !find_special(selected, "menu:github"))
     {
         append(&writer, " ---------------------------------------------\n");
         append(&writer, " %s\n", selected->description[0] ?
@@ -519,7 +856,13 @@ static void render_addons(const struct forever_menu_state *menu, char *text, siz
         append(&writer, " Last update\t%s\n",
                selected->updated[0] ? selected->updated : "Unknown");
     }
-    append(&writer, " \n %s", menu->status);
+    if (menu->status[0])
+        append(&writer, " \n %s", menu->status);
+    else if (menu->addon_tab == FOREVER_ADDON_FIND &&
+             menu->addon_query[0] && !menu->addon_match_count)
+        append(&writer, " \n No add-ons match \"%s\"", menu->addon_query);
+    else
+        append(&writer, " \n ");
 }
 
 void forever_menu_render(const struct forever_menu_state *menu, char *text, size_t size)

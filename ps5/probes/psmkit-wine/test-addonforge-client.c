@@ -35,7 +35,7 @@ static void *serve_fake(void *argument)
         "{\"id\":\"alpha\",\"key\":\"cat:alpha\",\"name\":\"Alpha\","
         "\"desc\":\"Link only\",\"curse\":123,\"downloads\":7}]}";
     struct fake_server *server = argument;
-    for (int request = 0; request < 2; request++)
+    for (int request = 0; request < 3; request++)
     {
         char bytes[4096] = {0};
         int fd = accept(server->listener, NULL, NULL);
@@ -52,7 +52,7 @@ static void *serve_fake(void *argument)
             assert(strstr(bytes, "GET /health HTTP/1.1\r\n"));
             send_all(fd, response, sizeof(response) - 1);
         }
-        else
+        else if (request == 1)
         {
             char response[4096];
             int length;
@@ -63,6 +63,23 @@ static void *serve_fake(void *argument)
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                 "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
                 sizeof(catalogue) - 1, catalogue);
+            assert(length > 0 && (size_t)length < sizeof(response));
+            send_all(fd, response, (size_t)length);
+        }
+        else
+        {
+            static const char body[] =
+                "{\"ok\":true,\"result\":{\"key\":\"github:owner/repo\",\"name\":\"Repo\"}}";
+            char response[512];
+            int length;
+            assert(strstr(bytes, "POST /command HTTP/1.1\r\n"));
+            assert(strstr(bytes,
+                "{\"command\":\"install_github\",\"args\":"
+                "{\"repo\":\"owner/repo\",\"allow_non_forever\":false}}"));
+            length = snprintf(response, sizeof(response),
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                sizeof(body) - 1, body);
             assert(length > 0 && (size_t)length < sizeof(response));
             send_all(fd, response, (size_t)length);
         }
@@ -85,7 +102,7 @@ static void test_http_and_fake_catalogue(void)
     fake.listener = socket(AF_INET, SOCK_STREAM, 0);
     assert(fake.listener >= 0);
     assert(!bind(fake.listener, (struct sockaddr *)&address, sizeof(address)));
-    assert(!listen(fake.listener, 2));
+    assert(!listen(fake.listener, 3));
     assert(!getsockname(fake.listener, (struct sockaddr *)&address, &address_size));
     fake.port = ntohs(address.sin_port);
     client.port = fake.port;
@@ -105,6 +122,8 @@ static void test_http_and_fake_catalogue(void)
     assert(!strcmp(snapshot.rows[1].status, "Installed"));
     assert(!strcmp(snapshot.rows[1].source, "GitHub"));
     assert(!strcmp(snapshot.rows[1].updated, "2026-10-16"));
+    assert(!addonforge_install_github(&client, "owner/repo", response, sizeof(response)));
+    assert(!addonforge_response_error(response, error, sizeof(error)));
     assert(!pthread_join(thread, NULL));
 }
 
@@ -145,6 +164,22 @@ static void test_installed_statuses_and_plain_errors(void)
                                      error, sizeof(error)));
     assert(!strcmp(snapshot.rows[0].name, "Emoji ? ??"));
     assert(!strcmp(snapshot.rows[0].description, "R?sum? ?"));
+    static const char cafe_find[] =
+        "{\"ok\":true,\"result\":[{\"id\":\"cafe\",\"key\":\"cat:cafe\","
+        "\"name\":\"Caf\xc3\xa9\",\"desc\":\"Recipes and bags\",\"github\":\"owner/cafe\"}]}";
+    {
+        struct forever_menu_state menu;
+        assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, cafe_find, &snapshot,
+                                         error, sizeof(error)));
+        assert(!strcmp(snapshot.rows[0].name, "Caf?"));
+        forever_menu_init(&menu);
+        menu.page = FOREVER_MENU_ADDON_PAGE;
+        menu.addon_tab = FOREVER_ADDON_FIND;
+        forever_menu_addon_snapshot(&menu, &snapshot);
+        assert(forever_menu_find_set_query(&menu, "\xc3\xa9"));
+        assert(menu.addon_match_count == 1);
+        assert(!strcmp(menu.addon_rows[1].key, "cat:cafe"));
+    }
     static const char nested_package[] =
         "{\"ok\":true,\"result\":[{\"missing_deps\":[{\"catalog_id\":null,"
         "\"folder\":\"Library\",\"name\":null}],\"key\":\"folder:parent\","

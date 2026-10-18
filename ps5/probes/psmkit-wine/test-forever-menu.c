@@ -136,6 +136,177 @@ static void test_deletion_scope(void)
      * this helper only proves that no caller can widen the fixed root set. */
 }
 
+static void test_menu_hint_seen_file(void)
+{
+    char path[1024], missing[1024], temporary[1040];
+    make_path(path, sizeof(path), "hint/.forever-menu-seen");
+    {
+        char directory[1024];
+        make_path(directory, sizeof(directory), "hint");
+        assert(!forever_mkdirs(directory));
+    }
+    assert(!forever_menu_hint_seen(path));
+    assert(!forever_menu_hint_mark_seen(path));
+    assert(forever_menu_hint_seen(path));
+    assert(text_is("hint/.forever-menu-seen", "seen\n"));
+    assert(!forever_menu_hint_mark_seen(path));
+    snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+    assert(access(temporary, F_OK) == -1 && errno == ENOENT);
+
+    make_path(missing, sizeof(missing), "missing-parent/child/.forever-menu-seen");
+    assert(forever_menu_hint_mark_seen(missing) < 0);
+    assert(!forever_menu_hint_seen(missing)); /* write failure leaves it eligible */
+}
+
+
+static void open_find(struct forever_menu_state *menu, struct forever_addon_snapshot *snapshot)
+{
+    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
+    forever_menu_init(menu);
+    forever_menu_open(menu, &values);
+    menu->page = FOREVER_MENU_ADDON_PAGE;
+    menu->addon_tab = FOREVER_ADDON_FIND;
+    forever_menu_addon_snapshot(menu, snapshot);
+}
+
+static void test_find_search_and_github(void)
+{
+    struct forever_menu_state menu;
+    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND, .count = 4};
+    struct forever_menu_result result;
+    char repo[FOREVER_ADDON_KEY_BYTES], error[FOREVER_MENU_STATUS_BYTES];
+    char text[FOREVER_MENU_TEXT_BYTES];
+
+    snprintf(snapshot.rows[0].key, sizeof(snapshot.rows[0].key), "cat:zulu");
+    snprintf(snapshot.rows[0].name, sizeof(snapshot.rows[0].name), "Zulu");
+    snprintf(snapshot.rows[0].description, sizeof(snapshot.rows[0].description),
+             "A bags organizer.");
+    snapshot.rows[0].downloads = 10;
+    snapshot.rows[0].installable = 1;
+    snprintf(snapshot.rows[1].key, sizeof(snapshot.rows[1].key), "cat:cafe");
+    snprintf(snapshot.rows[1].name, sizeof(snapshot.rows[1].name), "Caf\xc3\xa9");
+    snprintf(snapshot.rows[1].description, sizeof(snapshot.rows[1].description), "Recipes.");
+    snapshot.rows[1].downloads = 5;
+    snapshot.rows[1].installable = 1;
+    snprintf(snapshot.rows[2].key, sizeof(snapshot.rows[2].key), "cat:alpha");
+    snprintf(snapshot.rows[2].name, sizeof(snapshot.rows[2].name), "Alpha");
+    snprintf(snapshot.rows[2].description, sizeof(snapshot.rows[2].description),
+             "RAID tools.");
+    snapshot.rows[2].downloads = 30;
+    snapshot.rows[2].installable = 1;
+    snprintf(snapshot.rows[3].key, sizeof(snapshot.rows[3].key), "cat:beta");
+    snprintf(snapshot.rows[3].name, sizeof(snapshot.rows[3].name), "Beta");
+    snprintf(snapshot.rows[3].description, sizeof(snapshot.rows[3].description), "Nothing.");
+    snapshot.rows[3].downloads = 20;
+    snapshot.rows[3].installable = 1;
+
+    open_find(&menu, &snapshot);
+    assert(menu.addon_count == 6);
+    assert(!strcmp(menu.addon_rows[0].name, "Search\xe2\x80\xa6"));
+    assert(!strcmp(menu.addon_rows[5].name, "Add from GitHub link\xe2\x80\xa6"));
+
+    assert(forever_menu_find_append(&menu, "rA"));
+    assert(forever_menu_find_append(&menu, "iD"));
+    assert(!strcmp(menu.addon_query, "rAiD"));
+    assert(menu.addon_count == 3 && menu.addon_selected == 1);
+    assert(!strcmp(menu.addon_rows[1].name, "Alpha")); /* description match */
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Find: \"rAiD\""));
+    menu.addon_loading = 1; /* Circle still clears while an install is running. */
+
+    result = forever_menu_back(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_ADDON_PAGE && !menu.addon_query[0]);
+    assert(menu.addon_count == 6); /* Circle clears before leaving Find. */
+    result = forever_menu_back(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_CLOSE);
+
+    open_find(&menu, &snapshot);
+    assert(forever_menu_find_set_query(&menu, "\xc3\xa9"));
+    assert(menu.addon_count == 3 && !strcmp(menu.addon_rows[1].name, "Caf\xc3\xa9"));
+    assert(forever_menu_find_set_query(&menu, "absent"));
+    assert(menu.addon_count == 2 && menu.addon_selected == 0);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "No add-ons match \"absent\""));
+
+    assert(forever_menu_find_set_query(&menu, "old"));
+    forever_menu_find_ime(&menu, "replacement", 0);
+    assert(!strcmp(menu.addon_query, "old")); /* IME cancel keeps the old query. */
+    forever_menu_find_ime(&menu, "be", 1);
+    assert(!strcmp(menu.addon_query, "be") && !strcmp(menu.addon_rows[1].name, "Beta"));
+    assert(forever_menu_find_backspace(&menu));
+    assert(!strcmp(menu.addon_query, "b"));
+    {
+        char long_query[96];
+        memset(long_query, 'w', sizeof(long_query) - 1);
+        long_query[sizeof(long_query) - 1] = 0;
+        assert(forever_menu_find_set_query(&menu, long_query));
+        assert(strlen(menu.addon_query) == FOREVER_ADDON_QUERY_BYTES - 1);
+        assert(!forever_menu_find_append(&menu, "x"));
+    }
+
+    assert(forever_menu_find_set_query(&menu, ""));
+    forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE);
+    assert(menu.addon_sort_downloads);
+    assert(!strcmp(menu.addon_rows[1].name, "Alpha"));
+    assert(!strcmp(menu.addon_rows[2].name, "Beta"));
+    assert(forever_menu_find_set_query(&menu, "a"));
+    assert(!strcmp(menu.addon_rows[1].name, "Alpha"));
+    assert(!strcmp(menu.addon_rows[2].name, "Beta")); /* filtering preserves sort */
+
+    assert(!forever_menu_github_repo("owner/repo", repo, sizeof(repo), error, sizeof(error)));
+    assert(!strcmp(repo, "owner/repo"));
+    assert(!forever_menu_github_repo("owner/repo.git/", repo, sizeof(repo), error, sizeof(error)));
+    assert(!strcmp(repo, "owner/repo"));
+    assert(!forever_menu_github_repo("https://github.com/Owner/re_po/releases/latest",
+                                     repo, sizeof(repo), error, sizeof(error)));
+    assert(!strcmp(repo, "Owner/re_po"));
+    assert(!forever_menu_github_repo("https://www.github.com/a/b.git/", repo, sizeof(repo),
+                                     error, sizeof(error)));
+    assert(!strcmp(repo, "a/b"));
+    assert(forever_menu_github_repo("http://github.com/a/b", repo, sizeof(repo),
+                                    error, sizeof(error)));
+    assert(forever_menu_github_repo("https://example.com/a/b", repo, sizeof(repo),
+                                    error, sizeof(error)));
+    assert(forever_menu_github_repo("owner", repo, sizeof(repo), error, sizeof(error)));
+    assert(forever_menu_github_repo("owner/re po", repo, sizeof(repo), error, sizeof(error)));
+    assert(forever_menu_github_repo("owner/repo?x=1", repo, sizeof(repo), error, sizeof(error)));
+    {
+        char too_long[110] = {0};
+        memset(too_long, 'a', 101);
+        snprintf(too_long + 101, sizeof(too_long) - 101, "/b");
+        assert(forever_menu_github_repo(too_long, repo, sizeof(repo), error, sizeof(error)));
+    }
+
+    open_find(&menu, &snapshot);
+    result = forever_menu_select(&menu); /* pad CROSS on Search */
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME);
+    forever_menu_find_ime(&menu, "bags", 1); /* diag `text bags` confirms the IME */
+    result = forever_menu_select(&menu); /* next pad CROSS selects the first result */
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_INSTALL);
+    assert(!strcmp(result.key, "cat:zulu"));
+
+    open_find(&menu, &snapshot);
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME);
+    menu.addon_selected = menu.addon_count - 1;
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME);
+    result = forever_menu_github_ime(&menu, "https://github.com/owner/repo.git", 0);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE &&
+           menu.addon_tab == FOREVER_ADDON_FIND);
+    result = forever_menu_github_ime(&menu, "https://example.com/owner/repo", 1);
+    assert(result.command == FOREVER_MENU_COMMAND_NONE &&
+           menu.addon_tab == FOREVER_ADDON_FIND);
+    assert(!strcmp(menu.status,
+                   "Enter owner/repo or an https://github.com/owner/repo link."));
+    result = forever_menu_github_ime(&menu, "https://github.com/owner/repo.git", 1);
+    assert(result.command == FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB);
+    assert(!strcmp(result.key, "owner/repo"));
+    assert(result.tab == FOREVER_ADDON_INSTALLED && menu.addon_loading);
+}
+
+
 static void test_state_machine(void)
 {
     struct forever_menu_state menu;
@@ -201,21 +372,23 @@ static void test_state_machine(void)
     snapshot.rows[1].curse_only = 1;
     snapshot.rows[1].downloads = 42;
     forever_menu_addon_snapshot(&menu, &snapshot);
+    menu.addon_selected = 1;
     forever_menu_render(&menu, text, sizeof(text));
     assert(strstr(text, " Last update\tUnknown"));
-    assert(menu.addon_tab == FOREVER_ADDON_FIND && menu.addon_count == 2);
+    assert(menu.addon_tab == FOREVER_ADDON_FIND && menu.addon_count == 4);
     result = forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE);
     assert(result.command == FOREVER_MENU_COMMAND_NONE && menu.addon_sort_downloads);
-    assert(!strcmp(menu.addon_rows[0].name, "Curse Example"));
+    assert(!strcmp(menu.addon_rows[1].name, "Curse Example"));
     forever_menu_addon_button(&menu, FOREVER_ADDON_SQUARE);
-    assert(!menu.addon_sort_downloads && !strcmp(menu.addon_rows[0].name, "Alpha"));
+    assert(!menu.addon_sort_downloads && !strcmp(menu.addon_rows[1].name, "Alpha"));
+    menu.addon_selected = 1;
     result = forever_menu_select(&menu);
     assert(result.command == FOREVER_MENU_COMMAND_ADDONS_INSTALL);
     assert(!strcmp(result.key, "cat:alpha"));
     forever_menu_addon_snapshot(&menu, &snapshot);
-    forever_menu_move(&menu, 1);
+    menu.addon_selected = 2;
     forever_menu_addon_snapshot(&menu, &snapshot);
-    assert(menu.addon_selected == 1);
+    assert(menu.addon_selected == 2);
     result = forever_menu_select(&menu);
     assert(result.command == FOREVER_MENU_COMMAND_NONE);
     assert(strstr(menu.status, "Available on CurseForge only"));
@@ -295,6 +468,8 @@ int main(void)
     test_hdr_config();
     test_deletion_scope();
     test_state_machine();
+    test_menu_hint_seen_file();
+    test_find_search_and_github();
     snprintf(command, sizeof(command), "rm -rf '%s'", root);
     assert(!system(command));
     puts("forever menu helpers/state: PASS");
