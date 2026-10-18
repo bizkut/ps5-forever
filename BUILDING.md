@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.013
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.014
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -205,14 +205,20 @@ remain in force.
   `ps5/addonforge/patches/` add the Tauri-free loopback core, per-session bearer
   token, final-channel mapping and behavioural tests; the upstream checkout is
   copied before patching and is never modified.
+- CI uses the committed `ps5/addonforge/github-catalogue.csv` snapshot, not a
+  live fetch: 609,505 bytes, 2,421 rows, SHA-256
+  `8d5b512a8bf7b2d6107f2b2a2407a0f24485752cca6e58b6771c7a7b856dbd09`.
+  It is compiled into the core and packaged as
+  `wine-title/addonforge/github-catalogue.csv`; runtime refreshes remain separate.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
   and all later Cargo commands use `--offline --locked`.
 - The `addonforge` cache key covers the source pin, patches, `Cargo.lock`, Rust
-  toolchain and container image. A cache miss builds in two empty target
-  directories and refuses unequal `addonforge-core.exe` SHA-256 values. The
-  staged `build-receipt.json` records both hashes.
+  toolchain, container image and exact GitHub catalogue snapshot. A cache miss
+  builds in two empty target directories and refuses unequal
+  `addonforge-core.exe` SHA-256 values. The staged `build-receipt.json` records
+  both hashes.
 - `wine-title/addonforge/addonforge-core.exe` and
   `forever-maintenance.exe` are Windows PE executables run by Wine. The homebrew
   catalog scan rejects payload ELF executables; it does not classify these PEs

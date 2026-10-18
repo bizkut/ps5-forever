@@ -377,7 +377,7 @@ build_dxvk_cached() {
 }
 build_addonforge_cached() {
     local key
-    python3 ps5/addonforge/build.py --fetch-catalogue "$logs/github-catalogue.csv"
+    cp "$wow/ps5/addonforge/github-catalogue.csv" "$logs/github-catalogue.csv"
     key=$(cache_key_addonforge)
     cached_build addonforge "$key" \
         ps5-proton/ps5-wow/ps5/build/addonforge -- \

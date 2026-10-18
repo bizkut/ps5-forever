@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.013
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.014
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -459,11 +459,13 @@ Classic Era failure is not established.
   GitHub resolution continues to prefer the packager's `release.json`
   flavour/interface metadata, falling back to the existing tagged-asset logic.
   The runtime GitHub cache has a 24-hour TTL, conditional `If-None-Match`/304
-  refreshes and last-good offline fallback. A build-refreshed CSV is compiled
-  in for first-run offline use. The receipt pins its SHA-256, byte size and
-  row count. `build-linux.sh` refreshes this input *before* cache lookup and
-  includes its hash in the AddonForge cache key; `build.py --catalogue-snapshot`
-  replays a receipt's exact CSV without changing the two cold-build inputs.
+  refreshes and last-good offline fallback. The committed
+  `ps5/addonforge/github-catalogue.csv` is compiled in for first-run offline use
+  and packaged as `wine-title/addonforge/github-catalogue.csv`. The receipt pins
+  its SHA-256, byte size and row count. `build-linux.sh` copies this exact input
+  before cache lookup and includes its hash in the AddonForge cache key; it
+  never fetches a live CSV. `build.py --catalogue-snapshot` replays the same
+  bytes for both cold builds.
   Generated notices include the catalogue attribution and full GPL-3.0 text.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
