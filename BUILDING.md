@@ -152,6 +152,19 @@ evidence: `release-proof/broker-bench-20261016T163238Z`. This measures parallel
 file-write throughput, not real Battle.net download or update throughput; those
 speedups have not yet been measured.
 
+`python3 ps5/writebroker/benchmark-writebroker.py --output /tmp/wb-native
+--sdk /path/to/payload-sdk --wine /path/to/ps5-wine` prepares native and broker
+probe ELFs without contacting a console. Add `--execute --host CONSOLE_HOST`
+to run the native authid/write/pwrite matrix. `--mode broker-ab` requires exact
+`--baseline-broker`, `--candidate-broker` and `--restore-broker` ELFs and restores
+the supplied broker even after a failed run. `--mode ftp-network` measures the
+invoking LAN host's FTP path, not isolated disk throughput.
+
+Execution requires an idle title and at least 2 GiB free, uses a fresh synthetic
+scratch root, records payload/log digests and separate preparation, write,
+verification, flush and close times, and retains failed-run files for diagnosis.
+It never launches, kills or installs a title or changes live tuning.
+
 The matching PS5 startup measurement reproduced two crashes in four starts
 before the complete builtin sync and observed ten clean starts in ten attempts
 after it. This measurement is evidence for the sync change, not final `.012`
