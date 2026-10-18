@@ -3,9 +3,10 @@
  * The app folder is replaced by every store update, so everything the user
  * owns (the Wine prefix with Battle.net and the games, HOME, the shader cache)
  * lives in FOREVER_ROOT. Each function takes its paths as arguments so the
- * host tests can run it against a temporary directory. Only calls the native
- * title already imports are used (open/read/write/close/stat/mkdir/rename/
- * unlink). */
+ * host tests can run it against a temporary directory. Managed inspection uses
+ * stat plus no-follow open/fstat: the PS5 title sandbox rejects lstat. Empty
+ * directory replacement and the rare in-place fallback have separate syscall
+ * qualification requirements documented in release/BUILDING.md. */
 #ifndef FOREVER_SETUP_H
 #define FOREVER_SETUP_H
 
@@ -17,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "sha256.h"
 
 #define FOREVER_TUNE_DEFAULT "unwind_cache=on qpc=tsc log_async=on\n"
 #define FOREVER_FG_DEFAULT "fg=on mult=2 flow=1.0 method=auto\n"
@@ -123,7 +125,8 @@ static inline int forever_write_file(const char *path, const void *data, size_t 
     int fd, error = 0;
     if (snprintf(temporary, sizeof(temporary), "%s.forever-tmp", path) >= (int)sizeof(temporary))
         return -ENAMETOOLONG;
-    if ((fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666)) < 0) return -errno;
+    if (unlink(temporary) && errno != ENOENT) return -errno;
+    if ((fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0666)) < 0) return -errno;
     while (size && !error)
     {
         ssize_t written = write(fd, bytes, size);
@@ -171,35 +174,64 @@ static inline ssize_t forever_read_file(const char *path, char *buffer, size_t s
     return (ssize_t)used;
 }
 
-/* Copy source to destination through a temporary name. 0 or -errno. */
-static inline int forever_copy_file(const char *source, const char *destination)
+/* Copy between already-open descriptors. Record the failed I/O operation. */
+static inline int forever_copy_data(int in, int out, const char **operation)
 {
     static unsigned char block[1u << 16];
-    char temporary[1100];
-    int in, out, error = 0;
-    if (snprintf(temporary, sizeof(temporary), "%s.forever-tmp", destination) >= (int)sizeof(temporary))
-        return -ENAMETOOLONG;
-    if ((in = open(source, O_RDONLY)) < 0) return -errno;
-    if ((out = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666)) < 0) { error = -errno; close(in); return error; }
     for (;;)
     {
         ssize_t count = read(in, block, sizeof(block)), done = 0;
         if (count < 0 && errno == EINTR) continue;
-        if (count < 0) { error = -errno; break; }
-        if (!count) break;
+        if (count < 0) { *operation = "read-source"; return -errno; }
+        if (!count) return 0;
         while (done < count)
         {
             ssize_t written = write(out, block + done, (size_t)(count - done));
             if (written < 0 && errno == EINTR) continue;
-            if (written <= 0) { error = written < 0 ? -errno : -EIO; break; }
+            if (written <= 0)
+            {
+                *operation = "write-destination";
+                return written < 0 ? -errno : -EIO;
+            }
             done += written;
         }
-        if (error) break;
     }
+}
+
+/* Copy source to destination through a temporary name. 0 or -errno.
+ * Only managed sync may decide whether a rejected rename has a safe fallback. */
+static inline int forever_copy_file(const char *source, const char *destination,
+                                    const char **operation)
+{
+    char temporary[1100];
+    const char *step = "copy-path";
+    int in = -1, out = -1, error = 0, created = 0;
+    if (snprintf(temporary, sizeof(temporary), "%s.forever-tmp", destination) >= (int)sizeof(temporary))
+    {
+        if (operation) *operation = step;
+        return -ENAMETOOLONG;
+    }
+    step = "open-source";
+    if ((in = open(source, O_RDONLY)) < 0) { error = -errno; goto done; }
+    step = "unlink-temporary";
+    if (unlink(temporary) && errno != ENOENT) { error = -errno; goto done; }
+    step = "open-temporary";
+    if ((out = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0666)) < 0) { error = -errno; goto done; }
+    created = 1;
+    error = forever_copy_data(in, out, &step);
     close(in);
-    if (close(out) && !error) error = -errno;
-    if (!error && rename(temporary, destination)) error = -errno;
-    if (error) unlink(temporary);
+    in = -1;
+    if (close(out) && !error) { step = "close-temporary"; error = -errno; }
+    out = -1;
+    if (!error && rename(temporary, destination)) { step = "rename"; error = -errno; }
+done:
+    if (in >= 0) close(in);
+    if (out >= 0) close(out);
+    if (error)
+    {
+        if (operation) *operation = step;
+        if (created) unlink(temporary);
+    }
     return error;
 }
 
@@ -322,27 +354,177 @@ static inline int forever_migrate(const char *prefix, const char *home, const ch
     return 0;
 }
 
-/* Use the same ownership signatures as setupapi's is_fake_dll(): native
- * replacements installed by the user are not Wine prefix-update targets. */
-static inline int forever_is_wine_pe(const char *path)
+#define FOREVER_MANAGED_LOG_LIMIT 8
+#define FOREVER_MANAGED_STATE_HEADER "# forever-managed-v2\t"
+/* PS5 filesystem device IDs are namespace/context-specific. Keep them for
+ * descriptor race checks, but not for a cache persisted across title launches.
+ * Host tests can select either policy while injecting changing device IDs. */
+#ifndef FOREVER_MANAGED_CHECK_DEVICE
+#ifdef __PROSPERO__
+#define FOREVER_MANAGED_CHECK_DEVICE 0
+#else
+#define FOREVER_MANAGED_CHECK_DEVICE 1
+#endif
+#endif
+
+struct forever_managed_report
 {
-    unsigned char header[96];
-    size_t used = 0;
-    int fd = open(path, O_RDONLY), error = 0;
-    if (fd < 0) return -errno;
-    while (used < sizeof(header))
+    unsigned checked, hashed, repaired;
+    char paths[FOREVER_MANAGED_LOG_LIMIT][1024];
+    const char *failed_op;
+    char failed_path[1024];
+    int state_read_result, state_publish_attempted, state_publish_result;
+    unsigned state_loaded;
+    size_t state_publish_bytes;
+    const char *mismatch_field;
+    int mismatch_ignored;
+    char mismatch_path[1024], mismatch_recorded[65], mismatch_current[65];
+};
+
+static inline int forever_managed_failure(struct forever_managed_report *report,
+                                          const char *operation, const char *path, int error)
+{
+    report->failed_op = operation;
+    snprintf(report->failed_path, sizeof(report->failed_path), "%s", path);
+    return error;
+}
+/* Keep just the first actionable cache mismatch. If every differing field is
+ * ignored by policy, retain the first such difference to explain the cache hit. */
+static inline void forever_managed_mismatch(struct forever_managed_report *report,
+                                           const char *path, const char *field,
+                                           const char *recorded, size_t recorded_size,
+                                           const char *current, size_t current_size, int ignored)
+{
+    if (report->mismatch_field && (!report->mismatch_ignored || ignored)) return;
+    report->mismatch_field = field;
+    report->mismatch_ignored = ignored;
+    snprintf(report->mismatch_path, sizeof(report->mismatch_path), "%s", path);
+    if (recorded_size >= sizeof(report->mismatch_recorded))
+        recorded_size = sizeof(report->mismatch_recorded) - 1;
+    if (current_size >= sizeof(report->mismatch_current))
+        current_size = sizeof(report->mismatch_current) - 1;
+    memcpy(report->mismatch_recorded, recorded, recorded_size);
+    report->mismatch_recorded[recorded_size] = 0;
+    memcpy(report->mismatch_current, current, current_size);
+    report->mismatch_current[current_size] = 0;
+}
+
+/* Compare the canonical five-field metadata without integer-parser/runtime
+ * dependencies. Size is always field zero and is never ignored. Preserve v2
+ * records: dropping PS5's unstable device field must not force another audit. */
+static inline int forever_managed_cache_matches(const char *recorded, const char *current,
+                                                const char *path,
+                                                struct forever_managed_report *report)
+{
+    static const char *const fields[] = {"size", "mtime_sec", "mtime_nsec", "dev", "ino"};
+    const char *old = recorded, *now = current;
+    for (unsigned i = 0; i < 5; ++i)
     {
-        ssize_t count = read(fd, header + used, sizeof(header) - used);
-        if (count < 0 && errno == EINTR) continue;
-        if (count < 0) { error = -errno; break; }
-        if (!count) break;
-        used += (size_t)count;
+        const char *old_end = i < 4 ? strchr(old, ' ') : old + strlen(old);
+        const char *now_end = i < 4 ? strchr(now, ' ') : now + strlen(now);
+        if (!old_end || !now_end || old_end == old || now_end == now ||
+            (i == 4 && (strchr(old, ' ') || strchr(now, ' '))))
+        {
+            forever_managed_mismatch(report, path, "metadata", recorded, strlen(recorded),
+                                     current, strlen(current), 0);
+            return 0;
+        }
+        size_t old_size = (size_t)(old_end - old), now_size = (size_t)(now_end - now);
+        if (old_size != now_size || memcmp(old, now, old_size))
+        {
+            int ignored = i == 3 && !FOREVER_MANAGED_CHECK_DEVICE;
+            forever_managed_mismatch(report, path, fields[i], old, old_size, now, now_size, ignored);
+            if (!ignored) return 0;
+        }
+        if (i < 4) { old = old_end + 1; now = now_end + 1; }
     }
-    close(fd);
-    if (error) return error;
-    return used == sizeof(header) && header[0] == 'M' && header[1] == 'Z' &&
-        (!memcmp(header + 64, "Wine builtin DLL", sizeof("Wine builtin DLL")) ||
-         !memcmp(header + 64, "Wine placeholder DLL", sizeof("Wine placeholder DLL")));
+    return 1;
+}
+
+
+/* PS5 may forbid replacing another uid's directory entry even when its file
+ * is writable. Only after that specific rename failure, overwrite the same
+ * no-follow regular inode. Never truncate until identity/type/link checks pass.
+ * PS5 reports st_nlink=0 for ordinary files; both 0 and 1 are safe here. */
+static inline int forever_managed_overwrite(const char *source, const char *destination,
+                                            const struct stat *identity, const char **operation)
+{
+    struct stat opened;
+    const char *step = "open-source";
+    int in = -1, out = -1, error = 0;
+    if ((in = open(source, O_RDONLY)) < 0) { error = -errno; goto done; }
+    step = "open-inplace";
+    if ((out = open(destination, O_WRONLY | O_NOFOLLOW | O_NONBLOCK)) < 0)
+    { error = -errno; goto done; }
+    step = "fstat-inplace";
+    if (fstat(out, &opened)) { error = -errno; goto done; }
+    step = "inplace-type";
+    if (!S_ISREG(opened.st_mode)) { error = -EINVAL; goto done; }
+    step = "inplace-identity";
+    if (opened.st_dev != identity->st_dev || opened.st_ino != identity->st_ino)
+    { error = -EAGAIN; goto done; }
+    step = "inplace-links";
+    if (identity->st_nlink > 1 || opened.st_nlink > 1) { error = -EMLINK; goto done; }
+    step = "truncate-inplace";
+    if (ftruncate(out, 0)) { error = -errno; goto done; }
+    error = forever_copy_data(in, out, &step);
+    if (!error)
+    {
+        step = "fsync-inplace";
+        if (fsync(out)) error = -errno;
+    }
+done:
+    if (in >= 0) close(in);
+    if (out >= 0 && close(out) && !error) { step = "close-inplace"; error = -errno; }
+    if (error) *operation = step;
+    return error;
+}
+
+struct forever_managed_record
+{
+    const char *destination, *digest, *metadata;
+};
+
+/* stat is title-supported but follows symlinks. Never trust its regular-file
+ * metadata until a no-follow descriptor proves the leaf's type and identity.
+ * A symlink (including a dangling one) is a replace target, not an error.
+ * Nonregular files are never read; only directory candidates need a no-follow
+ * open to distinguish a real directory from a symlink to one. */
+static inline int forever_managed_open(const char *path, struct stat *status,
+                                       int *fd, int *exists, const char **operation)
+{
+    int opened, error;
+    *fd = -1;
+    memset(status, 0, sizeof(*status));
+    *exists = !stat(path, status);
+    if (!*exists && errno != ENOENT && errno != ELOOP && errno != EMLINK)
+    { *operation = "stat"; return -errno; }
+    if (*exists && !S_ISREG(status->st_mode) && !S_ISDIR(status->st_mode)) return 0;
+    opened = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    if (opened < 0)
+    {
+        error = errno;
+        status->st_mode = 0; /* followed metadata must not enable in-place repair */
+        if (error == ENOENT) { *exists = 0; return 0; }
+        if (error == ELOOP || error == EMLINK) { *exists = 1; return 0; }
+        *operation = "open-destination";
+        return -error;
+    }
+    if (fstat(opened, status))
+    {
+        error = -errno;
+        close(opened);
+        *operation = "fstat-destination";
+        return error;
+    }
+    *exists = 1;
+    if (!S_ISREG(status->st_mode))
+    {
+        if (close(opened)) { *operation = "close-destination"; return -errno; }
+        return 0;
+    }
+    *fd = opened;
+    return 0;
 }
 
 static inline unsigned forever_managed_hash(const char *name)
@@ -352,98 +534,262 @@ static inline unsigned forever_managed_hash(const char *name)
     return hash & 4095;
 }
 
-/* Keep every shipped Wine PE and explicit native graphics override current.
- * Diff by destination/digest against the previous manifest, checking sizes
- * and missing files even when the manifest is unchanged. Publish its stamp
- * only after all required atomic file copies succeed. */
-static inline int forever_sync_managed(const char *app_root, const char *list_path, const char *prefix)
+static inline void forever_managed_hex(const unsigned char digest[32], char hex[65])
 {
-    static char list[1u << 19], installed[1u << 19];
-    static struct { const char *destination, *digest; } previous[4096];
-    char stamp[1100], source[1100], destination[1100];
-    ssize_t length;
-    int copied = 0, error, manifest_changed;
-
-    if ((length = forever_read_file(list_path, list, sizeof(list))) < 0) return (int)length;
-    snprintf(stamp, sizeof(stamp), "%s/" FOREVER_MANAGED_STAMP, prefix);
-    if (forever_read_file(stamp, installed, sizeof(installed)) < 0) installed[0] = 0;
-    manifest_changed = strcmp(list, installed);
-    memset(previous, 0, sizeof(previous));
-    for (char *line = installed, *next; *line; line = next)
+    static const char digits[] = "0123456789abcdef";
+    for (unsigned i = 0; i < 32; ++i)
     {
-        char *tab1, *tab2, *end = strchr(line, '\n');
+        hex[2 * i] = digits[digest[i] >> 4];
+        hex[2 * i + 1] = digits[digest[i] & 15];
+    }
+    hex[64] = 0;
+}
+
+static inline int forever_managed_digest_valid(const char *digest)
+{
+    if (strlen(digest) != 64) return 0;
+    for (unsigned i = 0; i < 64; ++i)
+        if (!((digest[i] >= '0' && digest[i] <= '9') ||
+              (digest[i] >= 'a' && digest[i] <= 'f'))) return 0;
+    return 1;
+}
+
+/* Canonical text avoids depending on the host/console struct stat layout.
+ * Nanoseconds are available in both the PS5 FreeBSD ABI and POSIX.1-2008. */
+static inline void forever_managed_metadata(const struct stat *status, char text[160])
+{
+#ifdef __APPLE__
+    long nanoseconds = status->st_mtimespec.tv_nsec;
+#else
+    long nanoseconds = status->st_mtim.tv_nsec;
+#endif
+    snprintf(text, 160, "%lld %lld %ld %llu %llu",
+             (long long)status->st_size, (long long)status->st_mtime, nanoseconds,
+             (unsigned long long)status->st_dev, (unsigned long long)status->st_ino);
+}
+
+/* Hash an already inspected no-follow regular descriptor, binding the result
+ * to the same size/mtime/identity after the read. The caller always closes fd.
+ * 1 match, 0 drift, -errno failure. */
+static inline int forever_managed_matches(int fd, const char *expected,
+                                         struct stat *status, const char **operation)
+{
+    static unsigned char block[1u << 16];
+    struct sha256_context hash;
+    struct stat after;
+    unsigned char digest[32];
+    char hex[65], original[160], current[160];
+    const char *step = "hash-type";
+    int error = 0;
+    if (!S_ISREG(status->st_mode)) { *operation = step; return -EINVAL; }
+    forever_managed_metadata(status, original);
+    sha256_init(&hash);
+    step = "read-destination";
+    for (;;)
+    {
+        ssize_t count = read(fd, block, sizeof(block));
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0) { error = -errno; goto done; }
+        if (!count) break;
+        sha256_update(&hash, block, (size_t)count);
+    }
+    step = "fstat-after-hash";
+    if (fstat(fd, &after)) { error = -errno; goto done; }
+    forever_managed_metadata(&after, current);
+    step = "hash-identity";
+    if (strcmp(original, current)) { error = -EAGAIN; goto done; }
+    sha256_final(&hash, digest);
+    forever_managed_hex(digest, hex);
+    *status = after;
+    error = !strcmp(hex, expected);
+done:
+    if (error < 0) *operation = step;
+    return error;
+}
+
+/* Any unsupported, corrupt or truncated stamp is a cache miss for ALL rows.
+ * The seal covers the complete row set, not just records that happen to parse. */
+static inline int forever_managed_load(char *state, struct forever_managed_record previous[4096])
+{
+    const size_t header_size = sizeof(FOREVER_MANAGED_STATE_HEADER) - 1;
+    struct sha256_context hash;
+    unsigned char digest[32];
+    char hex[65], *body = strchr(state, '\n');
+    int records = 0;
+    if (!body || strncmp(state, FOREVER_MANAGED_STATE_HEADER, header_size) ||
+        (size_t)(body - state) != header_size + 64) return 0;
+    *body++ = 0;
+    sha256_init(&hash);
+    sha256_update(&hash, body, strlen(body));
+    sha256_final(&hash, digest);
+    forever_managed_hex(digest, hex);
+    if (strcmp(state + header_size, hex)) return 0;
+    for (char *line = body, *next; *line; line = next)
+    {
+        char *tab1 = strchr(line, '\t'), *tab2, *end = strchr(line, '\n');
         unsigned slot, probes = 0;
-        next = end ? end + 1 : line + strlen(line);
-        if (end) *end = 0;
-        if (!*line || *line == '#' || !(tab1 = strchr(line, '\t')) ||
-            !(tab2 = strchr(tab1 + 1, '\t'))) continue;
-        *tab2 = 0;
-        slot = forever_managed_hash(tab1 + 1);
-        while (previous[slot].destination && strcmp(previous[slot].destination, tab1 + 1))
+        if (!end || !tab1 || tab1 > end || !(tab2 = strchr(tab1 + 1, '\t')) ||
+            tab2 > end) return 0;
+        next = end + 1;
+        *end = *tab1 = *tab2 = 0;
+        if (!*line || !forever_managed_digest_valid(tab1 + 1) || !tab2[1] ||
+            strchr(tab2 + 1, '\t')) return 0;
+        slot = forever_managed_hash(line);
+        while (previous[slot].destination)
         {
-            if (++probes == 4096) return -EFBIG;
+            if (!strcmp(previous[slot].destination, line) || ++probes == 4096) return 0;
             slot = (slot + 1) & 4095;
         }
-        previous[slot].destination = tab1 + 1;
-        previous[slot].digest = tab2 + 1;
+        previous[slot].destination = line;
+        previous[slot].digest = tab1 + 1;
+        previous[slot].metadata = tab2 + 1;
+        ++records;
     }
+    return records + 1;
+}
+
+/* Every manifest row is app-owned, including formerly native replacements.
+ * A matching stat record skips data I/O; any other regular destination is
+ * checked against the manifest SHA-256. Only a fully successful run atomically
+ * replaces the versioned, sealed stamp. Return repaired count or -errno. */
+static inline int forever_sync_managed(const char *app_root, const char *list_path,
+                                      const char *prefix, struct forever_managed_report *report)
+{
+    static char list[1u << 19], installed[1u << 20], updated[1u << 20];
+    static struct forever_managed_record previous[4096];
+    const size_t header_size = sizeof(FOREVER_MANAGED_STATE_HEADER) - 1 + 64 + 1;
+    char stamp[1100], source[1100], destination[1100], metadata[160], hex[65], header[128];
+    size_t used = header_size;
+    struct sha256_context hash;
+    unsigned char digest[32];
+    int error, changed = 0, loaded = 0;
+    const char *operation;
+    ssize_t length;
+
+    memset(report, 0, sizeof(*report));
+    if ((length = forever_read_file(list_path, list, sizeof(list))) < 0)
+        return forever_managed_failure(report, "read-manifest", ".", (int)length);
+    if (snprintf(stamp, sizeof(stamp), "%s/" FOREVER_MANAGED_STAMP, prefix) >= (int)sizeof(stamp))
+        return forever_managed_failure(report, "stamp-path", ".", -ENAMETOOLONG);
+    memset(previous, 0, sizeof(previous));
+    length = forever_read_file(stamp, installed, sizeof(installed));
+    report->state_read_result = (int)length;
+    if (length < 0 || memchr(installed, 0, (size_t)length) ||
+        !(loaded = forever_managed_load(installed, previous)))
+    {
+        memset(previous, 0, sizeof(previous));
+        changed = 1;
+    }
+    if (loaded > 0) report->state_loaded = (unsigned)loaded - 1;
     for (char *line = list, *next; *line; line = next)
     {
         char *tab1, *tab2, *end = strchr(line, '\n');
+        struct stat output;
+        unsigned slot, probes = 0;
+        int exists, fd, matches = 0, recorded, written;
         next = end ? end + 1 : line + strlen(line);
         if (end) *end = 0;
-        if (!*line || *line == '#') goto restore;
-        if (!(tab1 = strchr(line, '\t')) || !(tab2 = strchr(tab1 + 1, '\t'))) { error = -EINVAL; goto fail; }
-        *tab1 = *tab2 = 0;
-        if (strstr(line, "..") || strstr(tab1 + 1, "..")) { error = -EACCES; goto fail; }
-        snprintf(source, sizeof(source), "%s/%s", app_root, line);
-        snprintf(destination, sizeof(destination), "%s/%s", prefix, tab1 + 1);
+        if (!*line || *line == '#') continue;
+        if (!(tab1 = strchr(line, '\t')) || !(tab2 = strchr(tab1 + 1, '\t')))
+            return forever_managed_failure(report, "parse-manifest", ".", -EINVAL);
+        *tab1++ = *tab2++ = 0;
+        if (!*line || !*tab1 || *line == '/' || *tab1 == '/' ||
+            strstr(line, "..") || strstr(tab1, ".."))
+            return forever_managed_failure(report, "validate-path", tab1, -EACCES);
+        if (!forever_managed_digest_valid(tab2))
+            return forever_managed_failure(report, "manifest-digest", tab1, -EINVAL);
+        if (snprintf(source, sizeof(source), "%s/%s", app_root, line) >= (int)sizeof(source) ||
+            snprintf(destination, sizeof(destination), "%s/%s", prefix, tab1) >= (int)sizeof(destination))
+            return forever_managed_failure(report, "resolve-path", tab1, -ENAMETOOLONG);
+        if (++report->checked > 4096)
+            return forever_managed_failure(report, "manifest-limit", tab1, -EFBIG);
+        slot = forever_managed_hash(tab1);
+        while (previous[slot].destination && strcmp(previous[slot].destination, tab1))
         {
-            struct stat input, output;
-            unsigned slot = forever_managed_hash(tab1 + 1), probes = 0;
-            int exists;
-            if (stat(source, &input)) { error = -errno; goto fail; }
-            exists = !stat(destination, &output);
-            if (!exists && errno != ENOENT) { error = -errno; goto fail; }
-            while (previous[slot].destination && strcmp(previous[slot].destination, tab1 + 1))
-            {
-                if (++probes == 4096) { error = -EFBIG; goto fail; }
-                slot = (slot + 1) & 4095;
-            }
-            if (exists && previous[slot].destination &&
-                !strcmp(previous[slot].digest, tab2 + 1) && input.st_size == output.st_size)
-            {
-                *tab1 = *tab2 = '\t';
-                goto restore;
-            }
-            if (exists && !strncmp(line, "lib/wine/", 9))
-            {
-                int builtin = forever_is_wine_pe(destination);
-                if (builtin < 0) { error = builtin; goto fail; }
-                if (!builtin)
-                {
-                    *tab1 = *tab2 = '\t';
-                    goto restore;
-                }
-            }
+            if (++probes == 4096)
+                return forever_managed_failure(report, "state-lookup", tab1, -EFBIG);
+            slot = (slot + 1) & 4095;
         }
+        recorded = previous[slot].destination && !strcmp(previous[slot].digest, tab2);
+        if (!previous[slot].destination)
+            forever_managed_mismatch(report, tab1, "record", "missing", 7, "present", 7, 0);
+        else if (!recorded)
+            forever_managed_mismatch(report, tab1, "digest", previous[slot].digest, 64, tab2, 64, 0);
+        error = forever_managed_open(destination, &output, &fd, &exists, &operation);
+        if (error) return forever_managed_failure(report, operation, tab1, error);
+        if (fd >= 0)
+        {
+            forever_managed_metadata(&output, metadata);
+            if (recorded && forever_managed_cache_matches(previous[slot].metadata, metadata, tab1, report))
+                matches = 1;
+            else
+            {
+                ++report->hashed;
+                matches = forever_managed_matches(fd, tab2, &output, &operation);
+                changed = 1;
+            }
+            if (close(fd) && matches >= 0) { operation = "close-destination"; matches = -errno; }
+            if (matches < 0) return forever_managed_failure(report, operation, tab1, matches);
+        }
+        else if (recorded)
+            forever_managed_mismatch(report, tab1, exists ? "type" : "existence",
+                                     "regular", 7, exists ? "not-regular" : "missing",
+                                     exists ? 11 : 7, 0);
+        if (!matches)
         {
             char *slash = strrchr(destination, '/');
             *slash = 0;
             error = forever_mkdirs(destination);
             *slash = '/';
-            if (error) goto fail;
+            if (error) return forever_managed_failure(report, "mkdir", tab1, error);
+            if (!exists || !S_ISREG(output.st_mode)) ++report->hashed;
+            /* rename replaces symlinks/FIFOs without opening them. Empty
+             * directories need rmdir; never recursively delete user data. */
+            if (exists && S_ISDIR(output.st_mode) && rmdir(destination))
+            {
+                return forever_managed_failure(report, "rmdir", tab1, -errno);
+            }
+            error = forever_copy_file(source, destination, &operation);
+            if (forever_permission_error(error) && !strcmp(operation, "rename") &&
+                exists && S_ISREG(output.st_mode))
+                error = forever_managed_overwrite(source, destination, &output, &operation);
+            if (error) return forever_managed_failure(report, operation, tab1, error);
+            error = forever_managed_open(destination, &output, &fd, &exists, &operation);
+            if (error) return forever_managed_failure(report, operation, tab1, error);
+            if (fd < 0)
+                return forever_managed_failure(report, "copy-type", tab1, -EINVAL);
+            error = forever_managed_matches(fd, tab2, &output, &operation);
+            if (close(fd) && error >= 0) { operation = "close-destination"; error = -errno; }
+            if (error <= 0)
+                return forever_managed_failure(report, error < 0 ? operation : "verify-copy",
+                                               tab1, error < 0 ? error : -EIO);
+            if (report->repaired < FOREVER_MANAGED_LOG_LIMIT)
+                snprintf(report->paths[report->repaired], sizeof(report->paths[0]), "%s", tab1);
+            ++report->repaired;
+            changed = 1;
         }
-        if ((error = forever_copy_file(source, destination))) goto fail;
-        ++copied;
-        *tab1 = *tab2 = '\t';
-    restore:
-        if (end) *end = '\n';
+        forever_managed_metadata(&output, metadata);
+        written = snprintf(updated + used, sizeof(updated) - used, "%s\t%s\t%s\n", tab1, tab2, metadata);
+        if (written < 0 || (size_t)written >= sizeof(updated) - used)
+            return forever_managed_failure(report, "format-state", tab1, -EFBIG);
+        used += (size_t)written;
     }
-    if (manifest_changed && (error = forever_write_file(stamp, list, strlen(list)))) return error;
-    return copied;
-fail:
-    return error;
+    if (changed || (unsigned)loaded != report->checked + 1)
+    {
+        sha256_init(&hash);
+        sha256_update(&hash, updated + header_size, used - header_size);
+        sha256_final(&hash, digest);
+        forever_managed_hex(digest, hex);
+        snprintf(header, sizeof(header), FOREVER_MANAGED_STATE_HEADER "%s\n", hex);
+        memcpy(updated, header, header_size);
+        report->state_publish_attempted = 1;
+        report->state_publish_bytes = used;
+        report->state_publish_result = forever_write_file(stamp, updated, used);
+        if (report->state_publish_result)
+            return forever_managed_failure(report, "publish-state", FOREVER_MANAGED_STAMP,
+                                           report->state_publish_result);
+    }
+    return (int)report->repaired;
 }
 
 /* Each supported WoW channel gets the preset only when its executable exists
@@ -481,7 +827,7 @@ static inline int forever_install_wow_config(const char *share, const char *pref
         if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
             length >= (int)sizeof(source)) return -ENAMETOOLONG;
         error = forever_mkdirs(wtf);
-        if (!error) error = forever_copy_file(source, config);
+        if (!error) error = forever_copy_file(source, config, NULL);
         if (error) return error;
         ++installed;
     }

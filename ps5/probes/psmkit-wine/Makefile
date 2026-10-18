@@ -61,7 +61,7 @@ runtime-qualification: runtime-child pe $(HOST_OUT)/test-staged-runtime
 runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py \
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
 		runtime-parent.h runtime-relaunch.h writebroker-autostart.h writebroker-menu.h \
-		forever-menu-settings.h forever-setup.h runtime-vulkan.c runtime-input.c \
+		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
 		../../title/addonforge-security.h ../../title/menu-font.h \
@@ -112,7 +112,7 @@ test-build-speed: test-build-speed.py ../../configure-stamp.py ../../release/pac
 
 test-staged: runtime-qualification
 
-$(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime.h
+$(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime.h sha256.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-staged-runtime.c elf-runtime.c -o $@
 
@@ -238,12 +238,12 @@ $(HOST_OUT)/test-writebroker-space: test-writebroker-space.c build-writebroker-s
 		$(WINE_SRC)/include/wine/ps5_writebroker.h
 	python3 build-writebroker-space-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 
-$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h
+$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h sha256.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
 $(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h writebroker-menu.h \
-		forever-setup.h ../../title/forever-menu.c ../../title/forever-menu.h
+		forever-setup.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-forever-menu.c \
 		../../title/forever-menu.c -o $@
@@ -266,9 +266,9 @@ $(HOST_OUT)/test-addonforge-security: test-addonforge-security.c \
 		../../addonforge/addonforge-control.h ../../title/addonforge-security.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
-$(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h third_party/stb/stb_image.h
+$(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h sha256.h third_party/stb/stb_image.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@ -lm
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@ -lm
 
 # Short tuning poll so the live log_async switch is exercised in milliseconds.
 $(HOST_OUT)/test-title-log: test-title-log.c title-log.c title-log.h
@@ -309,7 +309,7 @@ $(HOST_OUT)/test-protocol: test-protocol.c protocol.c protocol.h $(IO) ../localp
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -DPW_P1C_FAULT_INJECTION test-protocol.c protocol.c $(IO) -o $@
 
-$(HOST_OUT)/test-elf-runtime: test-elf-runtime.c elf-runtime.c elf-runtime.h
+$(HOST_OUT)/test-elf-runtime: test-elf-runtime.c elf-runtime.c elf-runtime.h sha256.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-elf-runtime.c -o $@
 

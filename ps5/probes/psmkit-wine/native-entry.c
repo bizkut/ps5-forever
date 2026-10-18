@@ -1740,6 +1740,30 @@ static void pw_forever_permission_stop(const char *failing_path, const char *rep
     forever_say(message);
 }
 
+/* Report each attempt before callers restart the broker or show a dialog. */
+static int pw_forever_sync_managed(void)
+{
+    struct forever_managed_report report;
+    int result = forever_sync_managed(
+        FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX, &report);
+    io_log("forever: prefix sync checked=%u hashed=%u repaired=%u",
+           report.checked, report.hashed, report.repaired);
+    io_log("forever: prefix sync state read=%d loaded=%u publication=%s result=%d bytes=%zu",
+           report.state_read_result, report.state_loaded,
+           report.state_publish_attempted ? "attempted" : "unchanged",
+           report.state_publish_result, report.state_publish_bytes);
+    if (report.mismatch_field)
+        io_log("forever: prefix sync mismatch path=%s field=%s recorded=%s current=%s ignored=%d",
+               report.mismatch_path, report.mismatch_field, report.mismatch_recorded,
+               report.mismatch_current, report.mismatch_ignored);
+    for (unsigned i = 0; i < report.repaired && i < FOREVER_MANAGED_LOG_LIMIT; ++i)
+        io_log("forever: prefix sync repaired %s", report.paths[i]);
+    if (result < 0)
+        io_log("forever: prefix sync failed op=%s errno=%d path=%s",
+               report.failed_op, -result, report.failed_path);
+    return result;
+}
+
 /* Every start, before Wine: put the user's data in /data/forever (moving an
  * older in-app prefix there once), write default settings files the user does
  * not have yet, bring the prefix files the app owns up to this version, and
@@ -1922,14 +1946,16 @@ static int pw_forever_start(void)
         }
     }
 
-    result = forever_sync_managed(
-        FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX);
+    /* Maintenance's supervisor already opened/presented the desktop and
+     * started its independent frame thread. This scan stays on the startup
+     * thread, and all DLLs are checked before normal Wine or game handoff. */
+    forever_say("Checking the app's Windows files...");
+    result = pw_forever_sync_managed();
     if (forever_permission_error(result))
     {
         repair = pw_forever_restart_broker(FOREVER_PREFIX);
         if (!repair)
-            result = forever_sync_managed(
-                FOREVER_APP_ROOT, FOREVER_APP_SHARE "/prefix-files.txt", FOREVER_PREFIX);
+            result = pw_forever_sync_managed();
         if (repair || forever_permission_error(result))
         {
             pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
@@ -1944,6 +1970,9 @@ static int pw_forever_start(void)
         forever_say(message);
         return -1;
     }
+#if !PW_RUNTIME_GPU
+    b1_message("");
+#endif
 
     result = forever_install_wow_config(FOREVER_APP_SHARE, FOREVER_PREFIX);
     if (forever_permission_error(result))
@@ -3043,9 +3072,6 @@ int main(int argc, char **argv)
 #endif
     io_log("psmkit-wine startup stage=clock result=%lld errno=%d", (long long)now, saved_errno);
     if (now<0) return 1;
-#if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
-    if (pw_maintenance_direct_game()) return 1;
-#endif
 #ifdef PW_PARENT_ROLE
 #if !(defined(PW_RUNTIME_B1) && PW_RUNTIME_GPU)
     (void)argc; (void)argv;
@@ -3176,6 +3202,11 @@ int main(int argc, char **argv)
 #endif
         return 1;
     }
+#if !PW_RUNTIME_GPU
+    /* Even direct-game launches verify behind the live maintenance desktop
+     * first. A fresh/unfinished prefix must finish wineboot before handoff. */
+    if (!forever_prefix_init && pw_maintenance_direct_game()) return 1;
+#endif
     /* If this was a genuinely new root, setup made it after the early probe. */
     pw_title_writebroker_autostart();
 #if !PW_RUNTIME_GPU

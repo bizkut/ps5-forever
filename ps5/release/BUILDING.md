@@ -124,11 +124,104 @@ here is a host build/inspection gate, **not console execution**.
   architecture trees and writes its source, prefix destination and SHA-256 into
   `prefix-files.txt`; the existing AGS exception remains excluded. DXVK/vkd3d
   app-owned graphics overrides remain in the same manifest.
-- Startup processes that manifest per entry. It copies changed entries, repairs
-  missing or wrong-size destinations even when the manifest is unchanged, and
-  preserves existing non-builtin native replacements. Copies are atomic; the
-  `.forever-managed` manifest stamp is published only after every required copy
-  succeeds, so interruption leaves the prior stamp intact.
+- Startup treats every `prefix-files.txt` row as app-owned, including listed DLLs
+  that were replaced with native files. The versioned `.forever-managed` stamp
+  records each destination's SHA-256, size, nanosecond mtime, device and inode,
+  with a checksum covering the complete state. Startup uses `stat` plus
+  `open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)` and `fstat` before trusting any regular
+  destination, including a cached one. Only a match of the applicable destination
+  key avoids file-content reads, never mtime alone. Hashing reuses that same
+  descriptor. `ELOOP`/`EMLINK` from the no-follow open identify symlink replace
+  targets, including dangling links; a link to the cached inode is never clean.
+  PS5 timestamp granularity can vary by filesystem despite the nanosecond field.
+  On PS5, `st_dev` is excluded only from the persistent cache key: the saved
+  title value `689700787` and FTP value `687931141` differed for the same files
+  whose size, mtime seconds and inode matched exactly. Device IDs remain checked
+  within an active hash/copy operation. Size, mtime seconds/nanoseconds and inode
+  are still mandatory cache-key fields; other hosts also check device. Existing
+  v2 stamps remain usable without another full audit or a format migration.
+  Missing records, metadata/identity
+  drift or a changed manifest digest trigger SHA-256 verification and repair
+  only when content differs. The first upgrade from the manifest-only stamp,
+  and any corrupt/partial state, hashes every existing regular destination once.
+- No source-file stat is recorded or used for skipping. A store update replaces
+  the entire app folder and therefore all source inodes/mtimes, while leaving the
+  prefix and its state intact. With an otherwise clean prefix and N changed
+  manifest digests, only those N rows are hashed/repaired; unchanged digests and
+  matching destination records skip content reads. Every copied destination is
+  hash-verified against the manifest, not merely compared with the source, so
+  corrupt shipped source bytes cannot be recorded as good.
+- Managed copies normally use the atomic temporary-file path and are verified
+  before recording their new metadata. If replacing a writable, foreign-owned
+  regular destination is rejected specifically by `rename` with `EACCES`/`EPERM`,
+  sync opens that destination without following symlinks or truncating first,
+  checks its descriptor type/device/inode and link count, then truncates, writes,
+  `fsync`s and hash-verifies it in place. Ordinary PS5 files report `st_nlink=0`,
+  so both zero and one are accepted; multiple hard links are refused. This narrow
+  fallback is not an atomic destination replacement, but normal Wine programs
+  remain gated until it succeeds, and failures never publish new state.
+  Symlink/FIFO destinations are replaced without following/opening them; empty
+  directories can be replaced, but nonempty directories fail without recursive
+  deletion. The stamp itself always stays atomic and retains the prior version
+  on failure. Remaining permission failures retain the existing broker restart
+  and retry path. Unlisted user files are outside this sync.
+- Each sync attempt logs `forever: prefix sync checked=N hashed=H repaired=R`,
+  followed by `forever: prefix sync repaired <prefix-relative-path>` for at most
+  eight repairs. Every failed attempt additionally logs
+  `forever: prefix sync failed op=<operation> errno=<errno> path=<prefix-relative-path>`
+  **before** permission handling, including the first attempt and any retry.
+  This identifies no-follow hash opens, temporary-file operations, rename,
+  in-place validation/truncate/write/fsync, and state publication separately.
+  `hashed` counts distinct destination rows whose contents were read, including
+  verification of repaired copies; a drifted-and-repaired row is counted once.
+  State diagnostics report `forever: prefix sync state read=B loaded=N
+  publication=attempted|unchanged result=E bytes=W`, including publication failure.
+  At most one first actionable mismatch is logged as `forever: prefix sync
+  mismatch path=P field=F recorded=A current=B ignored=0|1`. If only excluded
+  fields differ, that first difference is reported with `ignored=1` while
+  preserving the cache hit; it never hides a changed size or other required field.
+- Native title syscall audit: `.39` rejects `lstat` with `EPERM`, so sync does not
+  call it or substitute the unproven `fstatat(AT_SYMLINK_NOFOLLOW)`. Host sync tests
+  wrap `lstat` with an assertion to prevent its return. Existing title paths use
+  `open`, `close`, `stat`, `fstat`, `read`, `write`, `rename`, `unlink` and `mkdir`.
+  The ELF verifier already uses `O_RDONLY | O_CLOEXEC | O_NOFOLLOW`. Console
+  build `1e10c883` additionally exercised prefix-file no-follow/nonblocking reads
+  across all 1,591 rows and exclusive temporary-file creation during 88 repairs.
+  Still **unproven on prefix files**: `O_WRONLY | O_NOFOLLOW | O_NONBLOCK`,
+  `rmdir` for an empty directory, and `fsync` in the in-place fallback.
+  `ftruncate` already services title desktop shared-memory descriptors
+  (`runtime-parent.c`), but truncating a regular foreign-owned prefix file remains
+  unproven. `chmod` and `utimensat` are host-fixture operations only, not sync
+  dependencies. Each unproven operation has a distinct failure diagnostic;
+  presence of a kernel import or a passing host test is not console qualification.
+- Host cost (Xeon Silver 4116, clang-19 `-O2`, caches not flushed): the staged
+  1,591-row inventory totals 1,062,672,384 bytes (1,013.44 MiB). A no-record scan
+  took 6.262 s with zero repairs; the next descriptor-inspection scan took 0.0146 s
+  with zero hashes. Reproduce with `ps5/build/psmkit-wine-host/test-forever-setup --benchmark
+  ps5/build/title-psmkit-wine-b1/wine-title
+  ps5/build/title-psmkit-wine-b1/wine-title/share/forever/prefix-files.txt`.
+  Console build `1e10c883` on `.39` checked/hashed all 1,591 rows and repaired 88;
+  its "Checking the app's Windows files" to Wine-start interval was 16.7 s.
+  The corrected persistent-device policy is host-tested with an unstable device
+  ID and `hashed=0`; its fast-path PS5 wall time still needs console qualification.
+  Later unchanged starts hash no DLL contents.
+- The maintenance desktop is opened and presents a frame before prefix sync;
+  its independent frame/input thread continues while the startup thread scans.
+  Direct-game handoff now also waits until `pw_forever_start` completes, so the
+  first-upgrade scan runs behind that live window, never in its rendering loop.
+  All manifest DLLs, including ntdll/kernel32 and their startup dependencies,
+  are verified before the installer, Battle.net or a game starts; no unverified
+  subset is deferred until those programs are running. The extra matching-record
+  scan cost measured 14.6 ms on the host; PS5 metadata and maintenance-window
+  initialization costs are not measured here.
+- Fresh setup keeps its existing wineboot bootstrap path: `WINEBOOTSTRAPMODE=1`
+  loads builtins directly from the same `wine-title` build, not an unfinished
+  prefix. After wineboot finishes, the watcher stops its remaining processes,
+  `forever_finish_init` finalizes the registries, and `pw_native_exit` automatically
+  LoadExecs `eboot.bin` in the same user launch. That entry runs managed sync
+  before choosing the installer/Battle.net or consuming the direct-game flag.
+  No manual relaunch is required, and no normal Windows application starts
+  between wineboot completion and this sync.
 - PS5 in-process title servers synthesize Battle.net Agent's expected ACL grants
   for world-rwx files and directories when security xattrs cannot persist;
   payload and non-PS5 descriptors remain unchanged.
