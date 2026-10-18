@@ -127,8 +127,6 @@ static int cursor_allocate(void)
 
 /* The cursor plane is hidden after CURSOR_IDLE_US without pointer motion, so a
  * static arrow does not sit on an OLED panel; the next motion shows it again. */
-#define CURSOR_IDLE_US (3u * 1000000u)
-
 static void cursor_update(uint64_t now_us)
 {
     static int last_x = -1, last_y = -1, hidden;

@@ -332,7 +332,10 @@ Battle.net's CPU compositor uses them at 1×, and the GPU parent uses two 64 KiB
 VideoOut slots. Its nearest-neighbour integer scale follows RADV's fixed
 3840×2160 scanout versus the 1920×1080 desktop (2× when the complete image fits
 64×64, otherwise 1×); the hotspot is scaled identically. App-hidden cursors
-stay hidden on motion; the GPU plane still hides after three seconds idle.
+stay hidden on motion. Both the desktop compositor and GPU plane hide the cursor
+image after three seconds idle. Desktop motion, a newly selected visible shape
+or a mouse-button press wakes the image without overriding an app-hidden cursor;
+an idle hide damages only its previous rectangle and leaves pointer ownership intact.
 The B1 headless GPU parent uses win32u's title-GPU driver (null-driver behaviour
 plus native cursor callbacks), enabled only by the `wineSetCursor` callback.
 CPU-only headless children retain the plain null driver. This GPU role does not

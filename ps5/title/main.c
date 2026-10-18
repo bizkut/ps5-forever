@@ -442,6 +442,8 @@ static void on_pointer(const struct pointer_event *event, void *context)
     int x, y;
     struct ps5_desktop_mouse mouse = {.header = {PS5_DESKTOP_MOUSE, sizeof(mouse)}};
     (void)context;
+    if (event->kind == POINTER_BUTTON && event->down && mouse_button(event->code))
+        compositor_cursor_wake();
 
 #ifdef PS5_TITLE_EMBEDDED
     if (event->kind == POINTER_KEY && event->code == KEY_F12)
@@ -1238,6 +1240,7 @@ static void desktop_frame(void)
     hub_poll(now);
     pointer_position(&x, &y);
     compositor_cursor(x, y);
+    compositor_cursor_tick(now);
     compositor_compose();
 #if defined(PS5_TITLE_EMBEDDED) && defined(FOREVER_MENU_DIAG)
     menu_diag_dump();

@@ -15,6 +15,12 @@ void compositor_damage(const struct ps5_desktop_damage *damage);
 void compositor_cursor(int x, int y);
 /* Called on the compositor thread, after full protocol validation. */
 void compositor_cursor_shape(const void *message);
+/* Motion and a newly selected visible shape wake the cursor automatically.
+ * A button press may also wake it, without overriding the app's own hide. */
+void compositor_cursor_wake(void);
+/* Once per frame after input and hub messages, before composing; monotonic
+ * microseconds. Three seconds without cursor activity hides only the image. */
+void compositor_cursor_tick(uint64_t now_us);
 /* Font and message panel adapted from ps5-forever examples/battlenet/cpu_desktop.c
  * (commit 6cf23f2d, Copyright (C) 2026 Mihawk, MIT) */
 void compositor_message(const char *text);

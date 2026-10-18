@@ -63,6 +63,8 @@ static int bounding_damage, cursor_x, cursor_y;
 static uint32_t cursor_pixels[PS5_DESKTOP_CURSOR_SIDE * PS5_DESKTOP_CURSOR_SIDE];
 static unsigned cursor_width = CURSOR_WIDTH, cursor_height = CURSOR_HEIGHT;
 static int cursor_hotspot_x, cursor_hotspot_y, cursor_visible = 1, cursor_custom;
+static int cursor_idle, cursor_activity = 1;
+static uint64_t cursor_active_us;
 static struct ps5_desktop_cursor_shape *desktop_cursor, *cursor_selected;
 static uint64_t cursor_owner = UINT64_MAX;
 #define MENU_PANEL_WIDTH 1100
@@ -681,6 +683,7 @@ static void select_cursor(int force)
     cursor_hotspot_x = shape ? shape->hotspot_x : 0;
     cursor_hotspot_y = shape ? shape->hotspot_y : 0;
     cursor_visible = shape ? shape->visible : 1;
+    if (cursor_visible) compositor_cursor_wake();
     if (shape) memcpy(cursor_pixels, shape->pixels, cursor_width * cursor_height * sizeof(uint32_t));
     add_damage(cursor_rect());
 }
@@ -693,6 +696,9 @@ void compositor_init(int x, int y)
     cursor_height = CURSOR_HEIGHT;
     cursor_hotspot_x = cursor_hotspot_y = cursor_custom = 0;
     cursor_visible = 1;
+    cursor_idle = 0;
+    cursor_activity = 1;
+    cursor_active_us = 0;
     cursor_selected = NULL;
     cursor_owner = UINT64_MAX;
     message[0] = menu_text[0] = 0;
@@ -722,6 +728,9 @@ void compositor_reset(void)
     cursor_height = CURSOR_HEIGHT;
     cursor_hotspot_x = cursor_hotspot_y = cursor_custom = 0;
     cursor_visible = 1;
+    cursor_idle = 0;
+    cursor_activity = 1;
+    cursor_active_us = 0;
     add_damage((struct display_rect){0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT});
 }
 
@@ -797,7 +806,27 @@ void compositor_cursor(int x, int y)
     add_damage(cursor_rect());
     cursor_x = x;
     cursor_y = y;
+    compositor_cursor_wake();
     select_cursor(0);
+    add_damage(cursor_rect());
+}
+
+void compositor_cursor_wake(void)
+{
+    cursor_activity = 1;
+}
+
+void compositor_cursor_tick(uint64_t now_us)
+{
+    int idle;
+    if (cursor_activity)
+    {
+        cursor_active_us = now_us;
+        cursor_activity = 0;
+    }
+    idle = now_us - cursor_active_us >= CURSOR_IDLE_US;
+    if (idle == cursor_idle) return;
+    cursor_idle = idle;
     add_damage(cursor_rect());
 }
 
@@ -909,7 +938,7 @@ static void draw_cursor(const struct display_rect *damage, uint32_t *image)
     int left = cursor_x - hotspot_x, top = cursor_y - hotspot_y;
     struct display_rect rect = {left, top, left + (int)width, top + (int)height};
 
-    if ((!menu_text[0] && !cursor_visible) || !intersect(&rect, damage)) return;
+    if (cursor_idle || !cursor_visible || !intersect(&rect, damage)) return;
     for (int y = rect.top; y < rect.bottom; y++)
         for (int x = rect.left; x < rect.right; x++)
         {

@@ -303,6 +303,112 @@ static void test_cursor_shape(void)
     compositor_reset();
 }
 
+static void test_cursor_idle(void)
+{
+    union
+    {
+        struct ps5_desktop_cursor_shape shape;
+        unsigned char bytes[PS5_DESKTOP_MAX_MESSAGE];
+    } message;
+    struct ps5_desktop_cursor_shape *shape = &message.shape;
+
+    compositor_reset();
+    compositor_init(10, 20);
+    compositor_cursor_tick(0);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == 0xff000000, "cursor initially drawn before idle");
+    compositor_cursor(10, 20);
+    compositor_cursor_tick(2999999);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == 0xff000000, "cursor visible until three seconds");
+    compositor_cursor(10, 20);
+    compositor_cursor_tick(3000000);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == BACKGROUND,
+          "three seconds without position change repaints idle cursor");
+    compositor_hint_start(3000000);
+    compositor_menu("Forever menu\n> Frame generation");
+    compositor_cursor_tick(4000000);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == BACKGROUND,
+          "menu and start-up hint do not resurrect idle cursor");
+    compositor_menu("");
+    compositor_hint_stop();
+    compositor_cursor(12, 20);
+    compositor_cursor_tick(4000001);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 10] == BACKGROUND &&
+          image[20 * DISPLAY_WIDTH + 12] == 0xff000000,
+          "motion redraws cursor at new position without ghost arrow");
+    compositor_cursor_tick(7000001);
+    compositor_compose();
+    compositor_cursor_wake();
+    compositor_cursor_tick(7000002);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xff000000,
+          "stationary click activity redraws idle cursor");
+
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4},
+        .width = 1, .height = 1, .visible = 1};
+    shape->pixels[0] = 0xffffffff;
+    compositor_cursor_shape(shape);
+    compositor_cursor_tick(8000000);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xffffffff, "new visible shape is drawn");
+    compositor_cursor_shape(shape);
+    compositor_cursor_tick(10000000);
+    compositor_compose();
+    compositor_cursor_tick(10999999);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xffffffff,
+          "new visible shape restarts full idle interval");
+    compositor_cursor_tick(11000000);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == BACKGROUND,
+          "repeated unchanged shape does not postpone idle hiding");
+    shape->pixels[0] = 0xff00ffff;
+    compositor_cursor_shape(shape);
+    compositor_cursor_tick(11000001);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xff00ffff,
+          "changed visible shape wakes idle cursor without motion");
+    compositor_cursor_tick(14000000);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == 0xff00ffff,
+          "changed visible shape starts a fresh three seconds");
+    compositor_cursor_tick(14000001);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 12] == BACKGROUND, "changed visible shape also idles");
+    *shape = (struct ps5_desktop_cursor_shape){.header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape)}};
+    compositor_cursor_shape(shape);
+    compositor_cursor(14, 20);
+    compositor_cursor_tick(14000002);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 14] == BACKGROUND,
+          "motion never overrides app-hidden cursor after idle");
+    compositor_cursor_wake();
+    compositor_cursor_tick(14000003);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 14] == BACKGROUND,
+          "click never overrides app-hidden cursor");
+    compositor_menu("Forever menu\n> Frame generation");
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 14] == BACKGROUND,
+          "menu never overrides app-hidden cursor");
+    compositor_menu("");
+    *shape = (struct ps5_desktop_cursor_shape){
+        .header = {PS5_DESKTOP_CURSOR_SHAPE, sizeof(*shape) + 4},
+        .width = 1, .height = 1, .visible = 1};
+    shape->pixels[0] = 0xffffffff;
+    compositor_cursor_shape(shape);
+    compositor_cursor_tick(14000004);
+    compositor_compose();
+    check(image[20 * DISPLAY_WIDTH + 14] == 0xffffffff,
+          "visible shape restores app-hidden cursor with fresh activity");
+    compositor_reset();
+}
+
 static void write_menu_preview(void)
 {
     const char *path = getenv("FOREVER_MENU_PREVIEW_PPM");
@@ -620,6 +726,7 @@ int main(void)
     title_runtime.exit = 1;
     title_runtime.desktop_surface = pw_desktop_surface;
     test_cursor_shape();
+    test_cursor_idle();
     test_menu_overlay();
     test_cursor_ownership();
     compositor_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
