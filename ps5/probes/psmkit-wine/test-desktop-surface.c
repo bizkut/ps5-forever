@@ -508,6 +508,27 @@ static void test_menu_overlay(void)
     check(compositor_menu_title_fits(), "maximum-byte Find query uses a separate fitting line");
     check(strstr(text, "\n Find: \"WWWW") != NULL,
           "long Find query is separated from the title");
+    forever_menu_find_set_query(&menu, "");
+    menu.wago_status = FOREVER_WAGO_NOT_CHECKED;
+    menu.addon_selected = menu.addon_count;
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_line_bounds(9, &addon_row) &&
+          compositor_menu_value_bounds(9, &addon_value),
+          "Wago key row publishes hit and status geometry");
+    check(strstr(text, "Wago key\tset (not checked)") != NULL,
+          "Wago row shows stored but unchecked status without key text");
+    write_addon_preview("wago-key-row");
+    forever_menu_select(&menu);
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_text_supported(text) && compositor_menu_title_fits(),
+          "Wago choice has supported text and a fitting title");
+    check(strstr(text, "Type key") && strstr(text, "Read from file") &&
+          strstr(text, "Remove key"), "Wago choice shows all three actions");
+    write_addon_preview("wago-key-choice");
     forever_menu_notice(
         &menu,
         "Could not remove all Battle.net files (error 13). Your games were not touched.");

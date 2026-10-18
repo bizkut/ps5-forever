@@ -205,6 +205,12 @@ int ime_show_text(int user, const char *text)
     return show_keyboard(user, 1, 1);
 }
 
+void ime_clear_text(void)
+{
+    memset(buffer, 0, sizeof(buffer));
+    memset(shown, 0, sizeof(shown));
+}
+
 size_t ime_copy_text(char *text, size_t size)
 {
     size_t source = 0, used = 0;

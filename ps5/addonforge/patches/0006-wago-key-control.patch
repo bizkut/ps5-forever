@@ -1,0 +1,202 @@
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -35,6 +35,7 @@
+ struct App {
+     client: reqwest::Client,
+     state: Mutex<AppState>,
++    wago_valid: Mutex<Option<bool>>,
+     catalog: Mutex<Option<(Catalog, &'static str)>>,
+     stats: Mutex<Option<Stats>>,
+     last_install_timing: Mutex<Option<InstallTiming>>,
+@@ -629,14 +630,69 @@
+     set_install_path_impl(&app, path).await
+ }
+ 
++async fn wago_key_status(app: &App) -> Value {
++    let set = app.state.lock().await.has_wago_key();
++    let valid = if set { *app.wago_valid.lock().await } else { None };
++    serde_json::json!({"set": set, "valid": valid})
++}
++
++fn trimmed_wago_key(key: &str) -> Result<&str, String> {
++    let key = key.trim();
++    if key.len() > 256 || key.bytes().any(|byte| !(0x21..=0x7e).contains(&byte)) {
++        return Err("Wago key must be at most 256 characters, without spaces or control characters.".into());
++    }
++    Ok(key)
++}
++
++async fn check_wago_key_at(client: &reqwest::Client, key: &str, endpoint: &str) -> Option<bool> {
++    // Never expose the response body, request headers, or transport error.
++    let response = client.get(endpoint).bearer_auth(key)
++        .header(reqwest::header::ACCEPT, "application/json")
++        .timeout(std::time::Duration::from_secs(8)).send().await.ok()?;
++    if response.url().as_str() != endpoint {
++        return None;
++    }
++    match response.status().as_u16() {
++        401 | 403 => Some(false),
++        200..=299 if response.headers().get(reqwest::header::CONTENT_TYPE)
++            .and_then(|value| value.to_str().ok())
++            .is_some_and(|value| value.split(';').next() == Some("application/json")) => Some(true),
++        _ => None,
++    }
++}
++
++async fn store_wago_key(app: &App, key: &str, valid: Option<bool>) -> Result<Value, String> {
++    let key = trimmed_wago_key(key)?;
++    if !key.is_empty() && valid == Some(false) {
++        return Err("Wago rejected this key.".into());
++    }
++    let mut state = app.state.lock().await;
++    let mut next = state.clone();
++    next.wago_key = if key.is_empty() { None } else { Some(key.to_owned()) };
++    next.save().map_err(|_| "Could not save the Wago key.".to_string())?;
++    *state = next;
++    let set = state.has_wago_key();
++    let valid = if set { valid } else { None };
++    *app.wago_valid.lock().await = valid;
++    Ok(serde_json::json!({"set": set, "valid": valid}))
++}
++
++async fn set_wago_key_impl(app: &App, key: &str) -> Result<Value, String> {
++    let key = trimmed_wago_key(key)?;
++    let valid = if key.is_empty() { None } else {
++        // The collection URL redirects to a public homepage, even with a bad key.
++        // A read-only addon metadata request actually requires authentication.
++        check_wago_key_at(&app.client, key,
++            "https://addons.wago.io/api/external/addons/7x61oyG1?game_version=forever").await
++    };
++    store_wago_key(app, key, valid).await
++}
++
+ #[cfg(feature = "gui")]
+ #[tauri::command]
+ async fn set_wago_key(app: State<'_, Shared>, key: String) -> Result<bool, String> {
+-    let mut st = app.state.lock().await;
+-    let k = key.trim().to_string();
+-    st.wago_key = if k.is_empty() { None } else { Some(k) };
+-    st.save().map_err(err)?;
+-    Ok(st.wago_key.is_some())
++    set_wago_key_impl(&app, &key).await?;
++    Ok(app.state.lock().await.has_wago_key())
+ }
+ 
+ #[cfg(feature = "gui")]
+@@ -1511,6 +1567,7 @@
+     Arc::new(App {
+         client,
+         state: Mutex::new(st),
++        wago_valid: Mutex::new(None),
+         catalog: Mutex::new(None),
+         stats: Mutex::new(None),
+         last_install_timing: Mutex::new(None),
+@@ -1587,6 +1644,11 @@
+     }
+     let args = &request.args;
+     match request.command.as_str() {
++        "wago_key_status" => Ok(wago_key_status(&app).await),
++        "set_wago_key" => {
++            let key = string_arg(args, "key")?;
++            set_wago_key_impl(&app, &key).await
++        }
+         "find_installs" => serde_json::to_value(find_installs_impl(&app).await?).map_err(err),
+         "set_install_path" => {
+             let path = string_arg(args, "path")?;
+@@ -2265,6 +2327,88 @@
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    static STATE_ENV: Mutex<()> = Mutex::const_new(());
++
++    #[tokio::test]
++    async fn wago_key_set_clear_status_and_redaction() {
++        let _environment = STATE_ENV.lock().await;
++        let directory = std::env::temp_dir().join(format!("addonforge-wago-{}", std::process::id()));
++        std::env::set_var("ADDONFORGE_STATE_DIR", &directory);
++        let app = make_app();
++        let secret = "fake-wago-secret-for-redaction";
++        assert_eq!(wago_key_status(&app).await, serde_json::json!({"set": false, "valid": null}));
++        let response = store_wago_key(&app, &format!("  {secret}\r\n"), None).await.unwrap();
++        assert_eq!(response, serde_json::json!({"set": true, "valid": null}));
++        assert!(!response.to_string().contains(secret));
++        assert_eq!(AppState::load().wago_key.as_deref(), Some(secret));
++        assert_eq!(wago_key_status(&app).await, response);
++        let error = store_wago_key(&app, "other-fake-secret", Some(false)).await.unwrap_err();
++        assert_eq!(error, "Wago rejected this key.");
++        assert!(!error.contains("other-fake-secret"));
++        assert_eq!(AppState::load().wago_key.as_deref(), Some(secret));
++        assert_eq!(store_wago_key(&app, secret, Some(true)).await.unwrap(),
++                   serde_json::json!({"set": true, "valid": true}));
++        assert!(store_wago_key(&app, &"x".repeat(257), None).await.is_err());
++        assert!(store_wago_key(&app, "bad\nheader", None).await.is_err());
++        let cleared = dispatch_headless(app.clone(), HeadlessRequest {
++            command: "set_wago_key".into(), args: serde_json::json!({"key": " \r\n "}),
++        }).await.unwrap();
++        assert_eq!(cleared, serde_json::json!({"set": false, "valid": null}));
++        assert!(!AppState::load().has_wago_key());
++        assert_eq!(dispatch_headless(app, HeadlessRequest {
++            command: "wago_key_status".into(), args: serde_json::json!({}),
++        }).await.unwrap(), cleared);
++        std::fs::remove_dir_all(directory).unwrap();
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++    }
++
++    #[tokio::test]
++    async fn wago_validation_http_statuses_are_redacted() {
++        for (status, expected) in [(200, Some(true)), (401, Some(false)),
++                                   (403, Some(false)), (500, None)] {
++            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++            let endpoint = format!("http://{}/", listener.local_addr().unwrap());
++            let thread = std::thread::spawn(move || {
++                use std::io::{Read, Write};
++                let (mut stream, _) = listener.accept().unwrap();
++                let mut request = [0; 2048];
++                let count = stream.read(&mut request).unwrap();
++                assert!(std::str::from_utf8(&request[..count]).unwrap()
++                    .contains("authorization: Bearer fake-wago-secret"));
++                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n").unwrap();
++            });
++            assert_eq!(check_wago_key_at(&reqwest::Client::new(), "fake-wago-secret",
++                                        &endpoint).await, expected);
++            thread.join().unwrap();
++        }
++        assert_eq!(check_wago_key_at(&reqwest::Client::new(), "fake-wago-secret",
++                                    "http://127.0.0.1:1/").await, None);
++    }
++
++    #[tokio::test]
++    async fn wago_validation_never_accepts_public_pages() {
++        for redirect in [false, true] {
++            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++            let endpoint = format!("http://{}/private", listener.local_addr().unwrap());
++            let thread = std::thread::spawn(move || {
++                use std::io::{Read, Write};
++                for step in 0..if redirect { 2 } else { 1 } {
++                    let (mut stream, _) = listener.accept().unwrap();
++                    let mut request = [0; 2048];
++                    stream.read(&mut request).unwrap();
++                    if redirect && step == 0 {
++                        write!(stream, "HTTP/1.1 302 Found\r\nLocation: /public\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
++                    } else {
++                        let content_type = if redirect { "application/json" } else { "text/html" };
++                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").unwrap();
++                    }
++                }
++            });
++            assert_eq!(check_wago_key_at(&reqwest::Client::new(), "fake-wago-secret",
++                                        &endpoint).await, None);
++            thread.join().unwrap();
++        }
++    }
+ 
+     fn folder(name: &str, deps: &[&str], part_of: Option<&str>) -> AddonFolder {
+         AddonFolder {
+@@ -2374,6 +2518,7 @@
+     #[test]
+     fn headless_core_installs_and_removes_from_a_local_catalogue_archive() {
+         use std::io::Write;
++        let _environment = STATE_ENV.blocking_lock();
+ 
+         let root = std::env::temp_dir().join(format!(
+             "af-core-local-{}-{}",

@@ -460,6 +460,56 @@ static void test_state_machine(void)
     assert(menu.values.frame_generation == FOREVER_FG_OFF);
 }
 
+static void test_wago_menu(void)
+{
+    struct forever_menu_state menu;
+    struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_INSTALLED};
+    char text[FOREVER_MENU_TEXT_BYTES];
+    static const char *const labels[] = {"not set", "set", "set (not checked)", "rejected"};
+    forever_menu_init(&menu);
+    menu.page = FOREVER_MENU_ADDON_PAGE;
+    for (int status = FOREVER_WAGO_NOT_SET; status <= FOREVER_WAGO_REJECTED; status++)
+    {
+        snapshot.wago_status = status;
+        forever_menu_addon_snapshot(&menu, &snapshot);
+        forever_menu_render(&menu, text, sizeof(text));
+        assert(strstr(text, "Wago key"));
+        assert(strstr(text, labels[status]));
+    }
+    forever_menu_move(&menu, -1);
+    assert(menu.addon_selected == menu.addon_count);
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_WAGO_KEY);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Type key") && strstr(text, "Read from file") && strstr(text, "Remove key"));
+    assert(strstr(text, "Get a free key at addons.wago.io/account/apikeys"));
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_WAGO_IME);
+    menu.page = FOREVER_MENU_WAGO_KEY;
+    forever_menu_move(&menu, 1);
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_WAGO_FILE);
+    menu.page = FOREVER_MENU_WAGO_KEY;
+    forever_menu_move(&menu, 1);
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_WAGO_REMOVE);
+    menu.page = FOREVER_MENU_WAGO_KEY;
+    assert(forever_menu_back(&menu).command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_ADDON_PAGE);
+    snapshot.wago_status = FOREVER_WAGO_NOT_CHECKED;
+    snapshot.wago_saved = 1;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    assert(!strcmp(menu.status, "Wago key saved."));
+    forever_menu_addon_error(&menu, "Wago rejected this key.");
+    assert(menu.wago_status == FOREVER_WAGO_REJECTED);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Wago key\trejected"));
+    snapshot.wago_status = FOREVER_WAGO_NOT_SET;
+    snapshot.wago_saved = 2;
+    forever_menu_addon_snapshot(&menu, &snapshot);
+    assert(!strcmp(menu.status, "Wago key removed."));
+    assert(forever_menu_click_line(&menu, 9).command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_WAGO_KEY);
+    assert(forever_menu_click_line(&menu, 5).command == FOREVER_MENU_COMMAND_WAGO_FILE);
+}
+
 int main(void)
 {
     char command[320];
@@ -470,6 +520,7 @@ int main(void)
     test_state_machine();
     test_menu_hint_seen_file();
     test_find_search_and_github();
+    test_wago_menu();
     snprintf(command, sizeof(command), "rm -rf '%s'", root);
     assert(!system(command));
     puts("forever menu helpers/state: PASS");

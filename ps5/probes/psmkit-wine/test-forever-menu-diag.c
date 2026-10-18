@@ -43,6 +43,19 @@ int main(void)
     command = parse("text https://github.com/Owner/r\xc3\xa9po.git");
     assert(command.kind == FOREVER_MENU_DIAG_TEXT &&
            !strcmp(command.text, "https://github.com/Owner/r\xc3\xa9po.git"));
+    {
+        char output[96], captured[96] = {0};
+        FILE *log = tmpfile();
+        assert(log);
+        command = parse("text fake-wago-secret-for-redaction");
+        forever_menu_diag_summary(&command, output, sizeof(output));
+        fprintf(log, "%s\n", output);
+        rewind(log);
+        assert(fread(captured, 1, sizeof(captured) - 1, log) > 0);
+        fclose(log);
+        assert(!strstr(captured, "fake-wago-secret-for-redaction"));
+        assert(!strstr(captured, "fake-"));
+    }
     static const char *const invalid[] = {
         "pad R2", "pad options", "key A", "wait -1", "wait 60001",
         "click 1920 0", "click 0 1080", "click 1", "dump ../escape",

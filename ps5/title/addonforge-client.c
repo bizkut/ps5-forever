@@ -734,3 +734,136 @@ int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
         qsort(snapshot->rows, snapshot->count, sizeof(snapshot->rows[0]), row_name_compare);
     return 0;
 }
+
+static int json_literal(const char *at, const char *end, const char *literal)
+{
+    size_t length = strlen(literal);
+    return at && (size_t)(end - at) >= length && !memcmp(at, literal, length) &&
+        (at + length == end || strchr(",} \t\r\n", at[length]));
+}
+
+int addonforge_parse_wago_status(const char *response, enum forever_wago_key_status *status)
+{
+    const char *end, *result, *after, *set, *valid;
+    char error[64];
+    if (!response || !status) return -EINVAL;
+    end = response + strlen(response);
+    if (json_literal(json_value(response, end, "ok"), end, "false"))
+    {
+        if (json_string(response, end, "error", error, sizeof(error)) &&
+            !strcmp(error, "Wago rejected this key."))
+        {
+            *status = FOREVER_WAGO_REJECTED;
+            return 0;
+        }
+        return -EIO;
+    }
+    if (!json_literal(json_value(response, end, "ok"), end, "true") ||
+        !(result = json_value(response, end, "result")) ||
+        !object_end(result, end, &after)) return -EPROTO;
+    set = json_value(result, after, "set");
+    valid = json_value(result, after, "valid");
+    if (!json_literal(set, after, "true") && !json_literal(set, after, "false"))
+        return -EPROTO;
+    if (!json_literal(valid, after, "true") && !json_literal(valid, after, "false") &&
+        !json_literal(valid, after, "null")) return -EPROTO;
+    *status = json_literal(set, after, "false") ? FOREVER_WAGO_NOT_SET :
+        json_literal(valid, after, "true") ? FOREVER_WAGO_SET :
+        json_literal(valid, after, "false") ? FOREVER_WAGO_REJECTED : FOREVER_WAGO_NOT_CHECKED;
+    return 0;
+}
+
+int addonforge_wago_key_status(const struct addonforge_client *client,
+                               enum forever_wago_key_status *status)
+{
+    char response[512];
+    int error = addonforge_http_command(client, "wago_key_status", "{}", response, sizeof(response));
+    return error ? error : addonforge_parse_wago_status(response, status);
+}
+
+int addonforge_set_wago_key(const struct addonforge_client *client, const char *key,
+                            enum forever_wago_key_status *status)
+{
+    char arguments[ADDONFORGE_WAGO_KEY_BYTES * 2 + 16], response[512];
+    const char *end;
+    size_t used = 0;
+    int error;
+    if (!key || !status) return -EINVAL;
+    end = key + strlen(key);
+    while (key < end && isspace((unsigned char)*key)) key++;
+    while (end > key && isspace((unsigned char)end[-1])) end--;
+    if ((size_t)(end - key) >= ADDONFORGE_WAGO_KEY_BYTES) return -EFBIG;
+    memcpy(arguments, "{\"key\":\"", 8);
+    used = 8;
+    for (; key < end; key++)
+    {
+        if ((unsigned char)*key < 0x21 || (unsigned char)*key > 0x7e) return -EINVAL;
+        if (*key == '"' || *key == '\\') arguments[used++] = '\\';
+        arguments[used++] = *key;
+    }
+    memcpy(arguments + used, "\"}", 3);
+    error = addonforge_http_command(client, "set_wago_key", arguments, response, sizeof(response));
+    memset(arguments, 0, sizeof(arguments));
+    if (!error) error = addonforge_parse_wago_status(response, status);
+    memset(response, 0, sizeof(response));
+    return !error && *status == FOREVER_WAGO_REJECTED ? -EACCES : error;
+}
+
+int addonforge_read_wago_key_file(const char *path, char *key, size_t size)
+{
+    char line[513];
+    size_t used = 0, begin = 0;
+    int character, error = 0;
+    FILE *file;
+    if (!path || !key || size < ADDONFORGE_WAGO_KEY_BYTES) return -EINVAL;
+    key[0] = 0;
+    file = fopen(path, "rb");
+    if (!file) return -errno;
+    while ((character = fgetc(file)) != EOF && character != '\n')
+    {
+        if (used == sizeof(line) - 1) { error = -EFBIG; break; }
+        if (!character) { error = -EINVAL; break; }
+        line[used++] = (char)character;
+    }
+    if (ferror(file)) error = -EIO;
+    fclose(file);
+    while (used && isspace((unsigned char)line[used - 1])) used--;
+    while (begin < used && isspace((unsigned char)line[begin])) begin++;
+    if (!error && used - begin >= ADDONFORGE_WAGO_KEY_BYTES) error = -EFBIG;
+    if (!error && used == begin) error = -EINVAL;
+    if (!error)
+    {
+        memcpy(key, line + begin, used - begin);
+        key[used - begin] = 0;
+    }
+    memset(line, 0, sizeof(line));
+    return error;
+}
+
+int addonforge_set_wago_key_file(const struct addonforge_client *client, const char *path,
+                                 enum forever_wago_key_status *status)
+{
+    char key[ADDONFORGE_WAGO_KEY_BYTES];
+    int error = addonforge_read_wago_key_file(path, key, sizeof(key));
+    if (!error) error = addonforge_set_wago_key(client, key, status);
+    memset(key, 0, sizeof(key));
+    if (!error && unlink(path)) error = -errno;
+    return error;
+}
+
+void addonforge_snapshot_wago_status(struct forever_addon_snapshot *snapshot,
+                                      enum forever_wago_key_status status)
+{
+    snapshot->wago_status = status;
+    if (snapshot->tab != FOREVER_ADDON_FIND ||
+        (status != FOREVER_WAGO_SET && status != FOREVER_WAGO_NOT_CHECKED)) return;
+    for (size_t i = 0; i < snapshot->count; i++)
+    {
+        struct forever_addon_row *row = &snapshot->rows[i];
+        if (!strcmp(row->status, "Wago key required"))
+        {
+            row->installable = 1;
+            snprintf(row->status, sizeof(row->status), "available");
+        }
+    }
+}

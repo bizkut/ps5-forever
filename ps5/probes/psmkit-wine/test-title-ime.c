@@ -119,6 +119,9 @@ int main(void)
         assert(!strcmp(text, "Caf\xc3\xa9 \xf0\x9f\x98\x80"));
         schedule(EVENT_ABORT, UINT32_MAX);
         assert(ime_poll(&edit) && edit.cancel && !edit.enter);
+        ime_clear_text();
+        assert(!ime_copy_text(text, sizeof(text)) && !text[0]);
+        assert(!buffer[0] && !shown[0]);
     }
 
     puts("title IME confirm/cancel mapping: PASS");

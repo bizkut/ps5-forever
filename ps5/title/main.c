@@ -21,6 +21,7 @@
 #include "compositor.h"
 #include "display.h"
 #include "forever-menu.h"
+#include "addonforge-client.h"
 #include "hub.h"
 #include "ime.h"
 #include "input.h"
@@ -693,11 +694,15 @@ static void menu_diag_step(uint64_t now)
         while (end < menu_diag.size && menu_diag.script[end] != '\n') end++;
         menu_diag.offset = end < menu_diag.size ? end + 1 : end;
         size_t length = end - start;
-        io_log("menu diag input %.*s", (int)length, menu_diag.script + start);
         if (forever_menu_diag_parse(menu_diag.script + start, length, &command))
         {
             io_log("menu diag input invalid");
             continue;
+        }
+        {
+            char summary[96];
+            forever_menu_diag_summary(&command, summary, sizeof(summary));
+            io_log("%s", summary);
         }
         switch (command.kind)
         {
@@ -708,6 +713,11 @@ static void menu_diag_step(uint64_t now)
             menu_diag.wait_until = now_us() + (uint64_t)command.milliseconds * 1000;
             return;
         case FOREVER_MENU_DIAG_DUMP:
+            if (menu_ime_command == FOREVER_MENU_COMMAND_WAGO_IME)
+            {
+                io_log("menu diag dump skipped private keyboard");
+                break;
+            }
             snprintf(menu_diag.dump_name, sizeof(menu_diag.dump_name), "%s", command.name);
             menu_diag.dump_pending = 1;
             return;
@@ -720,20 +730,22 @@ static void menu_diag_step(uint64_t now)
             }
             else
                 io_log("menu diag text ignored no-menu-ime");
+            memset(command.text, 0, sizeof(command.text));
             break;
         case FOREVER_MENU_DIAG_ADDON:
         {
             size_t selected;
             for (selected = 0; selected < menu.addon_count; selected++)
                 if (!strcmp(menu.addon_rows[selected].key, command.name)) break;
-            if (selected < menu.addon_count)
+            if (selected < menu.addon_count || !strcmp(command.name, "menu:wago"))
             {
                 menu.addon_selected = selected;
                 menu.addon_scroll = selected >= 5 ? selected - 4 : 0;
                 render_menu();
             }
             io_log("menu diag addon key=%.48s found=%d index=%zu",
-                   command.name, selected < menu.addon_count, selected);
+                   command.name, selected < menu.addon_count ||
+                       !strcmp(command.name, "menu:wago"), selected);
             break;
         }
         }
@@ -828,7 +840,8 @@ static void release_forwarded_input(void)
 
 static void close_menu(void)
 {
-    if (menu.page == FOREVER_MENU_ADDON_PAGE || menu.page == FOREVER_MENU_ADDON_CONFIRM)
+    if (menu.page == FOREVER_MENU_ADDON_PAGE || menu.page == FOREVER_MENU_ADDON_CONFIRM ||
+        menu.page == FOREVER_MENU_WAGO_KEY)
         forever_title_addons_action(FOREVER_MENU_COMMAND_ADDONS_CLOSE,
                                     menu.addon_channel, menu.addon_tab, NULL);
     if (menu_ime_command && user >= 0) ime_show(user, 0);
@@ -894,10 +907,12 @@ static void apply_menu_result(struct forever_menu_result result)
         return;
     }
     if (result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME ||
-        result.command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME)
+        result.command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME ||
+        result.command == FOREVER_MENU_COMMAND_WAGO_IME)
     {
         const char *initial = result.command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME ?
-            menu.addon_query : "https://github.com/";
+            menu.addon_query : result.command == FOREVER_MENU_COMMAND_WAGO_IME ?
+            "" : "https://github.com/";
         error = user >= 0 ? ime_show_text(user, initial) : -ENODEV;
         if (error)
         {
@@ -911,7 +926,7 @@ static void apply_menu_result(struct forever_menu_result result)
         return;
     }
     if (result.command >= FOREVER_MENU_COMMAND_ADDONS_OPEN &&
-        result.command <= FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB)
+        result.command <= FOREVER_MENU_COMMAND_WAGO_REMOVE)
     {
         error = forever_title_addons_action(result.command, result.channel, result.tab,
                                             result.key[0] ? result.key : NULL);
@@ -925,6 +940,13 @@ static void apply_menu_result(struct forever_menu_result result)
             snprintf(status, sizeof(status), "Could not start the add-on operation (error %d).",
                      -error);
             forever_menu_addon_error(&menu, status);
+        }
+        else if (result.command == FOREVER_MENU_COMMAND_WAGO_FILE ||
+                 result.command == FOREVER_MENU_COMMAND_WAGO_REMOVE)
+        {
+            menu.addon_loading = 1;
+            forever_menu_status(&menu, result.command == FOREVER_MENU_COMMAND_WAGO_REMOVE ?
+                "Removing Wago key..." : "Saving Wago key...");
         }
         render_menu();
         return;
@@ -973,6 +995,24 @@ static void menu_ime_finish(const char *text, int accepted)
         forever_menu_find_ime(&menu, text, accepted);
     else if (command == FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME)
         result = forever_menu_github_ime(&menu, text, accepted);
+    else if (command == FOREVER_MENU_COMMAND_WAGO_IME)
+    {
+        if (accepted)
+        {
+            int error = strlen(text) >= ADDONFORGE_WAGO_KEY_BYTES ? -EFBIG :
+                forever_title_addons_action(FOREVER_MENU_COMMAND_WAGO_SET,
+                    menu.addon_channel, menu.addon_tab, text);
+            if (error)
+                forever_menu_addon_error(&menu, error == -EFBIG ?
+                    "Wago key is too long (maximum 256 characters)." : "Could not save the Wago key.");
+            else
+            {
+                menu.addon_loading = 1;
+                forever_menu_status(&menu, "Saving Wago key...");
+            }
+        }
+        ime_clear_text();
+    }
     apply_menu_result(result);
 }
 
@@ -1184,6 +1224,7 @@ static void desktop_frame(void)
                 char text[IME_MAX_TEXT * 4 + 1];
                 ime_copy_text(text, sizeof(text));
                 menu_ime_finish(text, edit.enter && !edit.cancel);
+                memset(text, 0, sizeof(text));
             }
         }
         else if (!forever_menu_is_open(&menu) && !input_draining)

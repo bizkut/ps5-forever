@@ -156,6 +156,13 @@ URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
 and TukUI entries work without a key. Changes load the next time WoW starts, or
 after typing `/reload` in WoW.
 
+For Wago add-ons, choose **Wago key** on the Add-ons page. Get a free personal
+key at [addons.wago.io/account/apikeys](https://addons.wago.io/account/apikeys),
+then type it or choose **Read from file** after saving it as the first line of
+`C:\Forever\Addons\wago-key.txt` (up to 256 characters). A successful import
+deletes the file. The key is saved locally by AddonForge; **Remove key** clears
+it. If Wago cannot be reached, it is saved as **set (not checked)**.
+
 If frame generation currently uses `fg=auto`, selecting it turns it off;
 selecting it again turns it on. Frame generation and the performance overlay
 use their live settings files; HDR applies the next time WoW starts. After

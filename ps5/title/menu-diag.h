@@ -3,6 +3,7 @@
 
 #include <errno.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "input.h"
@@ -25,7 +26,7 @@ struct forever_menu_diag_command
     int x, y;
     unsigned milliseconds;
     char name[49];
-    char text[256];
+    char text[257];
 };
 
 static inline int forever_menu_diag_number(const char *text, long minimum, long maximum, long *value)
@@ -141,6 +142,13 @@ static inline int forever_menu_diag_parse(
         return 0;
     }
     return -EINVAL;
+}
+
+/* Deliberately omit all caller-provided strings, even for invalid text input. */
+static inline void forever_menu_diag_summary(
+    const struct forever_menu_diag_command *command, char *text, size_t size)
+{
+    snprintf(text, size, "menu diag input kind=%d", command->kind);
 }
 
 #endif

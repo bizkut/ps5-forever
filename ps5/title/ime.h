@@ -28,6 +28,8 @@ int ime_show(int user, int show);
 int ime_show_text(int user, const char *text);
 /* Copies the keyboard's complete current contents as UTF-8; returns bytes copied. */
 size_t ime_copy_text(char *text, size_t size);
+/* Erases private menu input from the keyboard's retained buffers. */
+void ime_clear_text(void);
 /* Opens the keyboard, or closes it when it is open (the pad's L3+R3). */
 int ime_start(int user);
 /* GPU shortcut: open again with the last inline text for corrections. */

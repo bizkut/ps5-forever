@@ -38,6 +38,7 @@ enum forever_menu_page
     FOREVER_MENU_NOTICE,
     FOREVER_MENU_ADDON_PAGE,
     FOREVER_MENU_ADDON_CONFIRM,
+    FOREVER_MENU_WAGO_KEY,
 };
 
 enum forever_menu_item
@@ -71,6 +72,10 @@ enum forever_menu_command
     FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB,
     FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME,
     FOREVER_MENU_COMMAND_ADDONS_GITHUB_IME,
+    FOREVER_MENU_COMMAND_WAGO_IME,
+    FOREVER_MENU_COMMAND_WAGO_SET,
+    FOREVER_MENU_COMMAND_WAGO_FILE,
+    FOREVER_MENU_COMMAND_WAGO_REMOVE,
 };
 
 enum forever_frame_generation
@@ -123,11 +128,21 @@ struct forever_addon_row
     int curse_only;
 };
 
+enum forever_wago_key_status
+{
+    FOREVER_WAGO_NOT_SET,
+    FOREVER_WAGO_SET,
+    FOREVER_WAGO_NOT_CHECKED,
+    FOREVER_WAGO_REJECTED,
+};
+
 struct forever_addon_snapshot
 {
     enum forever_addon_tab tab;
     struct forever_addon_row rows[FOREVER_ADDON_ROWS];
     size_t count;
+    enum forever_wago_key_status wago_status;
+    int wago_saved;
 };
 
 struct forever_menu_values
@@ -166,6 +181,8 @@ struct forever_menu_state
     size_t addon_match_count;
     int addon_pending_github;
     char addon_query[FOREVER_ADDON_QUERY_BYTES];
+    enum forever_wago_key_status wago_status;
+    int wago_choice;
     char status[FOREVER_MENU_STATUS_BYTES];
 };
 

@@ -69,6 +69,11 @@ void forever_menu_move(struct forever_menu_state *menu, int direction)
 {
     if (!direction || menu->page == FOREVER_MENU_CLOSED || menu->page == FOREVER_MENU_PROGRESS ||
         menu->page == FOREVER_MENU_NOTICE) return;
+    if (menu->page == FOREVER_MENU_WAGO_KEY)
+    {
+        menu->wago_choice = (menu->wago_choice + (direction > 0 ? 1 : 2)) % 3;
+        return;
+    }
     if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL ||
         menu->page == FOREVER_MENU_CONFIRM_UNINSTALL ||
         menu->page == FOREVER_MENU_ADDON_CONFIRM)
@@ -78,13 +83,9 @@ void forever_menu_move(struct forever_menu_state *menu, int direction)
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
-        if (!menu->addon_count) return;
-        if (direction > 0)
-            menu->addon_selected = (menu->addon_selected + 1) % menu->addon_count;
-        else
-            menu->addon_selected =
-                (menu->addon_selected + menu->addon_count - 1) % menu->addon_count;
-        addon_selection_visible(menu);
+        size_t count = menu->addon_count + 1; /* last selection is the fixed Wago row */
+        menu->addon_selected = (menu->addon_selected + (direction > 0 ? 1 : count - 1)) % count;
+        if (menu->addon_selected < menu->addon_count) addon_selection_visible(menu);
         menu->status[0] = 0;
         return;
     }
@@ -211,6 +212,14 @@ static void addon_working(struct forever_menu_state *menu, const char *status)
 
 struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
 {
+    if (menu->page == FOREVER_MENU_WAGO_KEY)
+    {
+        static const enum forever_menu_command commands[] = {
+            FOREVER_MENU_COMMAND_WAGO_IME, FOREVER_MENU_COMMAND_WAGO_FILE,
+            FOREVER_MENU_COMMAND_WAGO_REMOVE};
+        menu->page = FOREVER_MENU_ADDON_PAGE;
+        return addon_result(menu, commands[menu->wago_choice], NULL);
+    }
     if (menu->page == FOREVER_MENU_ADDON_CONFIRM)
     {
         enum forever_menu_command command = menu->addon_confirmation;
@@ -238,6 +247,13 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
+        if (menu->addon_selected == menu->addon_count && !menu->addon_loading)
+        {
+            menu->page = FOREVER_MENU_WAGO_KEY;
+            menu->wago_choice = 0;
+            menu->status[0] = 0;
+            return none();
+        }
         const struct forever_addon_row *row = selected_addon(menu);
         if (!row || menu->addon_loading) return none();
         if (menu->addon_tab == FOREVER_ADDON_FIND)
@@ -386,6 +402,7 @@ void forever_menu_addon_snapshot(
                       menu->page != FOREVER_MENU_ADDON_CONFIRM) ||
         snapshot->tab != menu->addon_tab) return;
     selected = selected_addon(menu);
+    menu->wago_status = snapshot->wago_status;
     if (selected) snprintf(selected_key, sizeof(selected_key), "%s", selected->key);
     if (menu->addon_tab == FOREVER_ADDON_FIND)
     {
@@ -415,7 +432,9 @@ void forever_menu_addon_snapshot(
                 }
     }
     menu->addon_loading = 0;
-    if (menu->addon_pending_github)
+    if (snapshot->wago_saved)
+        copy_status(menu, snapshot->wago_saved == 2 ? "Wago key removed." : "Wago key saved.");
+    else if (menu->addon_pending_github)
     {
         menu->addon_pending_github = 0;
         copy_status(menu, "Installed from GitHub.");
@@ -431,6 +450,8 @@ void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
     if (menu->page != FOREVER_MENU_ADDON_PAGE &&
         menu->page != FOREVER_MENU_ADDON_CONFIRM) return;
     menu->addon_loading = 0;
+    if (text && !strcmp(text, "Wago rejected this key."))
+        menu->wago_status = FOREVER_WAGO_REJECTED;
     copy_status(menu, text && *text ? text : "The add-on operation failed.");
     menu->addon_pending_github = 0;
 }
@@ -652,6 +673,11 @@ int forever_menu_hint_mark_seen(const char *path)
 
 struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
 {
+    if (menu->page == FOREVER_MENU_WAGO_KEY)
+    {
+        menu->page = FOREVER_MENU_ADDON_PAGE;
+        return none();
+    }
     if (menu->page == FOREVER_MENU_ADDON_CONFIRM)
     {
         menu->page = FOREVER_MENU_ADDON_PAGE;
@@ -690,6 +716,12 @@ static int find_query_separate(const struct forever_menu_state *menu)
 
 struct forever_menu_result forever_menu_click_line(struct forever_menu_state *menu, int line)
 {
+    if (menu->page == FOREVER_MENU_WAGO_KEY)
+    {
+        if (line < 4 || line > 6) return none();
+        menu->wago_choice = line - 4;
+        return forever_menu_select(menu);
+    }
     if (menu->page == FOREVER_MENU_MAIN)
     {
         switch (line)
@@ -708,6 +740,11 @@ struct forever_menu_result forever_menu_click_line(struct forever_menu_state *me
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
         int offset = find_query_separate(menu) ? 1 : 0;
+        if (line == 9 + offset)
+        {
+            menu->addon_selected = menu->addon_count;
+            return forever_menu_select(menu);
+        }
         if (line == FOREVER_MENU_LINE_ADDON_TABS + offset)
             return forever_menu_addon_button(menu, FOREVER_ADDON_RIGHT);
         if (line >= FOREVER_MENU_LINE_ADDON_FIRST + offset &&
@@ -846,6 +883,12 @@ static void render_addons(const struct forever_menu_state *menu, char *text, siz
         else
             append(&writer, " \n");
     }
+    {
+        static const char *const states[] = {"not set", "set", "set (not checked)", "rejected"};
+        unsigned state = (unsigned)menu->wago_status;
+        append(&writer, "%s Wago key\t%s\n", mark(menu->addon_selected == menu->addon_count),
+               state < sizeof(states) / sizeof(states[0]) ? states[state] : states[0]);
+    }
     if (selected && !find_special(selected, "menu:search") &&
         !find_special(selected, "menu:github"))
     {
@@ -899,6 +942,22 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
         render_addons(menu, text, size);
+        return;
+    }
+    if (menu->page == FOREVER_MENU_WAGO_KEY)
+    {
+        snprintf(text, size,
+                 " Wago key\n"
+                 " ---------------------------------------------\n"
+                 " Get a free key at addons.wago.io/account/apikeys\n"
+                 "\n"
+                 "%s Type key\n"
+                 "%s Read from file\n"
+                 "%s Remove key\n"
+                 "\n"
+                 " File: C:\\Forever\\Addons\\wago-key.txt\n",
+                 mark(menu->wago_choice == 0), mark(menu->wago_choice == 1),
+                 mark(menu->wago_choice == 2));
         return;
     }
     if (menu->page == FOREVER_MENU_ADDON_CONFIRM)

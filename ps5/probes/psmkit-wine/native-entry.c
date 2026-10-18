@@ -2042,7 +2042,7 @@ struct forever_addons_request
     enum forever_menu_command command;
     enum forever_addon_channel channel;
     enum forever_addon_tab tab;
-    char key[FOREVER_ADDON_KEY_BYTES];
+    char key[ADDONFORGE_WAGO_KEY_BYTES];
 };
 
 static struct
@@ -2240,6 +2240,29 @@ static int forever_addons_mutate(
     int length;
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL)
         return forever_addons_command(client, "update_all", "{}", 600000, plain, plain_size);
+    if (request->command == FOREVER_MENU_COMMAND_WAGO_SET ||
+        request->command == FOREVER_MENU_COMMAND_WAGO_FILE ||
+        request->command == FOREVER_MENU_COMMAND_WAGO_REMOVE)
+    {
+        enum forever_wago_key_status status = FOREVER_WAGO_NOT_SET;
+        int error;
+        client->timeout_ms = 15000;
+        error = request->command == FOREVER_MENU_COMMAND_WAGO_FILE ?
+            addonforge_set_wago_key_file(client, ADDONFORGE_WAGO_KEY_FILE, &status) :
+            addonforge_set_wago_key(client,
+                request->command == FOREVER_MENU_COMMAND_WAGO_REMOVE ? "" : key, &status);
+        if (error == -EACCES)
+            snprintf(plain, plain_size, "Wago rejected this key.");
+        else if (error == -ENOENT && request->command == FOREVER_MENU_COMMAND_WAGO_FILE)
+            snprintf(plain, plain_size, "No wago-key.txt found in C:\\Forever\\Addons.");
+        else if (error == -EFBIG)
+            snprintf(plain, plain_size, "Wago key is too long (maximum 256 characters).");
+        else if (error == -EINVAL)
+            snprintf(plain, plain_size, "The Wago key is empty or contains invalid characters.");
+        else if (error)
+            snprintf(plain, plain_size, "Could not save the Wago key.");
+        return error;
+    }
     if (!forever_addons_safe_key(key)) return -EINVAL;
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB)
     {
@@ -2287,6 +2310,7 @@ static void *forever_addons_worker(void *unused)
     (void)unused;
     pthread_mutex_lock(&forever_addons.lock);
     request = forever_addons.request;
+    memset(forever_addons.request.key, 0, sizeof(forever_addons.request.key));
     pthread_mutex_unlock(&forever_addons.lock);
 
     if (request.command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
@@ -2328,6 +2352,14 @@ static void *forever_addons_worker(void *unused)
         (error = forever_addons_mutate(&client, &request, plain, sizeof(plain))))
         goto done;
     if ((error = forever_addons_refresh(&client, request.tab, plain, sizeof(plain)))) goto done;
+    client.timeout_ms = 15000;
+    if ((error = addonforge_wago_key_status(&client, &forever_addons.snapshot.wago_status)))
+        goto done;
+    addonforge_snapshot_wago_status(&forever_addons.snapshot, forever_addons.snapshot.wago_status);
+    forever_addons.snapshot.wago_saved =
+        request.command == FOREVER_MENU_COMMAND_WAGO_REMOVE ? 2 :
+        request.command == FOREVER_MENU_COMMAND_WAGO_SET ||
+        request.command == FOREVER_MENU_COMMAND_WAGO_FILE;
     if (forever_addons_current(request.generation))
     {
         title_desktop_addons_snapshot(&forever_addons.snapshot);
@@ -2338,6 +2370,7 @@ static void *forever_addons_worker(void *unused)
 done:
     if (error && error != -ECANCELED)
         forever_addons_publish_error(request.generation, error, plain);
+    memset(request.key, 0, sizeof(request.key));
     pthread_mutex_lock(&forever_addons.lock);
     forever_addons.busy = 0;
     pthread_mutex_unlock(&forever_addons.lock);
@@ -2397,6 +2430,7 @@ int forever_title_addons_action(
     if (tab < FOREVER_ADDON_INSTALLED || tab >= FOREVER_ADDON_TAB_COUNT ||
         channel < FOREVER_ADDON_CLASSIC_BETA || channel > FOREVER_ADDON_FINAL)
         return -EINVAL;
+    if (key && strlen(key) >= sizeof(forever_addons.request.key)) return -EFBIG;
     pthread_mutex_lock(&forever_addons.lock);
     if (forever_addons.busy || forever_addons.stopping)
     {

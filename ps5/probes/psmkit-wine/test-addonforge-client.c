@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -225,9 +226,143 @@ static void test_installed_statuses_and_plain_errors(void)
     assert(!strcmp(error, "The add-on service did not answer in time."));
 }
 
+static void test_wago_status_and_file(void)
+{
+    enum forever_wago_key_status status;
+    char path[128], key[257];
+    assert(!addonforge_parse_wago_status(
+        "{\"ok\":true,\"result\":{\"set\":false,\"valid\":null}}", &status));
+    assert(status == FOREVER_WAGO_NOT_SET);
+    assert(!addonforge_parse_wago_status(
+        "{\"ok\":true,\"result\":{\"set\":true,\"valid\":true}}", &status));
+    assert(status == FOREVER_WAGO_SET);
+    assert(!addonforge_parse_wago_status(
+        "{\"ok\":true,\"result\":{\"set\":true,\"valid\":null}}", &status));
+    assert(status == FOREVER_WAGO_NOT_CHECKED);
+    assert(!addonforge_parse_wago_status(
+        "{\"ok\":false,\"error\":\"Wago rejected this key.\"}", &status));
+    assert(status == FOREVER_WAGO_REJECTED);
+    assert(addonforge_parse_wago_status("{\"ok\":true,\"result\":{}}", &status) < 0);
+    {
+        struct forever_addon_snapshot snapshot;
+        char error[128];
+        assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND,
+            "{\"ok\":true,\"result\":[{\"key\":\"cat:wago\",\"name\":\"Wago Addon\","
+            "\"wago\":\"fixture\"}]}", &snapshot, error, sizeof(error)));
+        assert(snapshot.count == 1 && !snapshot.rows[0].installable);
+        addonforge_snapshot_wago_status(&snapshot, FOREVER_WAGO_NOT_CHECKED);
+        assert(snapshot.rows[0].installable);
+        assert(!strcmp(snapshot.rows[0].status, "available"));
+    }
+    snprintf(path, sizeof(path), "/tmp/forever-wago-file-%ld", (long)getpid());
+    assert(addonforge_read_wago_key_file(path, key, sizeof(key)) == -ENOENT);
+    FILE *file = fopen(path, "wb");
+    assert(file);
+    fputs("  fake-wago-secret \r\nignored second line", file);
+    assert(!fclose(file));
+    assert(!addonforge_read_wago_key_file(path, key, sizeof(key)));
+    assert(!strcmp(key, "fake-wago-secret"));
+    file = fopen(path, "wb");
+    assert(file); fputs(" \t\r\n", file); assert(!fclose(file));
+    assert(addonforge_read_wago_key_file(path, key, sizeof(key)) == -EINVAL);
+    assert(!key[0]);
+    file = fopen(path, "wb");
+    assert(file);
+    for (int i = 0; i < 257; i++) fputc('x', file);
+    assert(!fclose(file));
+    assert(addonforge_read_wago_key_file(path, key, sizeof(key)) == -EFBIG);
+    assert(!key[0]);
+    file = fopen(path, "wb");
+    assert(file);
+    for (int i = 0; i < 256; i++) fputc('x', file);
+    assert(!fclose(file));
+    assert(!addonforge_read_wago_key_file(path, key, sizeof(key)) && strlen(key) == 256);
+    assert(!unlink(path));
+}
+
+static void *serve_wago(void *argument)
+{
+    struct fake_server *server = argument;
+    static const char *const replies[] = {
+        "{\"ok\":true,\"result\":{\"set\":true,\"valid\":null}}",
+        "{\"ok\":true,\"result\":{\"set\":true,\"valid\":true}}",
+        "{\"ok\":true,\"result\":{\"set\":false,\"valid\":null}}",
+        "{\"ok\":false,\"error\":\"Wago rejected this key.\"}",
+        "{\"ok\":true,\"result\":{\"set\":true,\"valid\":null}}"};
+    for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); i++)
+    {
+        char request[4096] = {0}, response[1024];
+        int fd = accept(server->listener, NULL, NULL);
+        assert(fd >= 0);
+        assert(recv(fd, request, sizeof(request) - 1, 0) > 0);
+        if (i == 1) assert(strstr(request, "\"command\":\"wago_key_status\""));
+        else
+        {
+            assert(strstr(request, "\"command\":\"set_wago_key\""));
+            assert(strstr(request, i == 2 ? "\"key\":\"\"" :
+                          "\"key\":\"fake-wago-secret-for-redaction\""));
+        }
+        int length = snprintf(response, sizeof(response),
+            "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+            strlen(replies[i]), replies[i]);
+        send_all(fd, response, (size_t)length);
+        close(fd);
+    }
+    close(server->listener);
+    return NULL;
+}
+
+static void test_wago_commands_and_redaction(void)
+{
+    struct sockaddr_in address = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    socklen_t size = sizeof(address);
+    struct fake_server server;
+    struct addonforge_client client = {.token = "session-secret", .timeout_ms = 2000};
+    enum forever_wago_key_status status;
+    pthread_t thread;
+    char path[128], captured[256] = {0};
+    FILE *capture = tmpfile(), *file;
+    int saved_stdout = dup(STDOUT_FILENO), saved_stderr = dup(STDERR_FILENO);
+    assert(capture && saved_stdout >= 0 && saved_stderr >= 0);
+    server.listener = socket(AF_INET, SOCK_STREAM, 0);
+    assert(server.listener >= 0);
+    assert(!bind(server.listener, (struct sockaddr *)&address, sizeof(address)));
+    assert(!listen(server.listener, 5));
+    assert(!getsockname(server.listener, (struct sockaddr *)&address, &size));
+    client.port = ntohs(address.sin_port);
+    assert(!pthread_create(&thread, NULL, serve_wago, &server));
+    fflush(NULL);
+    assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+    assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
+    assert(!addonforge_set_wago_key(&client, "  fake-wago-secret-for-redaction\r\n", &status));
+    assert(status == FOREVER_WAGO_NOT_CHECKED);
+    assert(!addonforge_wago_key_status(&client, &status) && status == FOREVER_WAGO_SET);
+    assert(!addonforge_set_wago_key(&client, "", &status) && status == FOREVER_WAGO_NOT_SET);
+    snprintf(path, sizeof(path), "/tmp/forever-wago-import-%ld", (long)getpid());
+    file = fopen(path, "wb");
+    assert(file); fputs("fake-wago-secret-for-redaction\r\n", file); assert(!fclose(file));
+    assert(addonforge_set_wago_key_file(&client, path, &status) == -EACCES);
+    assert(status == FOREVER_WAGO_REJECTED && !access(path, F_OK));
+    assert(!addonforge_set_wago_key_file(&client, path, &status));
+    assert(status == FOREVER_WAGO_NOT_CHECKED && access(path, F_OK) && errno == ENOENT);
+    assert(!pthread_join(thread, NULL));
+    fflush(NULL);
+    assert(dup2(saved_stdout, STDOUT_FILENO) >= 0);
+    assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+    close(saved_stdout); close(saved_stderr);
+    rewind(capture);
+    size_t count = fread(captured, 1, sizeof(captured) - 1, capture);
+    assert(feof(capture) && count < sizeof(captured) - 1);
+    fclose(capture);
+    assert(!strstr(captured, "fake-wago-secret-for-redaction"));
+    assert(!strstr(captured, "fake-"));
+}
+
 int main(void)
 {
     test_http_and_fake_catalogue();
+    test_wago_status_and_file();
+    test_wago_commands_and_redaction();
     test_installed_statuses_and_plain_errors();
     puts("addonforge client: PASS (fake loopback server, JSON state, offline catalogue)");
     return 0;

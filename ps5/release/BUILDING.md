@@ -318,8 +318,13 @@ remain in force.
 - `deps.json` pins AddonForge commit `0dc9ab28f207f86e33770e359f2345043ef19585`
   and its tracked-content fingerprint. The numbered patches in
   `ps5/addonforge/patches/` add the Tauri-free loopback core, per-session bearer
-  token, final-channel mapping and behavioural tests; the upstream checkout is
-  copied before patching and is never modified.
+  token, final-channel mapping, install safety and behavioural tests.
+  `0006-wago-key-control.patch` follows 0005 on that unchanged upstream base:
+  `set_wago_key` trims and persists (empty clears), and `wago_key_status` returns
+  only `set` and `valid`. One bounded, authenticated add-on metadata request
+  rejects 401/403 without saving; an unavailable check saves with `valid: null`.
+  Redirects and HTML pages never count as successful validation. Neither
+  response nor log includes key text. The upstream checkout is copied before patching.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
@@ -328,6 +333,17 @@ remain in force.
   toolchain and container image. A cache miss builds in two empty target
   directories and refuses unequal `addonforge-core.exe` SHA-256 values. The
   staged `build-receipt.json` records both hashes.
+  The 0006 receipt includes patch SHA-256
+  `639ac5ee4888592fbd9392fb519ee0e294206b7d66e390a53b52d3fca5a5c25a`;
+  its two cold Windows builds both produced
+  `f160daef8ae9783eeab1addc685dfaa73403e49188be5b0fbc66f4931a8ad36e`
+  (2,556,416 bytes). The headless Rust suite has 21 tests; real Wago API
+  acceptance is not qualified by these local HTTP fixtures.
+  Private menu-diag input can select `addon menu:wago`, open it with `pad CROSS`,
+  choose Type key with another `pad CROSS`, then submit `text <key>`.
+  Text command contents are never logged, and frame dumps are refused while
+  the Wago keyboard is open. The current inline IME wrapper exposes no
+  qualified password mode, so it uses the existing plain keyboard.
 - `wine-title/addonforge/addonforge-core.exe` and
   `forever-maintenance.exe` are Windows PE executables run by Wine. The homebrew
   catalog scan rejects payload ELF executables; it does not classify these PEs

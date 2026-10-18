@@ -11,6 +11,7 @@ Battle.net launcher for WoW: Forever. Options opens the Forever menu; L3+R3 open
 - Options opens the Forever menu over Battle.net; F12 opens it from a USB keyboard. The menu controls frame generation, HDR, the performance overlay and Add-ons, and can Reinstall or Uninstall Battle.net.
 - L2 is now Back in Battle.net. The old in-WoW overlay hold has been removed.
 - Add-ons can search the loaded catalogue by name or description and install from an `owner/repo` or GitHub link.
+- Add-ons accepts your personal Wago API key by keyboard or `C:\Forever\Addons\wago-key.txt`, so Wago add-ons can be installed and updated. Imported key files are deleted after saving.
 - A short start-up hint shows the Options menu and L2 Back controls until the Forever menu has been opened once.
 - The recommended `Config.wtf` now uses `RenderFormat 1`.
 - Start-up repairs stale root-owned permissions under `/data/forever` without following symbolic links or changing hard-linked files.
