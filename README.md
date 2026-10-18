@@ -161,7 +161,7 @@ write to `/data/forever/prefix`, see [Troubleshooting](#troubleshooting).
 | --- | --- |
 | **Options** | Opens or closes the Forever menu while Battle.net is open |
 | **F12** on a USB keyboard | Opens or closes the Forever menu while Battle.net is open |
-| **L2** | Escape / back in Battle.net |
+| **L2** | Escape in Battle.net (closes an open Battle.net dialog or dropdown) |
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).

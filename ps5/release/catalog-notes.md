@@ -12,9 +12,15 @@ Battle.net launcher for World of Warcraft. Options opens the Forever menu; L3+R3
 - A one-shot `wine/direct-game` file can select a channel folder such as `_retail_`; an unavailable selection never starts another version.
 - Missing-only Config.wtf presets and the HDR switch apply to every detected channel.
 - Add-ons lists installed channels and selects source flavours from the product and the client's own version resource. Installs, update records and removals stay in the selected channel. Unknown products are not supported for add-ons.
-- The curated catalogue and starter packs currently contain Forever data only; other flavours can use GitHub links and known installed sources.
+- Add-ons Find and Starter packs now cover every version: Retail, Classic (MoP), Classic Era, Anniversary and Forever. The list comes from the community GitHub add-on catalogue (GPL-3.0), WoWInterface and Tukui; it refreshes at most once a day and works offline from a built-in copy.
+- Pressing Play on Classic, Classic Era and Anniversary works again: Battle.net's `WoWClassic.exe` spelling now matches the files on disk.
+- After a Play, the app remembers that version's safe start options (no sign-in data) for later direct starts.
+- Fixes Battle.net crashing while the Add-ons page was open: Battle.net's own windows now get priority over the add-on manager.
+- The start-up hint "OPTIONS Forever menu" shows on every start for 10 seconds.
+- The mouse cursor hides after 3 seconds without movement on the Battle.net screen too.
+- Faster Battle.net downloads and Scan and Repair: game data writes are buffered across several files and positions, and Battle.net's update agent reuses memory instead of preparing new memory each time. On one console a Retail download ran 21 MB/s against 12 MB/s on 01.000.013 when the disk was the limit.
 - Automatic discovery is limited to the default WoW install root. Custom C:/W: paths can launch from Battle.net Play.
-- Private-build console observations: Retail renders via the direct-game selector at 90 fps; an unavailable PTR selection refuses without fallback. Classic Era crashes after display initialization and remains under investigation. Anniversary, Classic progression, installed PTR/beta channels and per-channel Add-ons still need new console qualification; no general online-compatibility claim.
+- Console checks on a private build: Retail, Classic (MoP), Classic Era, Anniversary and the Forever beta all start from Battle.net Play.
 
 ### Forever Launcher 01.000.013
 
