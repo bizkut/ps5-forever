@@ -861,8 +861,8 @@ static void test_managed_manifest_guards(void)
 
 static void test_wow_config(void)
 {
-    static const char *const channels[] = {"_forever_", "_classic_beta_"};
-    static const char *const executables[] = {"Wow.exe", "WowB.exe"};
+    static const char *const channels[] = {"_forever_", "_classic_beta_", "_retail_", "_classic_era_", "_anniversary_", "_newthing_"};
+    static const char *const executables[] = {"Wow.exe", "WowB.exe", "Wow.exe", "WowClassic.exe", "WowClassic.exe", "wOwNew.EXE"};
     static const char preset[] = "SET GamePadEnable \"1\"\n";
     static const char mine[] = "SET mine \"1\"\n";
     char share[1024], prefix[1024], relative[512], config[1024];
@@ -871,21 +871,21 @@ static void test_wow_config(void)
     put("app/share/Config.wtf", preset);
     assert(!forever_mkdirs(prefix));
     assert(forever_install_wow_config(share, prefix) == 0); /* neither installed */
-    for (unsigned i = 0; i < 2; ++i)
+    for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
     {
         snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/keep",
                  channels[i]);
         put(relative, "");
     }
     assert(forever_install_wow_config(share, prefix) == 0); /* directories alone are not an installation */
-    for (unsigned i = 0; i < 2; ++i)
+    for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
     {
         snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/%s",
                  channels[i], executables[i]);
         put(relative, "MZ");
     }
-    assert(forever_install_wow_config(share, prefix) == 2);
-    for (unsigned i = 0; i < 2; ++i)
+    assert(forever_install_wow_config(share, prefix) == (int)(sizeof(channels) / sizeof(channels[0])));
+    for (unsigned i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
     {
         snprintf(relative, sizeof(relative), "wow/prefix/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
                  channels[i]);

@@ -199,31 +199,26 @@ static inline int forever_menu_rewrite_wow_hdr(const char *path, int enabled)
     return forever_write_file(path, output, output_size);
 }
 
-/* Install the recommended preset first for each installed channel whose
- * Config.wtf is missing, then change only HDROutput for both channels. */
+struct forever_wow_hdr_context { int enabled, changed; };
+static inline int forever_wow_hdr_visit(const struct wow_channel *channel, void *opaque)
+{
+    struct forever_wow_hdr_context *context = opaque;
+    char config[WOW_PATH_BYTES];
+    int error;
+    if (!channel->executable[0]) return 0;
+    if ((error = wow_join(config, sizeof(config), channel->unix_cwd, "WTF/Config.wtf")) ||
+        (error = forever_menu_rewrite_wow_hdr(config, context->enabled))) return error;
+    ++context->changed;
+    return 0;
+}
+/* Install absent presets, then change only HDROutput in each detected channel. */
 static inline int forever_menu_set_wow_hdr(const char *share, const char *prefix, int enabled)
 {
-    static const struct { const char *directory, *executable; } channels[] = {
-        {"_forever_", "Wow.exe"}, {"_classic_beta_", "WowB.exe"},
-    };
-    char executable[1100], config[1100];
-    int result = forever_install_wow_config(share, prefix), changed = 0;
-    if (result < 0) return result;
-    for (size_t i = 0; i < sizeof(channels) / sizeof(channels[0]); i++)
-    {
-        int length = snprintf(executable, sizeof(executable),
-                              "%s/drive_c/Program Files (x86)/World of Warcraft/%s/%s",
-                              prefix, channels[i].directory, channels[i].executable);
-        if (length < 0 || length >= (int)sizeof(executable)) return -ENAMETOOLONG;
-        if (!forever_exists(executable)) continue;
-        length = snprintf(config, sizeof(config),
-                          "%s/drive_c/Program Files (x86)/World of Warcraft/%s/WTF/Config.wtf",
-                          prefix, channels[i].directory);
-        if (length < 0 || length >= (int)sizeof(config)) return -ENAMETOOLONG;
-        if ((result = forever_menu_rewrite_wow_hdr(config, enabled))) return result;
-        changed++;
-    }
-    return changed;
+    struct forever_wow_hdr_context context = {enabled, 0};
+    int error = forever_install_wow_config(share, prefix);
+    if (error < 0) return error;
+    error = wow_channels_scan(prefix, forever_wow_hdr_visit, &context);
+    return error ? error : context.changed;
 }
 
 /* Missing or malformed flags retain the release's established HDR-on path. */

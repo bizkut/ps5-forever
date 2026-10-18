@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "sha256.h"
+#include "wow-channels.h"
 
 #define FOREVER_TUNE_DEFAULT "unwind_cache=on qpc=tsc log_async=on\n"
 #define FOREVER_FG_DEFAULT "fg=on mult=2 flow=1.0 method=auto\n"
@@ -792,46 +793,30 @@ static inline int forever_sync_managed(const char *app_root, const char *list_pa
     return (int)report->repaired;
 }
 
-/* Each supported WoW channel gets the preset only when its executable exists
- * and its own Config.wtf is absent. Returns the number installed (0..2), or
- * -errno on failure; earlier installations may already have succeeded. */
+/* Each installed executable gets the preset only if its own file is absent. */
+struct forever_wow_config_context { const char *share; int installed; };
+static inline int forever_wow_config_visit(const struct wow_channel *channel, void *opaque)
+{
+    struct forever_wow_config_context *context = opaque;
+    char wtf[WOW_PATH_BYTES], config[WOW_PATH_BYTES], source[WOW_PATH_BYTES];
+    struct stat status;
+    int error;
+    if (!channel->executable[0]) return 0;
+    if ((error = wow_join(wtf, sizeof(wtf), channel->unix_cwd, "WTF")) ||
+        (error = wow_join(config, sizeof(config), wtf, "Config.wtf"))) return error;
+    if (!stat(config, &status)) return 0;
+    if (errno != ENOENT) return -errno;
+    if ((error = wow_join(source, sizeof(source), context->share, "Config.wtf")) ||
+        (error = forever_mkdirs(wtf)) ||
+        (error = forever_copy_file(source, config, NULL))) return error;
+    ++context->installed;
+    return 0;
+}
 static inline int forever_install_wow_config(const char *share, const char *prefix)
 {
-    static const struct
-    {
-        const char *directory;
-        const char *executable;
-    } channels[] = {
-        {"_forever_", "Wow.exe"},
-        {"_classic_beta_", "WowB.exe"}
-    };
-    char game[1100], executable[1100], wtf[1100], config[1100], source[1100];
-    int length, error, installed = 0;
-    for (size_t i = 0; i < sizeof(channels) / sizeof(channels[0]); ++i)
-    {
-        if ((length = snprintf(game, sizeof(game), "%s/drive_c/Program Files (x86)/World of Warcraft/%s",
-                               prefix, channels[i].directory)) < 0 ||
-            length >= (int)sizeof(game)) return -ENAMETOOLONG;
-        if ((length = snprintf(executable, sizeof(executable), "%s/%s", game, channels[i].executable)) < 0 ||
-            length >= (int)sizeof(executable)) return -ENAMETOOLONG;
-        if (!forever_exists(executable)) continue;
-        if ((length = snprintf(wtf, sizeof(wtf), "%s/WTF", game)) < 0 ||
-            length >= (int)sizeof(wtf)) return -ENAMETOOLONG;
-        if ((length = snprintf(config, sizeof(config), "%s/Config.wtf", wtf)) < 0 ||
-            length >= (int)sizeof(config)) return -ENAMETOOLONG;
-        {
-            struct stat status;
-            if (!stat(config, &status)) continue;
-            if (errno != ENOENT) return -errno;
-        }
-        if ((length = snprintf(source, sizeof(source), "%s/Config.wtf", share)) < 0 ||
-            length >= (int)sizeof(source)) return -ENAMETOOLONG;
-        error = forever_mkdirs(wtf);
-        if (!error) error = forever_copy_file(source, config, NULL);
-        if (error) return error;
-        ++installed;
-    }
-    return installed;
+    struct forever_wow_config_context context = {share, 0};
+    int error = wow_channels_scan(prefix, forever_wow_config_visit, &context);
+    return error ? error : context.installed;
 }
 
 #endif

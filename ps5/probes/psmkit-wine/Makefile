@@ -251,12 +251,12 @@ $(HOST_OUT)/test-wow-channels: test-wow-channels.c wow-channels.h forever-setup.
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h sha256.h
+$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h wow-channels.h sha256.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
 $(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h writebroker-menu.h \
-		forever-setup.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
+		forever-setup.h wow-channels.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-forever-menu.c \
 		../../title/forever-menu.c -o $@

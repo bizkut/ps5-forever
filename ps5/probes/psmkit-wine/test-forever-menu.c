@@ -94,19 +94,27 @@ static void test_hdr_config(void)
     put("hdr/share/Config.wtf", "SET GxApi \"D3D12\"\nSET HDROutput \"1\"\nSET HDRFactor \"2\"\n");
     install_channel("_forever_", "Wow.exe");
     install_channel("_classic_beta_", "WowB.exe");
+    install_channel("_retail_", "Wow.exe");
+    install_channel("_classic_era_", "WowClassic.exe");
+    install_channel("_anniversary_", "WowClassic.exe");
+    install_channel("_future_", "wOwFuture.EXE");
     put("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_forever_/WTF/Config.wtf",
         "SET mine \"keep\"\r\nSET HDROutput \"1\"\r\nSET HDRFactor \"1.7\"\r\n");
 
-    assert(forever_menu_set_wow_hdr(share, prefix, 0) == 2);
+    assert(forever_menu_set_wow_hdr(share, prefix, 0) == 6);
     assert(text_is("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_forever_/WTF/Config.wtf",
                    "SET mine \"keep\"\r\nSET HDROutput \"0\"\r\nSET HDRFactor \"1.7\"\r\n"));
     assert(text_is("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_beta_/WTF/Config.wtf",
+                   "SET GxApi \"D3D12\"\nSET HDROutput \"0\"\nSET HDRFactor \"2\"\n"));
+    assert(text_is("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_retail_/WTF/Config.wtf",
+                   "SET GxApi \"D3D12\"\nSET HDROutput \"0\"\nSET HDRFactor \"2\"\n"));
+    assert(text_is("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_future_/WTF/Config.wtf",
                    "SET GxApi \"D3D12\"\nSET HDROutput \"0\"\nSET HDRFactor \"2\"\n"));
     assert(!forever_menu_rewrite_switch(flag, "hdr", 0));
     assert(!forever_menu_read_switch(flag, "hdr", 1, &enabled) && !enabled);
     assert(!forever_menu_hdr_runtime_enabled(flag));
 
-    assert(forever_menu_set_wow_hdr(share, prefix, 1) == 2);
+    assert(forever_menu_set_wow_hdr(share, prefix, 1) == 6);
     assert(text_is("hdr/prefix/drive_c/Program Files (x86)/World of Warcraft/_forever_/WTF/Config.wtf",
                    "SET mine \"keep\"\r\nSET HDROutput \"1\"\r\nSET HDRFactor \"1.7\"\r\n"));
     assert(!forever_menu_rewrite_switch(flag, "hdr", 1));
