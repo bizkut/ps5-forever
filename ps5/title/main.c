@@ -53,8 +53,7 @@ static int pending_menu_status_kind, pending_addon_kind, input_draining;
 static uint8_t physical_keys[256], forwarded_keys[256];
 static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
 static enum forever_menu_command menu_ime_command;
-#define FOREVER_MENU_SEEN_PATH "/data/forever/.forever-menu-seen"
-static int menu_hint_eligible, menu_hint_started;
+static int menu_hint_started;
 
 int forever_title_menu_load(struct forever_menu_values *);
 int forever_title_addons_action(enum forever_menu_command, unsigned,
@@ -345,7 +344,7 @@ done:
 #ifdef PS5_TITLE_EMBEDDED
 static void maybe_start_menu_hint(uint64_t now)
 {
-    if (!menu_hint_eligible || menu_hint_started) return;
+    if (menu_hint_started) return;
     menu_hint_started = 1;
     compositor_hint_start(now);
 }
@@ -364,7 +363,8 @@ static void on_hub_message(const void *message, void *context)
         memcpy(&window, message, sizeof(window));
         compositor_window(&window);
 #ifdef PS5_TITLE_EMBEDDED
-        maybe_start_menu_hint(now_us());
+        if ((window.flags & PS5_DESKTOP_VISIBLE) && window.width && window.height)
+            maybe_start_menu_hint(now_us());
 #endif
         break;
     }
@@ -880,12 +880,7 @@ static void open_menu(void)
     struct forever_menu_values values = {FOREVER_FG_ON, 1, 0};
     int error;
     compositor_hint_stop();
-    if (menu_hint_eligible)
-    {
-        (void)forever_menu_hint_mark_seen(FOREVER_MENU_SEEN_PATH);
-        menu_hint_eligible = 0;
-        menu_hint_started = 1;
-    }
+    menu_hint_started = 1;
     if (user >= 0) ime_show(user, 0);
     menu_ime_command = FOREVER_MENU_COMMAND_NONE;
     release_forwarded_input();
@@ -1174,7 +1169,6 @@ static int desktop_open(void)
     physical_pad = menu_pad = physical_mouse = forwarded_mouse = 0;
     input_draining = pending_menu_status_kind = pending_addon_kind = 0;
     menu_ime_command = FOREVER_MENU_COMMAND_NONE;
-    menu_hint_eligible = !forever_menu_hint_seen(FOREVER_MENU_SEEN_PATH);
     menu_hint_started = 0;
 #ifdef FOREVER_MENU_DIAG
     memset(&menu_diag, 0, sizeof(menu_diag));
@@ -1199,9 +1193,6 @@ static void desktop_frame(void)
     if (message_pending)
     {
         compositor_message(pending_message);
-#ifdef PS5_TITLE_EMBEDDED
-        if (pending_message[0]) maybe_start_menu_hint(now);
-#endif
         message_pending = 0;
     }
 #ifdef PS5_TITLE_EMBEDDED

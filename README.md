@@ -182,8 +182,7 @@ close, or click with a mouse. The menu can:
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
 
-Until you open the Forever menu once, each start shows an eight-second hint for
-**Options** and **L2**.
+Each app start shows a ten-second hint for **Options** over Battle.net.
 
 Open **Add-ons** before pressing Play. L1/R1 cycles through detected installed
 WoW channels; Left/Right switches Installed, Updates, Find and Starter packs.

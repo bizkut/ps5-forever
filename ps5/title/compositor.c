@@ -111,8 +111,8 @@ static struct display_rect cursor_rect(void)
 #define MESSAGE_COLUMNS ((DISPLAY_WIDTH - 4 * MESSAGE_PADDING) / FONT_WIDTH)
 static char message[640];
 static struct display_rect message_rect;
-#define HINT_TEXT "OPTIONS  Forever menu      L2  Back"
-#define HINT_DURATION_US 8000000ull
+#define HINT_TEXT "OPTIONS  Forever menu"
+#define HINT_DURATION_US 10000000ull
 #define HINT_PADDING_X 28
 #define HINT_PADDING_Y 14
 #define HINT_BOTTOM_MARGIN 48

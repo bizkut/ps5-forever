@@ -144,29 +144,6 @@ static void test_deletion_scope(void)
      * this helper only proves that no caller can widen the fixed root set. */
 }
 
-static void test_menu_hint_seen_file(void)
-{
-    char path[1024], missing[1024], temporary[1040];
-    make_path(path, sizeof(path), "hint/.forever-menu-seen");
-    {
-        char directory[1024];
-        make_path(directory, sizeof(directory), "hint");
-        assert(!forever_mkdirs(directory));
-    }
-    assert(!forever_menu_hint_seen(path));
-    assert(!forever_menu_hint_mark_seen(path));
-    assert(forever_menu_hint_seen(path));
-    assert(text_is("hint/.forever-menu-seen", "seen\n"));
-    assert(!forever_menu_hint_mark_seen(path));
-    snprintf(temporary, sizeof(temporary), "%s.tmp", path);
-    assert(access(temporary, F_OK) == -1 && errno == ENOENT);
-
-    make_path(missing, sizeof(missing), "missing-parent/child/.forever-menu-seen");
-    assert(forever_menu_hint_mark_seen(missing) < 0);
-    assert(!forever_menu_hint_seen(missing)); /* write failure leaves it eligible */
-}
-
-
 static void open_find(struct forever_menu_state *menu, struct forever_addon_snapshot *snapshot)
 {
     struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0};
@@ -545,7 +522,6 @@ int main(void)
     test_hdr_config();
     test_deletion_scope();
     test_state_machine();
-    test_menu_hint_seen_file();
     test_find_search_and_github();
     test_wago_menu();
     snprintf(command, sizeof(command), "rm -rf '%s'", root);

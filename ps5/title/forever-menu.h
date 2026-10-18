@@ -216,8 +216,6 @@ int forever_menu_github_repo(const char *input, char *repo, size_t repo_size,
                              char *error, size_t error_size);
 struct forever_menu_result forever_menu_github_ime(
     struct forever_menu_state *menu, const char *text, int accepted);
-int forever_menu_hint_seen(const char *path);
-int forever_menu_hint_mark_seen(const char *path);
 void forever_menu_progress(struct forever_menu_state *menu, const char *text);
 void forever_menu_notice(struct forever_menu_state *menu, const char *text);
 void forever_menu_close(struct forever_menu_state *menu);

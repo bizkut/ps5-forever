@@ -469,7 +469,7 @@ static void test_menu_overlay(void)
     forever_menu_render(&menu, text, sizeof(text));
     compositor_reset();
     compositor_init(0, 0);
-    check(compositor_menu_text_supported("OPTIONS  Forever menu      L2  Back"),
+    check(compositor_menu_text_supported("OPTIONS  Forever menu"),
           "start-up hint has no fallback glyphs");
     compositor_hint_start(1000);
     compositor_compose();
@@ -492,10 +492,19 @@ static void test_menu_overlay(void)
           (hint.right <= status.left || hint.left >= status.right ||
            hint.bottom <= status.top || hint.top >= status.bottom),
           "start-up hint and installer status panel do not overlap");
-    compositor_hint_tick(8001000);
+    compositor_hint_tick(10000999);
+    compositor_compose();
+    check(compositor_hint_active(), "start-up hint remains visible for ten seconds");
+    compositor_hint_tick(10001000);
     compositor_compose();
     check(!compositor_hint_active() && !compositor_hint_bounds(&hint),
-          "start-up hint is removed after eight seconds");
+          "start-up hint is removed after ten seconds");
+    compositor_init(0, 0);
+    compositor_hint_start(20000000);
+    compositor_compose();
+    check(compositor_hint_active() && compositor_hint_bounds(&hint),
+          "a subsequent app start shows the same hint again");
+    compositor_hint_stop();
     compositor_message("");
     compositor_menu(text);
     compositor_compose();

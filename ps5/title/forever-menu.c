@@ -1,10 +1,6 @@
-#include <errno.h>
-#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include "forever-menu.h"
 
 #define ADDON_VISIBLE_ROWS 5
@@ -661,41 +657,6 @@ struct forever_menu_result forever_menu_github_ime(
     addon_working(menu, "Installing from GitHub...");
     result = addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB, repo);
     return result;
-}
-
-int forever_menu_hint_seen(const char *path)
-{
-    struct stat status;
-    return path && !stat(path, &status);
-}
-
-int forever_menu_hint_mark_seen(const char *path)
-{
-    static const char content[] = "seen\n";
-    char temporary[512];
-    size_t done = 0;
-    int fd, error = 0, length;
-    if (!path || !*path) return -EINVAL;
-    if (forever_menu_hint_seen(path)) return 0;
-    length = snprintf(temporary, sizeof(temporary), "%s.tmp", path);
-    if (length < 0 || (size_t)length >= sizeof(temporary)) return -ENAMETOOLONG;
-    fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0) return -errno;
-    while (done < sizeof(content) - 1)
-    {
-        ssize_t count = write(fd, content + done, sizeof(content) - 1 - done);
-        if (count < 0 && errno == EINTR) continue;
-        if (count <= 0) { error = count < 0 ? errno : EIO; break; }
-        done += (size_t)count;
-    }
-    if (close(fd) && !error) error = errno;
-    if (!error && rename(temporary, path)) error = errno;
-    if (error)
-    {
-        unlink(temporary);
-        return -error;
-    }
-    return 0;
 }
 
 struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
