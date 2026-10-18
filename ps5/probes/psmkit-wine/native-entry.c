@@ -464,14 +464,8 @@ void forever_title_menu_wait_lifetime(void)
 }
 #endif
 
-static int pw_game_loader_exists(const char *path, void *context)
-{
-    struct stat loader_stat;
-    (void)context;
-    return !stat(path, &loader_stat) && S_ISREG(loader_stat.st_mode);
-}
-
-int pw_parent_stage_game_launch(char *const *program, const char *windows_cwd, const char *unix_cwd)
+int pw_parent_stage_game_launch(char *const *program, const char *windows_cwd, const char *unix_cwd,
+                                int remember)
 {
     unsigned separator;
     int error;
@@ -480,8 +474,18 @@ int pw_parent_stage_game_launch(char *const *program, const char *windows_cwd, c
     else if (!(error = pw_game_wire_encode(&game_wire, program, windows_cwd, unix_cwd)))
     {
         error = -pw_game_wire_decode((int)game_wire.argc, (char **)game_wire.argv,
-                                     PW_RUNTIME_PREFIX, pw_game_loader_exists, NULL, &separator);
-        if (!error) game_relaunch_pending = 1;
+                                     PW_RUNTIME_PREFIX, wow_channel_resolve_files, NULL, &separator);
+        if (!error)
+        {
+            if (remember)
+            {
+                int saved = pw_game_record_launch(FOREVER_STATE, (char **)game_wire.argv + 7,
+                                                   windows_cwd, unix_cwd);
+                io_log("b1 maintenance Play record result=%d argc=%u argv=REDACTED cwd=REDACTED",
+                       saved, game_wire.argc - 7);
+            }
+            game_relaunch_pending = 1;
+        }
     }
     pthread_mutex_unlock(&game_lock);
     return error;
@@ -499,9 +503,9 @@ static int pw_maintenance_direct_game(void)
     static const char flag[] = "/app0/wine/direct-game";
     struct stat flag_stat;
     struct wow_channel channel;
-    char selector[WOW_FOLDER_BYTES + 16], image[WOW_PATH_BYTES];
-    char *program[] = {image, "-launcherlogin", "-uid", channel.product, NULL};
-    int error, present = !stat(flag, &flag_stat);
+    char selector[WOW_FOLDER_BYTES + 16];
+    struct pw_game_wire replay;
+    int recorded = 0, error, present = !stat(flag, &flag_stat);
     if (!present) return 0;
     error = forever_read_file(flag, selector, sizeof(selector));
     int removed = unlink(flag), unlink_errno = errno;
@@ -524,17 +528,17 @@ static int pw_maintenance_direct_game(void)
         forever_say("Direct start unavailable: the requested WoW channel has no executable and loader pair.");
         return 0;
     }
-    if (snprintf(image, sizeof(image), "%s\\%s", channel.windows_cwd, channel.executable) >= (int)sizeof(image))
-        return 0;
-    if (!channel.product[0]) program[2] = NULL;
-    program[3] = (char *)wow_channel_launch_uid(&channel);
-    error = pw_parent_stage_game_launch(program, channel.windows_cwd, channel.unix_cwd);
+    error = pw_game_direct_launch(&replay, FOREVER_STATE, &channel, &recorded);
+    if (!error)
+        error = pw_parent_stage_game_launch((char **)replay.argv + 7, replay.argv[5], replay.argv[3], 0);
     if (error)
     {
         io_log("b1 maintenance direct game validation failed error=%d argv=REDACTED cwd=REDACTED; continuing maintenance",
                error);
         return 0;
     }
+    io_log("b1 maintenance direct game source=%s argc=%u argv=REDACTED cwd=REDACTED",
+           recorded ? "recorded-Play" : "flavor-fallback", replay.argc - 7);
     pw_maintenance_loadexec_game("direct game startup");
     return 1; /* LoadExec returned: use the same exit fallback, never start Wine. */
 }
@@ -551,25 +555,18 @@ static int pw_game_launch(const struct wine_ps5_title_game_launch *launch)
 {
     int error;
     if (!launch || launch->size != sizeof(*launch)) return EINVAL;
-    if ((error = pw_parent_stage_game_launch(launch->argv, launch->windows_cwd, launch->unix_cwd)))
+    if ((error = pw_parent_stage_game_launch(launch->argv, launch->windows_cwd, launch->unix_cwd, 1)))
         return error;
     pw_parent_request_game_launch();
     return 0;
 }
 #else
 
-static int pw_game_loader_exists(const char *path, void *context)
-{
-    struct stat loader_stat;
-    (void)context;
-    return !stat(path, &loader_stat) && S_ISREG(loader_stat.st_mode);
-}
-
 static int pw_game_startup_argv(int argc, char **argv, char ***wine_argv, const char **unix_cwd)
 {
     unsigned separator;
     int error = pw_game_wire_decode(argc, argv, PW_RUNTIME_PREFIX,
-                                    pw_game_loader_exists, NULL, &separator);
+                                    wow_channel_resolve_files, NULL, &separator);
     if (error) return error;
     *wine_argv = argv + separator;
     (*wine_argv)[0] = (char *)PW_RUNTIME_LOADER;

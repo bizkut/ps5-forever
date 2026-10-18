@@ -113,6 +113,14 @@ assert 'result = pw_forever_sync_managed();' in sync_stage
 assert 'if (result < 0)' in sync_stage.split('result = pw_forever_sync_managed();', 1)[1]
 assert 'return -1;' in sync_stage.split('io_log("forever: app-owned prefix files', 1)[1]
 assert 'forever: prefix sync checked=%u hashed=%u repaired=%u' in native_startup
+# Only intercepted Play commands publish launch state. Replaying/falling back
+# must not turn a synthesized direct command into a purported Play record.
+assert 'pw_game_record_launch(FOREVER_STATE, (char **)game_wire.argv + 7,' in native_startup
+assert 'pw_game_direct_launch(&replay, FOREVER_STATE, &channel, &recorded)' in native_startup
+assert 'pw_parent_stage_game_launch((char **)replay.argv + 7, replay.argv[5], replay.argv[3], 0)' in native_startup
+assert 'pw_parent_stage_game_launch(launch->argv, launch->windows_cwd, launch->unix_cwd, 1)' in native_startup
+supervisor_source = Path(__file__).with_name('runtime-parent.c').read_text()
+assert 'pw_parent_stage_game_launch(argv + 7, argv[5], argv[3], 1)' in supervisor_source
 assert profile('b1', {'gpu': True, 'headless': True,
                       'environment': {'PROTON_ENABLE_HDR': '1', 'WINEPS5_DIRECT_REQUESTS': '0',
                                       'WINEPS5_HDR_TRACE': '1', 'WINEPS5_QUERY_TRACE': '1'}})['environment'] == {

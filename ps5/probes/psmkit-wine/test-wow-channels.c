@@ -1,9 +1,21 @@
 /* Shared discovery, product parsing, path grammar and direct-start contracts. */
+#include <dirent.h>
+#include <errno.h>
+static int fail_directory_eof;
+static struct dirent *test_readdir(DIR *directory);
+#define readdir test_readdir
 #include "wow-channels.h"
+#undef readdir
 #include "forever-setup.h"
 #include <assert.h>
 #include <stdlib.h>
 static char root[256];
+static struct dirent *test_readdir(DIR *directory)
+{
+    struct dirent *entry = readdir(directory);
+    if (!entry && fail_directory_eof) errno = EIO;
+    return entry;
+}
 static void put(const char *relative, const char *text)
 {
     char path[2048], *slash;
@@ -83,6 +95,20 @@ int main(void)
     assert(!unlink(missing));
     assert(!wow_channel_select(prefix, "", &channel)); /* any new complete channel */
     assert(!strcmp(channel.folder, "_future_"));
+    put("prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_era_/WowClassic.exe", "MZ");
+    put("prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_era_/WOWClassic.exe", "MZ");
+    put("prefix/drive_c/Program Files (x86)/World of Warcraft/_classic_era_/WowClassic_loader.dll", "loader");
+    assert(wow_channel_select(prefix, "_classic_era_", &channel) == -ENOENT);
+    assert(!wow_channel_select(prefix, "_retail_", &channel));
+    char share[1100], actual_exe[WOW_FOLDER_BYTES], actual_loader[WOW_FOLDER_BYTES];
+    snprintf(share, sizeof(share), "%s/share", root);
+    put("share/Config.wtf", "SET GxApi \"D3D12\"\n");
+    assert(forever_install_wow_config(share, prefix) > 0); /* ambiguity cannot prevent maintenance startup */
+    snprintf(missing, sizeof(missing), "%s/_retail_", world);
+    fail_directory_eof = 1;
+    int read_error = wow_channel_resolve_files(missing, "WoW.exe", actual_exe, actual_loader, NULL);
+    fail_directory_eof = 0;
+    assert(read_error == -EIO); /* uniqueness requires a complete directory scan */
     char cleanup[320];
     snprintf(cleanup, sizeof(cleanup), "rm -rf %s", root);
     assert(!system(cleanup));

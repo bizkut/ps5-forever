@@ -325,13 +325,58 @@ Battle.net can replace `.build.info` with just one product row, so it never
 controls discovery and never supplies another channel's product.
 
 Direct selection maps the TACT products `wowt`/`wowxptr` to Agent's
-`wow_ptr`/`wow_ptr_x` uids. Play's argv/uid are passed through unchanged.
+`wow_ptr`/`wow_ptr_x` uids. Play's arguments/uid are preserved; only the
+executable leaf's case is normalized to its actual on-disk spelling.
 
 Discovery intentionally scans only the default
 `C:\Program Files (x86)\World of Warcraft` root. Battle.net's binary
 `.product.db` / `Launcher.db` are not parsed. Play handoffs accept structural
 channel paths at any C:/W: install root; custom roots are outside automatic
 settings/Add-ons/direct-start discovery for now.
+
+Both the maintenance handoff and GPU startup resolve the requested executable
+and sibling loader with ASCII case-insensitive directory matching. Each must
+have exactly one native spelling; two case variants or an incomplete/erroring
+directory scan refuse launch. The resolved on-disk executable spelling enters
+the game wire and recorded replay, and existence checks use the resolved
+loader spelling. This covers Battle.net's `WoWClassic.exe` against installed
+`WowClassic.exe`/`WowClassic_loader.dll`, as well as `Wow.exe`/`wow_loader.dll`
+and `WowB.exe`/`WowB_loader.dll`, without special-casing an executable.
+Discovery still lists incomplete/ambiguous channels for settings and Add-ons
+with an empty loader; they do not block maintenance startup or other channels.
+
+The maintenance parent records each accepted Battle.net Play launch under
+`/data/forever/state/last-launch-_<channel>_.bin`. The record contains the
+existing versioned, NUL-separated argv/cwd wire (at most 4,096 bytes and 64
+game arguments), not native pointers. Direct start replays that channel's
+record, preserving safe game options and Agent UID differences without
+a per-product launch table. Until Play has supplied a record, direct start
+keeps the existing `-launcherlogin -uid <flavor>` fallback; that fallback
+cannot supply product-specific launch options such as Anniversary's
+`-initialgamemode=bccfresh`.
+
+Only Play publishes records; replay/fallback never overwrites them. Publishing
+is atomic and a save failure does not block the original Play launch. Malformed,
+oversized, wrong-channel, different-installation or unsafe-option records are
+refused, not silently replayed as another channel or downgraded to fallback.
+Recorded executable and both cwd forms must match the selected installation;
+DOS paths compare case/slash-insensitively and cwd trailing separators are
+ignored for identity only. The exact saved cwd is replayed. Every replay still
+passes the normal prefix, executable and sibling-loader admission.
+
+Persistence uses a generic option/type allow-list, not a keyword deny-list:
+the standalone `-launcherlogin`, `-console` and `-windowed` booleans, `-uid`
+with a validated `wow*` product identifier, and `-initialgamemode` with a
+symbolic mode value of at most 32
+letters/digits/underscores/hyphens (starting with a letter). Inline `=`/`:` and
+separated values are covered. Unknown/config options, login/session tokens,
+attached login values, invalid typed values and unexplained positional values
+are omitted. An unknown option immediately followed by another switch has
+ambiguous arity: recording is refused without replacing the previous record,
+instead of losing required game configuration or interpreting a secret as a
+safe option. This intentionally does not preserve arbitrary launch options:
+opaque values cannot be proven free of credentials. Replay rechecks the same
+allow-list. Only argument counts and redacted argv/cwd markers are logged.
 
 The single `b1-game-wow.json` has `runtime_game: true`, with no configured
 executable, argv, uid or channel cwd. `runtime-b1-dual` still separately builds

@@ -114,6 +114,56 @@ static inline void wow_build_product(const char *root, const char *folder, char 
     }
     fclose(file);
 }
+static inline int wow_ascii_equal(const char *a, const char *b)
+{
+    for (; *a && *b; ++a, ++b)
+    {
+        unsigned char left = *a, right = *b;
+        if (left >= 'A' && left <= 'Z') left += 'a' - 'A';
+        if (right >= 'A' && right <= 'Z') right += 'a' - 'A';
+        if (left != right) return 0;
+    }
+    return !*a && !*b;
+}
+/* Resolve both leaves in one directory pass. Windows spelling is insensitive
+ * to ASCII case, but two native case variants are ambiguous, even when one
+ * happens to match the requested spelling exactly. Outputs use on-disk case. */
+static inline int wow_channel_resolve_files(const char *cwd, const char *requested,
+                                            char *executable, char *loader, void *context)
+{
+    char wanted_loader[WOW_FOLDER_BYTES], path[WOW_PATH_BYTES];
+    const char *wanted[] = {requested, wanted_loader};
+    char *found[] = {executable, loader};
+    unsigned matches[2] = {0, 0};
+    struct dirent *entry;
+    DIR *directory;
+    int error = 0, length;
+    (void)context;
+    if (!wow_executable_name(requested)) return -EINVAL;
+    length = snprintf(wanted_loader, sizeof(wanted_loader), "%.*s_loader.dll",
+                      (int)strlen(requested) - 4, requested);
+    if (length < 0 || (size_t)length >= sizeof(wanted_loader)) return -ENAMETOOLONG;
+    if (!(directory = opendir(cwd))) return -errno;
+    errno = 0;
+    while ((entry = readdir(directory)))
+        for (unsigned i = 0; i < 2; ++i)
+            if (wow_ascii_equal(entry->d_name, wanted[i]))
+            {
+                if (++matches[i] > 1) error = -EEXIST;
+                else strcpy(found[i], entry->d_name);
+            }
+    if (errno && !error) error = -errno;
+    closedir(directory);
+    if (error) return error;
+    for (unsigned i = 0; i < 2; ++i)
+    {
+        if (matches[i] != 1) return -ENOENT;
+        if (wow_join(path, sizeof(path), cwd, found[i])) return -ENAMETOOLONG;
+        if (!wow_regular(path)) return -ENOENT;
+    }
+    return 0;
+}
+
 static inline int wow_channel_read(const char *root, const char *windows_root, const char *folder,
                                    struct wow_channel *channel)
 {
@@ -149,16 +199,14 @@ static inline int wow_channel_read(const char *root, const char *windows_root, c
     if (!has_flavor && !channel->executable[0]) return -ENOENT;
     if (channel->executable[0])
     {
-        char loader[WOW_FOLDER_BYTES + 16];
-        n = snprintf(loader, sizeof(loader), "%.*s_loader.dll", (int)strlen(channel->executable) - 4, channel->executable);
-        if (n < 0 || (size_t)n >= sizeof(loader)) return -ENAMETOOLONG;
-        if (wow_join(channel->unix_loader, sizeof(channel->unix_loader), channel->unix_cwd, loader)) return -ENAMETOOLONG;
-        if (!wow_regular(channel->unix_loader))
-        {
-            for (char *p = loader; *p; ++p) if (*p >= 'A' && *p <= 'Z') *p += 'a' - 'A';
-            if (wow_join(channel->unix_loader, sizeof(channel->unix_loader), channel->unix_cwd, loader)) return -ENAMETOOLONG;
-            if (!wow_regular(channel->unix_loader)) channel->unix_loader[0] = 0;
-        }
+        char loader[WOW_FOLDER_BYTES];
+        int error = wow_channel_resolve_files(channel->unix_cwd, channel->executable,
+                                              channel->executable, loader, NULL);
+        /* Settings/Add-ons still discover incomplete or ambiguous installs;
+         * the empty loader keeps them out of direct-start admission. */
+        if (error && error != -ENOENT && error != -EEXIST) return error;
+        if (!error && wow_join(channel->unix_loader, sizeof(channel->unix_loader),
+                               channel->unix_cwd, loader)) return -ENAMETOOLONG;
     }
     return 0;
 }

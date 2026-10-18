@@ -8,6 +8,7 @@
 #define FOREVER_PREFIX FOREVER_ROOT "/prefix"
 #define FOREVER_HOME FOREVER_ROOT "/home"
 #define FOREVER_SHADER_CACHE FOREVER_ROOT "/radv-shader-cache"
+#define FOREVER_STATE FOREVER_ROOT "/state"
 #define FOREVER_DRIVE_C FOREVER_PREFIX "/drive_c"
 /* the Battle.net launcher's size and time the home-screen icon was made from */
 #define FOREVER_ICON_SOURCE FOREVER_ROOT "/.icon-source"

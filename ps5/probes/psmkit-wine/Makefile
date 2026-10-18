@@ -196,7 +196,8 @@ $(HOST_OUT)/test-audio-mixer: test-audio-mixer.c \
 		-I "$(WINE_SRC)/dlls/wineps5audio.drv" \
 		test-audio-mixer.c $(WINE_SRC)/dlls/wineps5audio.drv/mixer.c -o $@
 
-$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h wow-channels.h forever-paths.h protocol.h
+$(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h wow-channels.h forever-paths.h \
+		forever-setup.h sha256.h protocol.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 

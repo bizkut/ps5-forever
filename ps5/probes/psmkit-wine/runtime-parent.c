@@ -1355,7 +1355,7 @@ static int serve_game_launch(const struct spawn_service *service)
     error = pw_game_request_unpack(&request, argv);
     if (!error)
     {
-        error = pw_parent_stage_game_launch(argv + 7, argv[5], argv[3]);
+        error = pw_parent_stage_game_launch(argv + 7, argv[5], argv[3], 1);
         accepted = !error;
     }
 #endif
