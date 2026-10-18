@@ -61,7 +61,7 @@ runtime-qualification: runtime-child pe $(HOST_OUT)/test-staged-runtime
 runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py \
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
 		runtime-parent.h runtime-relaunch.h writebroker-autostart.h writebroker-menu.h \
-		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-input.c \
+		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-profile.h runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
 		../../title/addonforge-security.h ../../title/menu-font.h \
@@ -117,7 +117,8 @@ $(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-staged-runtime.c elf-runtime.c -o $@
 
 test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wine-title \
-		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
+		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
+		$(HOST_OUT)/test-direct-commit $(HOST_OUT)/test-direct-cache $(HOST_OUT)/test-direct-fail-fast $(HOST_OUT)/test-vm-cpu \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
 		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch \
 		$(HOST_OUT)/test-battlenet-restart $(HOST_OUT)/test-audio-mixer \
@@ -135,6 +136,12 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wi
 	$(HOST_OUT)/test-elf-runtime
 	$(HOST_OUT)/test-wine-title
 	$(HOST_OUT)/test-write-buffer
+	$(HOST_OUT)/test-request-profile
+	$(HOST_OUT)/test-runtime-profile-callbacks
+	$(HOST_OUT)/test-direct-commit
+	$(HOST_OUT)/test-direct-cache
+	$(HOST_OUT)/test-direct-fail-fast
+	$(HOST_OUT)/test-vm-cpu
 	$(HOST_OUT)/test-loader-path
 	$(HOST_OUT)/test-runtime-imports
 	$(HOST_OUT)/test-runtime-input
@@ -321,6 +328,33 @@ $(HOST_OUT)/test-write-buffer: test-write-buffer.c build-write-buffer-test.py \
 		$(WINE_SRC)/dlls/ntdll/unix/file.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
 		$(WINE_SRC)/include/wine/ps5_title_private.h
 	python3 build-write-buffer-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-request-profile: test-request-profile.c \
+		$(WINE_SRC)/include/wine/ps5_request_profile.h $(WINE_SRC)/include/wine/server_protocol.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -I "$(WINE_SRC)/include" $< -o $@
+
+$(HOST_OUT)/test-runtime-profile-callbacks: test-runtime-profile-callbacks.c runtime-profile.h \
+		$(WINE_SRC)/include/wine/ps5_suspend.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I "$(WINE_SRC)/include" $< -o $@
+
+$(HOST_OUT)/test-direct-commit: test-direct-commit.c build-direct-commit-test.py \
+		$(WINE_SRC)/dlls/ntdll/unix/ps5_direct.c
+	python3 build-direct-commit-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-direct-cache: test-direct-cache.c build-direct-cache-test.py \
+		$(WINE_SRC)/dlls/ntdll/unix/virtual.c $(WINE_SRC)/dlls/ntdll/unix/ps5_direct.c
+	python3 build-direct-cache-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-direct-fail-fast: test-direct-fail-fast.c build-direct-cache-test.py \
+		$(WINE_SRC)/dlls/ntdll/unix/virtual.c $(WINE_SRC)/dlls/ntdll/unix/ps5_direct.c
+	python3 build-direct-cache-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)" --fail-fast-test
+
+$(HOST_OUT)/test-vm-cpu: test-vm-cpu.c build-direct-cache-test.py \
+		$(WINE_SRC)/dlls/ntdll/unix/virtual.c
+	python3 build-direct-cache-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)" --cpu-test
+
 
 $(HOST_OUT)/test-loader-path: test-loader-path.c build-path-test.py $(WINE_SRC)/loader/main.h $(PLATFORM_SRC)/src/libc.c $(PLATFORM_SRC)/include/ps5platform/libc.h
 	mkdir -p $(HOST_OUT)

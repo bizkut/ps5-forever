@@ -1,0 +1,91 @@
+PPSA99030 scan-speed investigation and direct-commit batching, 2026-10-18
+Console: .39 only. No release, commit or Git tag was created for this receipt.
+
+Artifact
+  private-builds/scan-speed/private/PPSA99030.zip (private workspace artifact)
+  SHA-256 be41e52a929847de31c9d2de4a32c908e0973a49a280de6ae473f7432c4ef969
+  Probe SHA-256 2b8db0c48cf79f2cd58553d77e5709a9a35c4a165d7dfef9feb2fff52dded1b5
+  Build/receipts: private-builds/scan-speed/ (private workspace evidence)
+  RUNTIME_TITLE_QUALIFIED digest=d576562fc7c2fb18b87abe8d1f06140f44a7521534b769a47ea633c8d59c13a1 imports=447 raw_syscalls=0 profile=b1
+  RUNTIME_TITLE_QUALIFIED digest=ed497c5b446c3cdb9c38d8f7cc2a4f88372de56e2b7eab5d96fd47f1233036de imports=452 raw_syscalls=0 profile=b1
+  RUNTIME_TITLE_DUAL_QUALIFIED maintenance=d576562fc7c2fb18b87abe8d1f06140f44a7521534b769a47ea633c8d59c13a1 game=ed497c5b446c3cdb9c38d8f7cc2a4f88372de56e2b7eab5d96fd47f1233036de combined=615bd7b153d222ae10d386d4a4b88191f6c7c16661fcfe6aed20353249323a46
+  Digest labels normalize the qualifier's content keys; these are static title/import/syscall gates, not game or Vulkan conformance claims.
+
+Evidence
+  Initial child IOCP + MD5 control: 16 GiB /20.337642 s =805.600 MiB/s.
+  In that control: 262144 reads, all pending, 262144 matching completions;
+  aggregate hash31486 ms, IOCP wait8748 ms; four workers.
+  Client hot-request RTT ~26-30 us; server send-start -> handler ~15-19 us.
+  This throughput and latency do not explain the real Agent scan's low disk use.
+  Control log: bench-profiled-baseline-1-20261018T075937Z.klog.
+
+  Real Scan and Repair baseline: real-20261018T080011Z.klog.
+  58 sampled windows: scan workers00e0/00e4 median CPU49.65%/49.4%; their
+  dominant NtAllocateVirtualMemory samples41.75-43%, not a hashing hotspot.
+  Last24 Agent I/O windows: 1.948997 MiB/s, only839 ms in actual read calls
+  across242496 ms of wall-clock windows. Steady server queue mean medians:
+  select16 us, set_queue_mask12 us, remove_completion15 us.
+  At least135 seconds were explicitly captured after the user's scan-start notice.
+
+  Allocation-stage real scan: real-20261018T081045Z.klog.
+  At least95 seconds explicitly captured after the second user-start notice.
+  Representative10-s windows: ~339 allocations, largest32832 KiB;
+  requested~10.5 GiB, ~172000 newly backed64-KiB units, backing~8.2 s;
+  hide-to-PROT_NONE~5.55 s, zero~1.05 s, allocate~0.43 s, map~0.53 s,
+  metadata<1 ms. Same windows read only~15-30 MiB in~20-60 ms.
+  Agent log repair responses are suppressed/reused after the first GET; the
+  recorded0.3018357% response is not a usable before/after progress slope.
+
+Fix
+  PS5-title-only contiguous-run batching of the temporary PROT_NONE operation
+  after direct-unit mapping/zeroing. Each unit remains separately allocated,
+  owned and rollback-tracked. Existing committed units split runs and are never
+  reclosed or zeroed. New mappings remain non-executable throughout preparation.
+  C:\wineps5-tune.txt: direct_commit_batch=off restores per-unit calls;
+  direct_commit_batch=on enables batching (default), reread at most once/second.
+  No IOCP or message-queue semantics were changed.
+  Existing CPU sampler was shared with maintenance/PsmKit children; profiling
+  now records per-request client histograms and bounded server queue timing.
+
+Native A/B, same ZIP and probe, alternating off/on/off/on
+  Scratch file1 GiB retained across runs; timed scan256 MiB, four workers,
+  64-KiB reads, one32-MiB VirtualAlloc/VirtualFree workspace per read, MD5,
+  IOCP GQCS/GQCSEx and message waits.4096 reads/completions in every run.
+  off1:103.896495 s,2.464 MiB/s
+  on1: 41.030202 s,6.239 MiB/s
+  off2:103.801169 s,2.466 MiB/s
+  on2: 41.004528 s,6.243 MiB/s
+  Throughput improvement~2.53x. This is allocation-realistic benchmark evidence,
+  not proof of disk/network-limited real Battle.net behavior.
+  Logs: bench-off-1-20261018T082135Z.klog,
+        bench-on-1-20261018T082326Z.klog,
+        bench-off-2-20261018T082415Z.klog,
+        bench-on-2-20261018T082606Z.klog.
+  Native census reduction over logged benchmark windows with>=10000 units:
+    off:4046310 units,3961611 hide calls,121980 ms,30.146 us/unit;
+    on:4099558 units,8108 hide calls,805 ms,0.196 us/unit.
+  Counters include startup/census boundaries; whole-run timings above are the
+  primary A/B comparison. Workspaces still receive eager backing and zeroing.
+
+Tests exercised
+  RED: production extraction failed expected4-unit ->1 hide-call assertion.
+  GREEN: DIRECT_COMMIT_HOST_PASS batching=1 kill_switch=1 old_units_untouched=1
+         zeroing=1 rollback=1 subunit=1
+  Tests include actual production tune parsing/default/cache/CRLF/non-title,
+  partial-unit commits and allocation/map/protect failure rollback.
+  REQUEST_PROFILE_HOST_PASS exact_wire_layout=1 payload_unchanged=1 unsupported_unchanged=1
+  RUNTIME_PROFILE_CALLBACKS_HOST_PASS cpu_only=1 gpu_procs_absent=1 disabled=1 start_retry=1
+  RUNTIME_PROFILE_HOST_PASS root=SEPARATE_TITLE_ONLY guards=NO_PAYLOAD_WRITES modules=EXACT_PROFILE console=NOT_CONTACTED
+  Existing production-extracted write-buffer suite passed all8 printed groups.
+  Existing standalone loader/tests/ps5_title.c suite passed.
+  Full aggregate host suite and native WoW/GPU execution were not run here.
+
+Console state at handoff
+  Exact private ZIP above installed; not public012. Batching explicitly on.
+  Real maintenance executables and managed prefix manifest restored with SHA
+  readback. C:\scan-bench\data.bin, scratch directory, scan-bench-probe.exe
+  and result file removed. Best private title relaunched for the user.
+  Main was asked to obtain a real Scan and Repair progress slope and a real
+  download_rate off/on comparison. Neither final real-workload result is
+  claimed in this receipt. Eager large-buffer commit/zero work remains and
+  this change alone does not establish Windows-PC/disk/network-speed parity.

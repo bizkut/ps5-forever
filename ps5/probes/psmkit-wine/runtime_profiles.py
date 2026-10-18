@@ -276,7 +276,8 @@ def profile(name, overrides=None):
         if selected['gpu'] and not selected['headless']:
             raise ValueError('B1 gpu requires headless to give RADV exclusive VideoOut ownership')
         if (selected.get('environment', {}).keys() -
-                {'WINEPS5_MXCSR_TRACE', 'WINEPS5_WRITE_TRACE', 'WINEPS5_WRITE_STICKY'}) and not selected['gpu']:
+                {'WINEPS5_MXCSR_TRACE', 'WINEPS5_WRITE_TRACE', 'WINEPS5_WRITE_STICKY',
+                 'WINEPS5_PROFILE'}) and not selected['gpu']:
             raise ValueError('B1 graphics environment requires a gpu profile')
         if overrides is not None and 'child_dll_overrides' in overrides and not selected['gpu']:
             raise ValueError('B1 child_dll_overrides requires a gpu profile')

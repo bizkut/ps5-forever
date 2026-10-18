@@ -92,12 +92,19 @@ for log_async in ('0', '1'):
     assert profile('b1', {'gpu': True, 'headless': True,
                           'environment': {'WINEPS5_LOG_ASYNC': log_async}})['environment'] == {
                               'WINEPS5_LOG_ASYNC': log_async}
-for trace_name in ('WINEPS5_MXCSR_TRACE', 'WINEPS5_WRITE_TRACE', 'WINEPS5_WRITE_STICKY'):
+for trace_name in ('WINEPS5_MXCSR_TRACE', 'WINEPS5_WRITE_TRACE', 'WINEPS5_WRITE_STICKY',
+                   'WINEPS5_PROFILE'):
     for trace_value in ('0', '1'):
         for gpu_enabled in (False, True):
             assert profile('b1', {'gpu': gpu_enabled, 'headless': gpu_enabled,
                                   'environment': {trace_name: trace_value}})['environment'] == {
                                       trace_name: trace_value}
+# Profiling is not a graphics feature: its startup assignment must run before
+# the GPU-only environment branch as well as being admitted by profile().
+native_startup = Path(__file__).with_name('native-entry.c').read_text()
+common_environment = native_startup.split('if (native_runtime.payload_spawn', 1)[1].split(
+    '#if PW_RUNTIME_GPU', 1)[0]
+assert 'setenv("WINEPS5_PROFILE", PW_RUNTIME_PROFILE, 0)' in common_environment
 assert profile('b1', {'gpu': True, 'headless': True,
                       'environment': {'PROTON_ENABLE_HDR': '1', 'WINEPS5_DIRECT_REQUESTS': '0',
                                       'WINEPS5_HDR_TRACE': '1', 'WINEPS5_QUERY_TRACE': '1'}})['environment'] == {

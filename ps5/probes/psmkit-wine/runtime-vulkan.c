@@ -23,6 +23,7 @@ int pw_title_set_cursor(const void *, unsigned);
 unsigned pw_title_get_gamepad(unsigned, struct wine_ps5_gamepad_state *, int);
 unsigned pw_title_set_gamepad_vibration(unsigned, unsigned, unsigned);
 void pw_title_enable_gamepad(int);
+void *pw_title_profile_proc(const char *);
 static VkResult title_create_instance(const VkInstanceCreateInfo *info,
                                      const VkAllocationCallbacks *allocator, VkInstance *instance)
 {
@@ -62,7 +63,6 @@ static VkResult title_create_swapchain(VkDevice device, const VkSwapchainCreateI
 /* Frame pacing as presented: every 10 s, the frames presented, their rate,
  * the mean, 99th-percentile (the "1% low") and worst interval between presents. */
 typedef void (*title_hang_diagnostic_fn)(unsigned, unsigned);
-typedef void (*title_profile_sample_fn)(void);
 
 static PFN_vkQueuePresentKHR title_real_present;
 static pthread_mutex_t title_present_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -70,8 +70,8 @@ static int64_t title_present_window_ns, title_present_last_ns;
 static uint32_t title_present_ms_x10[4096];
 static unsigned title_present_count;
 static _Atomic int64_t title_present_completed_ns;
-static _Atomic uintptr_t title_hang_diagnostic, title_profile_sample;
-static _Atomic int title_hang_watchdog_started, title_hang_reported, title_profile_started;
+static _Atomic uintptr_t title_hang_diagnostic;
+static _Atomic int title_hang_watchdog_started, title_hang_reported;
 
 static int64_t title_now_ns(void)
 {
@@ -99,69 +99,6 @@ static void title_sleep_one_second(void)
     title_sleep_until(title_now_ns() + 1000000000);
 }
 
-/* Called in the sampled thread's SIGURG handler, not on the sampler thread.
- * A plain CLOCK_THREAD_CPUTIME_ID always refers to the calling thread. */
-static int title_get_current_thread_cpu_time(uint64_t *time_ns)
-{
-    struct timespec now;
-
-    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &now)) return errno;
-    *time_ns = (uint64_t)now.tv_sec * 1000000000 + now.tv_nsec;
-    return 0;
-}
-
-/* Diagnostic only: retain the old provider's clock identity for two threads. */
-static int title_get_thread_cpu_clock_id(pthread_t thread, int *id)
-{
-    clockid_t clock;
-    int error = pthread_getcpuclockid(thread, &clock);
-
-    if (!error) *id = clock;
-    return error;
-}
-
-static void *title_profile_sampler(void *unused)
-{
-    const int64_t interval_ns = INT64_C(1000000000) / WINE_PS5_PROFILE_HZ;
-    int64_t next_ns = title_now_ns();
-
-    (void)unused;
-    for (;;)
-    {
-        title_profile_sample_fn sample = (title_profile_sample_fn)
-            atomic_load_explicit(&title_profile_sample, memory_order_acquire);
-        int64_t now;
-
-        if (sample) sample();
-        next_ns += interval_ns;
-        now = title_now_ns();
-        if (next_ns < now) next_ns = now + interval_ns;
-        title_sleep_until(next_ns);
-    }
-    return NULL;
-}
-
-static void title_set_thread_profile(title_profile_sample_fn sample)
-{
-    const char *enabled = getenv("WINEPS5_PROFILE");
-
-    if (!enabled || strcmp(enabled, "1")) sample = NULL;
-    atomic_store_explicit(&title_profile_sample, (uintptr_t)sample, memory_order_release);
-    if (sample && !atomic_exchange_explicit(&title_profile_started, 1, memory_order_relaxed))
-    {
-        pthread_t thread;
-        int error = pthread_create(&thread, NULL, title_profile_sampler, NULL);
-
-        if (error)
-        {
-            atomic_store_explicit(&title_profile_started, 0, memory_order_relaxed);
-            atomic_store_explicit(&title_profile_sample, 0, memory_order_release);
-            io_log("title profile start failed error=%d", error);
-        }
-        else
-            io_log("title profile enabled hz=%u window_s=10", WINE_PS5_PROFILE_HZ);
-    }
-}
 
 static void *title_hang_watchdog(void *unused)
 {
@@ -398,9 +335,6 @@ void *pw_title_vulkan_proc(const char *name)
     if (!strcmp(name, "wineSetGamepadVibration")) return (void *)pw_title_set_gamepad_vibration;
     if (!strcmp(name, "wineEnableGamepad")) return (void *)pw_title_enable_gamepad;
     if (!strcmp(name, "wineSetHangDiagnostic")) return (void *)title_set_hang_diagnostic;
-    if (!strcmp(name, "wineSetThreadProfile")) return (void *)title_set_thread_profile;
-    if (!strcmp(name, "wineGetCurrentThreadCpuTime")) return (void *)title_get_current_thread_cpu_time;
-    if (!strcmp(name, "wineGetThreadCpuClockId")) return (void *)title_get_thread_cpu_clock_id;
-    return NULL;
+    return pw_title_profile_proc(name);
 }
 #endif

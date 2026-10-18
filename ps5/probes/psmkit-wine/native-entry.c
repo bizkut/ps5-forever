@@ -48,6 +48,7 @@ int sceSystemServiceGetHdrToneMapLuminance(struct wine_ps5_hdr_luminance *);
 #include <fcntl.h>
 #include <poll.h>
 #include <stdatomic.h>
+#include "runtime-profile.h"
 
 #ifndef SO_NBIO
 #define SO_NBIO 0x1200
@@ -3106,6 +3107,7 @@ int main(int argc, char **argv)
 #endif
     io_log("psmkit-wine startup stage=clock result=%lld errno=%d", (long long)now, saved_errno);
     if (now<0) return 1;
+    native_runtime.vulkan_proc = pw_title_profile_proc;
 #ifdef PW_PARENT_ROLE
 #if !(defined(PW_RUNTIME_B1) && PW_RUNTIME_GPU)
     (void)argc; (void)argv;
@@ -3317,6 +3319,8 @@ int main(int argc, char **argv)
         setenv("WINEPS5_WRITE_TRACE", PW_RUNTIME_WRITE_TRACE, 0)) return 1;
     if (*PW_RUNTIME_WRITE_STICKY &&
         setenv("WINEPS5_WRITE_STICKY", PW_RUNTIME_WRITE_STICKY, 0)) return 1;
+    if (*PW_RUNTIME_PROFILE &&
+        setenv("WINEPS5_PROFILE", PW_RUNTIME_PROFILE, 0)) return 1;
 #if PW_RUNTIME_GPU
     /* PE XInput only probes Unix modules admitted by the GPU manifest.
      * Unix-side title/callback checks still gate the native implementation. */
@@ -3344,8 +3348,6 @@ int main(int argc, char **argv)
         setenv("VKD3D_SWAPCHAIN_PRESENT_MODE", PW_RUNTIME_VKD3D_PRESENT_MODE, 0)) return 1;
     if (*PW_RUNTIME_VIDEOOUT_STATS &&
         setenv("PS5_VIDEOOUT_STATS", PW_RUNTIME_VIDEOOUT_STATS, 0)) return 1;
-    if (*PW_RUNTIME_PROFILE &&
-        setenv("WINEPS5_PROFILE", PW_RUNTIME_PROFILE, 0)) return 1;
     if (*PW_RUNTIME_LOG_ASYNC &&
         setenv("WINEPS5_LOG_ASYNC", PW_RUNTIME_LOG_ASYNC, 0)) return 1;
     int hdr_output = forever_menu_hdr_runtime_enabled(

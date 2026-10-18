@@ -428,6 +428,124 @@ The second pair was network-bound at 8.2 to 8.6 MB/s (1.8 to 1.5 seconds inside
 writes). These are combined-build workload measurements, not an isolated claim
 for the buffer alone or a Scan and Repair qualification.
 
+## Scan / IOCP diagnostic probe
+
+`make -C ps5/probes/scan-bench LLVM_MINGW=/opt/llvm-mingw` builds a Windows
+probe independent of Battle.net. Install the executable as the maintenance
+launcher and also as `C:\Agent.exe`: the launcher starts the second copy as a
+child, matching Agent's cross-process wineserver transport rather than
+benchmarking the title parent's direct-call path. This diagnostic filename also
+exercises the Agent-only cache admission rule; back up and restore that prefix
+file along with both maintenance-launcher copies.
+Standalone fixture cleanup removes only scratch/result data, never a restored
+`C:\Agent.exe`; the swap transaction owns restoration/removal of that executable.
+
+The child creates `C:\scan-bench\data.bin` once (1 GiB), then four workers read
+256 MiB in 64 KiB overlapped chunks, dequeue IOCP packets (alternating
+`GetQueuedCompletionStatus` / `GetQueuedCompletionStatusEx`), and hash all bytes
+with BCrypt MD5. Each chunk reserves/commits/releases a 32 MiB scratch workspace,
+matching the allocation churn measured in Agent's scan workers. Build with
+`WORKSPACE=0` for the IOCP/hash-only control (16 passes over the 1 GiB file).
+A separate thread runs `MsgWaitForMultipleObjects` / `PeekMessage`.
+`C:\scan-bench-result.txt` records throughput, completed/pending read counts,
+aggregate allocation / release / hash / IOCP-wait time and message-loop counters.
+The probe checks `VirtualQuery` after free/reuse and fresh-commit zeroes, and
+waits 11 seconds outside each end of the timed interval so the sampler can
+publish complete baseline/final cumulative CPU counters. Compile a distinct
+`OUT` with `WORKERS=2` to match Agent's two scan workers; the four-worker default
+also stresses a bounded cache whose retained capacity may be smaller than all
+simultaneously active workspaces.
+Timed work excludes scratch creation. Keep the scratch file between A/B runs;
+afterward run the probe with `--cleanup` or remove the scratch directory and
+result over FTP, and restore both maintenance-launcher copies. A launcher swap
+must temporarily update the matching SHA-256 in `share/forever/prefix-files.txt`
+and restore it afterward, otherwise prefix-integrity checks reject the probe.
+
+For diagnostics, copy `b1-product.json`, set `environment.WINEPS5_PROFILE="1"`
+and build the maintenance role using that temporary `B1_PROFILE_CONFIG`. The
+key is accepted for maintenance and GPU roles; graphics-only keys remain gated.
+CPU callbacks are shared by both parents and PsmKit children without admitting
+graphics functions into CPU-only roles. Use the sampler for CPU time:
+`GetThreadTimes` is not implemented by the PS5 platform.
+`runtime-b1-dual` selects its own maintenance product profile, so compose
+separately built roles when using a diagnostic maintenance profile.
+
+The sampler's `title request latency` lines are cumulative per-process,
+per-request send-to-reply histograms (not the subsequent blocked select wait).
+`server queue` measures client send-start to handler-entry for the explicitly
+layout-checked select, event, IOCP and message-mask requests; it includes
+transport send time. `server requests` separately records handler time.
+These diagnostics require profiling and do not change the request wire layout.
+
+The PS5 direct-backed commit path batches its temporary NX/no-access protection
+over each contiguous run of newly mapped 64 KiB units. It never includes an
+already committed neighbouring unit, and retains per-unit ownership, zeroing
+and transaction rollback. `direct_commit_batch=off` in `C:\wineps5-tune.txt`
+restores per-unit protection calls; `direct_commit_batch=on` re-enables batching
+(default). The key is reread at most once per second and does not affect payload
+Wine. The `test-direct-commit` host gate extracts the production transaction and
+tune parser and covers batching, old neighbours, partial-unit commits, zeroing,
+allocation/map/protect failures and the live kill switch.
+On a failed batched commit, any unhidden new run is closed before rollback;
+an unmap failure keeps only inaccessible pending units. If both protection and
+unmap refuse to make retained new memory inaccessible, a single klog line and
+native `pthread_kill(pthread_self(), SIGKILL)` fail-stop terminate the affected
+process rather than returning an accessible uncommitted mapping. This bypasses
+Wine's orderly exit, child/menu waits and server joins, even under the VM lock.
+
+The whole-region cache is restricted to the actual loaded `Agent.exe` image.
+Startup captures its bounded UTF-16 `ImagePathName`, not the command line or
+`argv[0]`, before entering Windows code. Matching is exact and case-insensitive
+on the final path component. Unknown images, `Battle.net.exe`, CEF subprocesses,
+`AgentHelper.exe`, and WoW keep the existing allocator path even with
+`direct_cache=on`; direct-commit protection batching is independent of this gate.
+
+The private direct-region cache retains at most four whole, unsplit allocations,
+charged by native bytes to a 64.125 MiB per-process bound (two nominal 32 MiB
+workspaces including alignment slack). Only completely committed private RW
+regions of 1–64 MiB qualify; guards, write-watch, executable/section mappings,
+split ownership and partly decommitted regions stay on the existing path.
+Freed cached regions are native `PROT_NONE`, absent from Wine's view tree and
+logically `MEM_FREE`. An exact-size reuse obeys base/alignment/address limits,
+reopens NX/RW, zeros the complete native extent, recloses native tail slack and
+only then republishes committed Wine pages. Thus kernel I/O buffers remain
+physically backed; reuse does not depend on a kernel `read`/`recv` causing a
+recoverable userspace page fault. `MEM_RESET` remains on its in-place path and
+does not bypass zeroing of a later fresh allocation.
+`MEM_TOP_DOWN` requests always use the normal highest-free-address search,
+not a selection limited to retained cache entries.
+
+`direct_cache=off` in `C:\wineps5-tune.txt` disables reuse and drains retained
+regions at the next direct-view reservation or whole-view release;
+`direct_cache=on` enables it for `Agent.exe` only (default). Cache admission/reuse
+stops and drains under direct-memory pressure
+(less than a 256 MiB contiguous hole or a failed availability query). A failed
+physical allocation reclaims the process's cache before one retry. Overlapping
+different allocations evict retained ranges before mapping; failed reclamation
+retains ownership metadata and never permits an overlapping mapping.
+A failed cache reopen/tail-protection rollback first recloses the native
+extent, then evicts it if closing fails. If remaining mapped units cannot be
+closed after a failed eviction either, the same native SIGKILL fail-stop applies;
+it never returns an accessible address that Wine reports as `MEM_FREE`.
+The production-extracted `test-direct-fail-fast` uses the real host signal
+consumer in a child holding a recursive VM mutex with a blocked client. Its
+parent watchdog cannot be mistaken for the consumer's own SIGKILL. This is host
+termination evidence, not an exercised PS5-console fatal-injection result.
+
+`title vm cpu` reports cumulative, per-process **completed-operation CPU
+nanoseconds** for current-process allocation (including `NtAllocateVirtualMemoryEx`),
+free and cache zeroing, independently of sampled-PC/top-25 truncation.
+`cache-zero` is a subset of `allocate`, not an additive category. Difference
+`cpu_ns` and `now_ns` between records to obtain one-core CPU percentage; require
+`cpu_calls == calls` before treating the CPU result as complete. The
+`title direct cache` census separately reports hit/miss/eviction/retained bytes
+and bulk-zero time. Zeroing is mandatory; an allocation win must not be
+reported as eliminating the cost if bulk zeroing becomes the new bottleneck.
+The `test-direct-cache` and `test-vm-cpu` host gates compile the production cache,
+delete-view cutover and CPU counters, including real no-access and kernel-I/O
+checks, bounds/pressure/kill-switch cases and failed reclaim/reopen ownership.
+
+
 ## Native release gate
 
 Before publishing the corrected release or promoting its catalog entry, install
