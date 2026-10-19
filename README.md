@@ -181,12 +181,16 @@ offline use keeps the last good cache or the build's bundled GitHub snapshot.
 **Add from GitHub link…** remains available. Unknown products say “Add-ons aren't
 supported for this WoW version yet”; they never receive another flavour's files.
 
-For Wago add-ons, choose **Wago key** on the Add-ons page. Get a free personal
-key at [addons.wago.io/account/apikeys](https://addons.wago.io/account/apikeys),
-then type it or choose **Read from file** after saving it as the first line of
-`C:\Forever\Addons\wago-key.txt` (up to 256 characters). A successful import
-deletes the file. The key is saved locally by AddonForge; **Remove key** clears
-it. If Wago cannot be reached, it is saved as **set (not checked)**.
+For Wago add-ons, choose **Wago key** on the Add-ons page. Wago gives the key
+for add-on managers to its Patreon supporters: subscribe at
+[addons.wago.io/patreon](https://addons.wago.io/patreon), then copy the key it
+gives you. The API key on Wago's account page is for publishing add-ons and
+does not work here. Type the key, or choose **Read from file** after saving it
+as the first line of `C:\Forever\Addons\wago-key.txt` (up to 256 characters).
+A successful import deletes the file. The key is saved locally by AddonForge;
+**Remove key** clears it. If Wago cannot be reached, it is saved as **set (not
+checked)**. Without a key, Wago-only add-ons show **Wago key required**; all
+other sources work without one.
 
 If frame generation currently uses `fg=auto`, selecting it turns it off;
 selecting it again turns it on. Frame generation and the performance overlay

@@ -486,7 +486,7 @@ static void test_wago_menu(void)
     assert(menu.page == FOREVER_MENU_WAGO_KEY);
     forever_menu_render(&menu, text, sizeof(text));
     assert(strstr(text, "Type key") && strstr(text, "Read from file") && strstr(text, "Remove key"));
-    assert(strstr(text, "Get a free key at addons.wago.io/account/apikeys"));
+    assert(strstr(text, "Wago Patreon supporters get a key: addons.wago.io/patreon"));
     assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_WAGO_IME);
     menu.page = FOREVER_MENU_WAGO_KEY;
     forever_menu_move(&menu, 1);

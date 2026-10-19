@@ -937,7 +937,7 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
         snprintf(text, size,
                  " Wago key\n"
                  " ---------------------------------------------\n"
-                 " Get a free key at addons.wago.io/account/apikeys\n"
+                 " Wago Patreon supporters get a key: addons.wago.io/patreon\n"
                  "\n"
                  "%s Type key\n"
                  "%s Read from file\n"
