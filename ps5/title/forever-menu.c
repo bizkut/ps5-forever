@@ -543,6 +543,8 @@ int forever_menu_find_backspace(struct forever_menu_state *menu)
     return forever_menu_find_set_query(menu, query);
 }
 
+/* The keyboard already filtered live as it typed (main.c); a cancel keeps that
+ * query, and a confirm applies the final text. */
 void forever_menu_find_ime(struct forever_menu_state *menu, const char *text, int accepted)
 {
     if (accepted) forever_menu_find_set_query(menu, text);

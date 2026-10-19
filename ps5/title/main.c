@@ -1237,13 +1237,15 @@ static void desktop_frame(void)
 #ifdef PS5_TITLE_EMBEDDED
         if (menu_ime_command)
         {
+            char text[IME_MAX_TEXT * 4 + 1];
+            ime_copy_text(text, sizeof(text));
             if (edit.enter || edit.cancel)
-            {
-                char text[IME_MAX_TEXT * 4 + 1];
-                ime_copy_text(text, sizeof(text));
                 menu_ime_finish(text, edit.enter && !edit.cancel);
-                memset(text, 0, sizeof(text));
-            }
+            /* Search filters on each keystroke, as the inline panel reports it. */
+            else if (menu_ime_command == FOREVER_MENU_COMMAND_ADDONS_SEARCH_IME &&
+                     forever_menu_find_set_query(&menu, text))
+                render_menu();
+            memset(text, 0, sizeof(text));
         }
         else if (!forever_menu_is_open(&menu) && !input_draining)
 #endif

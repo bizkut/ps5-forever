@@ -214,9 +214,9 @@ static void test_find_search_and_github(void)
     forever_menu_render(&menu, text, sizeof(text));
     assert(strstr(text, "No add-ons match \"absent\""));
 
-    assert(forever_menu_find_set_query(&menu, "old"));
+    assert(forever_menu_find_set_query(&menu, "old")); /* the live keyboard query */
     forever_menu_find_ime(&menu, "replacement", 0);
-    assert(!strcmp(menu.addon_query, "old")); /* IME cancel keeps the old query. */
+    assert(!strcmp(menu.addon_query, "old")); /* IME cancel keeps the typed query. */
     forever_menu_find_ime(&menu, "be", 1);
     assert(!strcmp(menu.addon_query, "be") && !strcmp(menu.addon_rows[1].name, "Beta"));
     assert(forever_menu_find_backspace(&menu));

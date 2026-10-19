@@ -162,7 +162,7 @@ WoW channels; Left/Right switches Installed, Updates, Find and Starter packs.
 Cross opens or installs, Square updates the
 selected add-on, Triangle updates all, and R3 removes after a confirmation whose
 default is Cancel. In Find, type on a USB keyboard or choose **Search…** for the
-on-screen keyboard; **Add from GitHub link…** accepts `owner/repo` or its GitHub
+on-screen keyboard (results filter as you type); **Add from GitHub link…** accepts `owner/repo` or its GitHub
 URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
 and TukUI entries work without a key. Changes load the next time WoW starts, or
 after typing `/reload` in WoW.
