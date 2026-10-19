@@ -8,11 +8,11 @@ Battle.net: Retail, Classic, Classic Era, Anniversary, Forever, beta or PTR.
 The launcher detects channel folders rather than keeping a list of versions.
 The supplied settings use 4K output with HDR and frame generation.
 
-Classic beta and Forever have prior console testing. In a private all-versions
-build, Retail rendered through the direct-game selector at 90 fps. Classic Era
-currently crashes after display initialization and is under investigation.
-Other channels still need their own console tests; detection does not guarantee
-that every game build will render or work online.
+In 01.000.014, Retail, Classic, Classic Era, Anniversary and the Forever beta
+all start from Battle.net's **Play** button and were tested on a console.
+Other channels, such as PTR or new versions, are detected the same way but have
+not been tested; detection does not guarantee that every game build will render
+or work online.
 
 > [!NOTE]
 > This launcher is for World of Warcraft. Other Battle.net games are not
@@ -27,74 +27,48 @@ that every game build will render or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## Changes in 01.000.013
+## What's new in 01.000.014
 
-- The write broker now repairs stale root-owned permissions in
-  `/data/forever` and older install locations before it starts serving the
-  launcher. Repair is limited to fixed launcher-data roots and does not follow
-  symbolic links or change hard-linked files.
+- **Every World of Warcraft version:** Retail, Classic, Classic Era,
+  Anniversary, Forever, the betas and PTR start with Battle.net's **Play**
+  button. The launcher finds installed versions by their folders, so new
+  versions need no update.
+- **Add-ons for every version:** the Forever menu's add-on manager searches,
+  installs, updates and removes add-ons per WoW version, from GitHub,
+  WoWInterface, Tukui and Wago (with your own Wago key).
+- **Faster Battle.net downloads and Scan and Repair:** game data writes are
+  collected into large blocks, and Battle.net's updater reuses memory. On a test
+  console a Retail download ran at about 21 MB/s, against 12 MB/s on 01.000.013
+  and about 4 MB/s before 01.000.013, when the disk was the limit.
+- **Forever menu:** press **Options** over Battle.net for frame generation, HDR,
+  the performance overlay, Add-ons and reinstalling Battle.net. A hint shows the
+  button for ten seconds at every start.
+- Battle.net no longer crashes while the Add-ons page is open.
+- The mouse cursor hides after three seconds without movement in Battle.net.
+- All Windows system DLLs in `/data/forever` are kept identical to the app's
+  Wine files, and startup repairs folders under `/data/forever` that other tools
+  left unwritable.
 
-## Changes in 01.000.012
-
-- Fixes WoW freezing on the loading screen about half the time at start (a
-  startup crash): the app now keeps Wine's system DLLs in `/data/forever`
-  identical to the ones it loads. The first start after updating copies these
-  files once and takes about 2 minutes.
-- Battle.net no longer asks to update installed games on every start: Wine now
-  reports the folder permissions its Agent expects.
-- WoW and Battle.net show their own mouse cursors, including WoW's gauntlet and
-  Battle.net's text and link cursors, with the click point in the right place.
-- On most Battle.net pages, the controller's D-pad moves between buttons and
-  links; Triangle presses and Options goes back.
-- World of Warcraft Classic beta is the default game again; the final
-  WoW: Forever channel still works when selected in Battle.net.
-- Fixes the final channel's executable name (`_forever_/Wow.exe`), so its
-  recommended settings install and direct start finds it.
-- Faster parallel file writes: write-broker requests now use 16 connections
-  instead of one shared by all Windows threads. PS5 benchmark: 32 KiB writes from
-  4–8 threads improved from ~16 to ~30 MiB/s; single-thread writes are unchanged.
-  Real Battle.net download/update speedups have not yet been measured.
-- Installs recommended `Config.wtf` independently for final and beta without
-  replacing user settings.
-- Fixes WoW 1.60.1.70425 black screen/Error #132 before D3D12.
-- Reports a generic Wine/Linux system identity instead of Sony/PlayStation 5
-  branding while preserving real hardware capabilities.
-- Release logs no longer include raw keyboard records.
-- Fixes endless loading on Battle.net's password sign-in page.
-- If the Battle.net installer's Live download fails, the launcher tries the
-  direct versioned download link.
-- Startup creates missing `Program Files` and `Program Files (x86)` folders
-  without replacing existing user files.
-- Window surfaces are published only when drawing is flushed, fixing the
-  installer's crawling flicker.
-- Windows sees the real free disk space through the write broker. An older or
-  unavailable broker falls back to the previous fixed 16 GiB answer.
-- The drawn purple desktop background is restored.
-
-01.000.010 was not published: its build failed on a compiler warning in the new cursor code.
-
-The `01.000.007` workflow failed before publication because of stale import-policy
-entries. `01.000.008` removed only the obsolete `wineps5` `strlen`/`strstr`
-policy rows; the remaining import checks stay enabled.
-
-Native PS5 acceptance of this release is **pending**. Drive support remains
-limited to `C:` and `W:`; `Z:` and UNC/network-share paths are not supported.
+Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 
 ## What you need
 
 - A **jailbroken PS5** that can run homebrew apps. Tested on firmware 5.50.
 - **[ShadowMountPlus](https://github.com/drakmor/ShadowMountPlus)**, in a version that lets
   apps use `/data`. It installs the app; your games and settings live in `/data`.
-- About **55 GB of free space** on the console (WoW Classic is about 50 GB).
-- A **Battle.net account** with access to WoW Classic, with an **authenticator** enabled
-  (see [Signing in to Battle.net](#signing-in-to-battlenet)).
+- Enough **free space** on the console for the WoW versions you install: Classic
+  versions need about 50–55 GB; Retail is much larger.
+- A **Battle.net account** with access to the WoW version you want, with an
+  **authenticator** enabled (see [Signing in to Battle.net](#signing-in-to-battlenet)).
 - A **DualSense** controller. A USB keyboard also works.
 - An **FTP server** on the console, only to add your own `Lossless.dll` or
   change settings files by hand. FSR 3 frame generation needs neither.
 
 ## Install
 
-Once listed in the homebrew catalog, **ProsperoStore** can install and update it.
+**ProsperoStore** (recommended): install
+[ProsperoStore](https://github.com/darkxex/ProsperoStore/releases), then install
+**Forever Launcher** from it. ProsperoStore also installs updates.
 
 **By hand:**
 
@@ -111,9 +85,38 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 2. Forever Launcher downloads Blizzard's Battle.net installer. Follow its
    on-screen prompts to install Battle.net.
 3. Sign in to Battle.net (see below).
-4. Battle.net opens on **World of Warcraft Classic beta** (`WowB.exe` in
-   `_classic_beta_`) by default. Press **Install**, wait for the download (about 50 GB),
-   then press **Play**. The final Forever game also works if you select it in Battle.net.
+4. In Battle.net, choose the World of Warcraft version you want, press
+   **Install** and wait for the download, then press **Play**.
+
+### Faster: copy WoW from a PC
+
+If WoW is already installed on a PC, you can copy it to the console over your
+home network instead of downloading it again. Battle.net then only checks the
+files and downloads what is missing.
+
+1. Start Forever Launcher once and install Battle.net (steps 1–3 above), then
+   close the app.
+2. On the PC, find your `World of Warcraft` folder. On Windows it is usually
+   `C:\Program Files (x86)\World of Warcraft`. A Mac install
+   (`/Applications/World of Warcraft`) works too; Battle.net replaces the Mac
+   game files with the Windows ones.
+3. With an FTP program, copy the whole folder, including the hidden files
+   `.build.info` and `.product.db`, to the console as:
+
+   ```text
+   /data/forever/prefix/drive_c/Program Files (x86)/World of Warcraft
+   ```
+
+   Use a wired network if you can. Classic is about 50 GB; Retail is much larger.
+4. Start Forever Launcher. In Battle.net, select the game. If it shows
+   **Install**, use **Locate the game** below the button and choose
+   `C:\Program Files (x86)\World of Warcraft`.
+5. Battle.net checks the files and downloads only what is missing or newer.
+   For a full check, use the gear next to **Play** → **Scan and Repair**.
+
+Forever Launcher fixes the file permissions of copied folders at startup, so
+you normally don't need to change them by hand. If it still says it can't
+write to `/data/forever/prefix`, see [Troubleshooting](#troubleshooting).
 
 ## Signing in to Battle.net
 
@@ -131,10 +134,14 @@ Once listed in the homebrew catalog, **ProsperoStore** can install and update it
 | --- | --- |
 | **Options** | Opens or closes the Forever menu while Battle.net is open |
 | **F12** on a USB keyboard | Opens or closes the Forever menu while Battle.net is open |
-| **L2** | Escape / back in Battle.net |
+| **L2** | Escape in Battle.net (closes an open Battle.net dialog or dropdown) |
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).
+
+In Battle.net, the mouse cursor hides after three seconds without pointer
+movement. Move the pointer or click to show it again. A new visible cursor
+shape also restarts the timer; the game's or app's own hidden cursor stays hidden.
 
 ## Forever menu
 
@@ -148,23 +155,38 @@ close, or click with a mouse. The menu can:
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
 
+Each app start shows a ten-second hint for **Options** over Battle.net.
+
 Open **Add-ons** before pressing Play. L1/R1 cycles through detected installed
 WoW channels; Left/Right switches Installed, Updates, Find and Starter packs.
 Cross opens or installs, Square updates the
 selected add-on, Triangle updates all, and R3 removes after a confirmation whose
-default is Cancel. CurseForge-only rows say so and cannot be installed. GitHub,
-WoWInterface and TukUI entries work without a key. Changes load the next time
-WoW starts, or after typing `/reload` in WoW.
+default is Cancel. In Find, type on a USB keyboard or choose **Search…** for the
+on-screen keyboard; **Add from GitHub link…** accepts `owner/repo` or its GitHub
+URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
+and TukUI entries work without a key. Changes load the next time WoW starts, or
+after typing `/reload` in WoW.
+
+If Battle.net needs another web renderer process, Add-ons pauses and releases its
+helper process instead of blocking Battle.net. Close and reopen **Add-ons** to
+resume; the process limit and Battle.net's updater/game reserve stay unchanged.
 
 Add-ons are checked against the selected channel's product and client version,
 and go into that channel's own `Interface/AddOns` folder. Find and Starter packs
 cover Retail (including PTR/beta), Classic MoP, Anniversary, Classic Era and
 Forever. Find uses [layday's GitHub add-on catalogue](https://github.com/layday/github-wow-addon-catalogue),
-Forever's curated rows and compatible WoWInterface/Tukui entries. It retains
-the last good cache offline and includes a bundled GitHub snapshot for first
-use without a connection. **Add from GitHub link…** remains available. Unknown
-products say “Add-ons aren't supported for this WoW version yet”; they never
-receive another flavour's files.
+merged with Forever's curated rows and compatible WoWInterface/Tukui entries.
+The GitHub index is cached for 24 hours, secondary indexes for six hours;
+offline use keeps the last good cache or the build's bundled GitHub snapshot.
+**Add from GitHub link…** remains available. Unknown products say “Add-ons aren't
+supported for this WoW version yet”; they never receive another flavour's files.
+
+For Wago add-ons, choose **Wago key** on the Add-ons page. Get a free personal
+key at [addons.wago.io/account/apikeys](https://addons.wago.io/account/apikeys),
+then type it or choose **Read from file** after saving it as the first line of
+`C:\Forever\Addons\wago-key.txt` (up to 256 characters). A successful import
+deletes the file. The key is saved locally by AddonForge; **Remove key** clears
+it. If Wago cannot be reached, it is saved as **set (not checked)**.
 
 If frame generation currently uses `fg=auto`, selecting it turns it off;
 selecting it again turns it on. Frame generation and the performance overlay
@@ -249,13 +271,11 @@ Updating the app replaces only the app folder. Your games and settings stay.
 - **By hand:** close the app and replace only its `PPSA99030` app folder
   with the folder from the new zip. Do not delete `/data/forever`.
 
-The first start after an update synchronizes the app's Windows files into
-`/data/forever`, including Wine's system DLLs. This keeps the on-disk DLLs
-identical to the builtin images loaded by Wine; mismatched copies can crash
-protected games during startup. Only changed, missing or wrong-size managed
-files are copied. Existing native DLL replacements are preserved, while the
-app's managed DXVK/vkd3d graphics files take precedence. The first sync after
-updating to this version runs once and takes about 2 minutes.
+Every start checks the app's Windows files in `/data/forever`, including Wine's
+system DLLs, and repairs any that differ from the app's own copies, because
+mismatched copies can crash games during startup. The first start after an
+update checks every file once (about 15–20 seconds); later starts take less than
+a second.
 
 ## Uninstalling
 
@@ -272,12 +292,13 @@ delete `/data/forever` to remove Battle.net, WoW and your settings.
 
 ## Troubleshooting
 
-- **"Forever Launcher can't write to ..." (permission denied)**: 01.000.013
-  restarts the write broker once so it can repair the fixed launcher-data
-  trees, waits for it to become ready, then retries the failed step once. If
-  the message remains, close the app and, on a PC, use FTP to set
-  `/data/forever` and everything in it to permission `777`; then start Forever
-  Launcher again.
+- **"Forever Launcher can't write to ..." (permission denied)**: the app
+  restarts its file helper once to repair folder permissions under
+  `/data/forever`, then tries again. If the message remains, close the app and,
+  on a PC, use FTP to set `/data/forever` and everything in it to permission
+  `777`; then start Forever Launcher again.
+- **Drives:** only `C:` and `W:` work inside Wine; `Z:` and network shares are
+  not supported.
 - **"Forever Launcher cannot use /data" (error 2 or 30)**: `/data` is missing
   or read-only. Update ShadowMountPlus to a version that lets apps use `/data`.
 - **Battle.net sign-in fails**: use the email code and make sure an authenticator is
