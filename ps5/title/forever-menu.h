@@ -18,10 +18,12 @@
 #define FOREVER_MENU_LINE_FRAME_GENERATION 2
 #define FOREVER_MENU_LINE_HDR 3
 #define FOREVER_MENU_LINE_HUD 4
-#define FOREVER_MENU_LINE_ADDONS 6
-#define FOREVER_MENU_LINE_REINSTALL 8
-#define FOREVER_MENU_LINE_UNINSTALL 9
-#define FOREVER_MENU_LINE_CLOSE 11
+#define FOREVER_MENU_LINE_VOICE 5
+#define FOREVER_MENU_LINE_PROXIMITY_VOICE 6
+#define FOREVER_MENU_LINE_ADDONS 8
+#define FOREVER_MENU_LINE_REINSTALL 10
+#define FOREVER_MENU_LINE_UNINSTALL 11
+#define FOREVER_MENU_LINE_CLOSE 13
 #define FOREVER_MENU_LINE_CANCEL 7
 #define FOREVER_MENU_LINE_CONFIRM 8
 #define FOREVER_MENU_LINE_ADDON_TABS 2
@@ -46,6 +48,7 @@ enum forever_menu_item
     FOREVER_MENU_FRAME_GENERATION,
     FOREVER_MENU_HDR,
     FOREVER_MENU_HUD,
+    FOREVER_MENU_VOICE,
     FOREVER_MENU_ADDONS,
     FOREVER_MENU_REINSTALL,
     FOREVER_MENU_UNINSTALL,
@@ -58,6 +61,7 @@ enum forever_menu_command
     FOREVER_MENU_COMMAND_SET_FRAME_GENERATION,
     FOREVER_MENU_COMMAND_SET_HDR,
     FOREVER_MENU_COMMAND_SET_HUD,
+    FOREVER_MENU_COMMAND_SET_VOICE,
     FOREVER_MENU_COMMAND_REINSTALL,
     FOREVER_MENU_COMMAND_UNINSTALL,
     FOREVER_MENU_COMMAND_CLOSE,
@@ -155,6 +159,7 @@ struct forever_menu_values
     enum forever_frame_generation frame_generation;
     int hdr;
     int hud;
+    int voice;
 };
 
 struct forever_menu_result
@@ -172,6 +177,7 @@ struct forever_menu_state
     enum forever_menu_item selected;
     int confirmation_selected; /* zero is Cancel, deliberately the default */
     struct forever_menu_values values;
+    int voice_downloading;
     unsigned addon_channel;
     struct forever_addon_install addon_channels[FOREVER_ADDON_CHANNELS];
     size_t addon_channel_count;

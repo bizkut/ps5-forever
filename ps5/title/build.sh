@@ -114,6 +114,14 @@ cc -std=c11 -O2 -fPIC -c "$here/stubs/libSceIme_stub.c" -o "$work/obj/libSceIme_
 stubs+=("$work/libSceIme.so")
 extra_inputs=()
 extra_stubs=(--stub "$work/libSceIme.so")
+# Only the game parent captures audio; no microphone imports in the desktop
+# parent, child, or ordinary title probes.
+if [[ -n ${PS5_TITLE_RADV:-} ]]; then
+    cc -std=c11 -O2 -fPIC -c "$here/stubs/libSceAudioIn_stub.c" -o "$work/obj/libSceAudioIn_stub.o"
+    "$sdk/bin/prospero-lld" --shared -soname libSceAudioIn.prx -o "$work/libSceAudioIn.so" "$work/obj/libSceAudioIn_stub.o"
+    stubs+=("$work/libSceAudioIn.so")
+    extra_stubs+=(--stub "$work/libSceAudioIn.so")
+fi
 if [[ -n ${PS5_TITLE_RADV:-} ]]; then
     # Reuse RADV's native-title recipe; its imports never use kernel_web.
     source "$vulkan/tools/radv-link.sh"
@@ -124,6 +132,30 @@ if [[ -n ${PS5_TITLE_RADV:-} ]]; then
     "$sdk/bin/prospero-lld" --shared -soname libSceAgcDriver.prx -o "$work/libSceAgcDriver.so" "$work/obj/libSceAgcDriver_stub.o"
     stubs+=("$work/libSceAgcDriver.so")
     extra_stubs+=(--stub "$work/libSceAgcDriver.so")
+fi
+if [[ -n ${PS5_TITLE_RADV:-} ]]; then
+    voice=${PS5_WHISPER_INSTALL:-$here/../build/whisper}
+    [[ -f $voice/lib/libwhisper.a ]] || {
+        echo "Whisper archives missing: run bash ps5/build-whisper.sh" >&2; exit 2;
+    }
+    cc -std=c++17 -O2 -g -Wall -Wextra -Werror -stdlib=libc++ -fexceptions -fcxx-exceptions -frtti \
+        -ffunction-sections -fdata-sections -DGGML_MAX_NAME=160 \
+        -I "$voice/include" -c "$here/voice.cpp" -o "$work/obj/voice.o"
+    objs+=("$work/obj/voice.o")
+    for library in whisper ggml ggml-base ggml-cpu ggml-vulkan; do
+        archives+=("$voice/lib/lib$library.a")
+    done
+    # Vulkan-Hpp's dispatcher owns GGML's instance/device; no WoW WSI hooks.
+    flags+=(--defsym=vkGetInstanceProcAddr=vk_icdGetInstanceProcAddr
+        --defsym=vkGetDeviceProcAddr=vk_common_GetDeviceProcAddr
+        --defsym=vkCmdCopyBuffer=vk_common_CmdCopyBuffer
+        --defsym=vkGetPhysicalDeviceFeatures2=vk_common_GetPhysicalDeviceFeatures2)
+    # GGML's optional crash backtrace may not spawn a debugger in a title.
+    flags+=(--defsym=execlp=pw_native_fail_minus_one)
+    flags+=(--defsym=fork=forever_voice_fork --defsym=pathconf=forever_voice_pathconf)
+    # Keep these reviewed fail-closed adapters local, never system providers.
+    printf '{ local: fork; pathconf; execlp; };\n' > "$work/voice-local.map"
+    flags+=(--version-script "$work/voice-local.map")
 fi
 "$sdk/bin/prospero-lld" -T "$vulkan/tooling/psbc/ps5-pie-unwind.ld" -L "$native" --eh-frame-hdr \
     "${flags[@]}" --version-script "$map" --version-script "$native/app-symbols.map" \

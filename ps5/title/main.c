@@ -50,6 +50,7 @@ static char pending_menu_status[FOREVER_MENU_STATUS_BYTES];
 static struct forever_addon_snapshot pending_addon_snapshot;
 static char pending_addon_error[FOREVER_MENU_STATUS_BYTES];
 static int pending_menu_status_kind, pending_addon_kind, input_draining;
+static int pending_voice_enabled, pending_voice_busy;
 static uint8_t physical_keys[256], forwarded_keys[256];
 static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
 static enum forever_menu_command menu_ime_command;
@@ -72,6 +73,7 @@ void pw_elf_sha256(const void *, size_t, uint8_t[32]);
 void io_log(const char *, ...) __attribute__((format(printf, 1, 2)));
 #endif
 int forever_title_menu_action(enum forever_menu_command, int);
+void forever_title_voice_cancel(void);
 #endif
 
 /* Producers never touch compositor state; the desktop consumes the copy. */
@@ -90,6 +92,16 @@ void title_desktop_menu_status(const char *text, int notice)
     pthread_mutex_lock(&message_mutex);
     snprintf(pending_menu_status, sizeof(pending_menu_status), "%s", text ? text : "");
     pending_menu_status_kind = notice ? 2 : 1;
+    pthread_mutex_unlock(&message_mutex);
+}
+
+void title_desktop_voice_status(const char *text, int enabled, int busy)
+{
+    pthread_mutex_lock(&message_mutex);
+    snprintf(pending_menu_status, sizeof(pending_menu_status), "%s", text ? text : "");
+    pending_menu_status_kind = 3;
+    pending_voice_enabled = enabled;
+    pending_voice_busy = busy;
     pthread_mutex_unlock(&message_mutex);
 }
 
@@ -858,6 +870,10 @@ static void release_forwarded_input(void)
 
 static void close_menu(void)
 {
+    forever_title_voice_cancel();
+    pthread_mutex_lock(&message_mutex);
+    if (pending_menu_status_kind == 3) pending_menu_status_kind = 0;
+    pthread_mutex_unlock(&message_mutex);
     if (menu.page == FOREVER_MENU_ADDON_PAGE || menu.page == FOREVER_MENU_ADDON_CONFIRM ||
         menu.page == FOREVER_MENU_WAGO_KEY)
         forever_title_addons_action(FOREVER_MENU_COMMAND_ADDONS_CLOSE,
@@ -877,7 +893,7 @@ static void close_menu(void)
 
 static void open_menu(void)
 {
-    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0};
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 0};
     int error;
     compositor_hint_stop();
     menu_hint_started = 1;
@@ -987,7 +1003,12 @@ static void apply_menu_result(struct forever_menu_result result)
     io_log("menu diag action command=%d enabled=%d result=%d",
            result.command, result.enabled, error);
 #endif
-    if (!error) forever_menu_commit(&menu, result.command, result.enabled);
+    if (result.command == FOREVER_MENU_COMMAND_SET_VOICE && error > 0)
+    {
+        menu.voice_downloading = 1;
+        forever_menu_status(&menu, "Checking voice model\xe2\x80\xa6");
+    }
+    else if (!error) forever_menu_commit(&menu, result.command, result.enabled);
     else
     {
         snprintf(status, sizeof(status), "Could not save the setting (error %d).", -error);
@@ -1198,7 +1219,16 @@ static void desktop_frame(void)
 #ifdef PS5_TITLE_EMBEDDED
     if (pending_menu_status_kind)
     {
-        if (pending_menu_status_kind == 2) forever_menu_notice(&menu, pending_menu_status);
+        if (pending_menu_status_kind == 3)
+        {
+            if (forever_menu_is_open(&menu))
+            {
+                forever_menu_commit(&menu, FOREVER_MENU_COMMAND_SET_VOICE, pending_voice_enabled);
+                menu.voice_downloading = pending_voice_busy;
+                forever_menu_status(&menu, pending_menu_status);
+            }
+        }
+        else if (pending_menu_status_kind == 2) forever_menu_notice(&menu, pending_menu_status);
         else forever_menu_progress(&menu, pending_menu_status);
         pending_menu_status_kind = 0;
         render_menu();
@@ -1329,6 +1359,7 @@ int title_desktop_start(void)
 void title_desktop_stop(void)
 {
     if (!desktop_started) return;
+    forever_title_voice_cancel();
     atomic_store(&desktop_running, 0);
     pthread_join(desktop_thread, NULL);
     compositor_reset();

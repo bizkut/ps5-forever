@@ -1,0 +1,36 @@
+--- a/src/ggml-backend.cpp
++++ b/src/ggml-backend.cpp
+@@ -2600,6 +2600,11 @@
+     GGML_UNUSED(buft);
+ }
+ 
++// Keep CPU staging allocations within the PS5 title's bounded heap blocks.
++static size_t ggml_backend_cpu_buffer_type_get_max_size(ggml_backend_buffer_type_t) {
++    return 192ull * 1024ull * 1024ull;
++}
++
+ static ggml_backend_buffer_t ggml_backend_cpu_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft, size_t size) {
+     void * data = ggml_aligned_malloc(size);
+ 
+@@ -2630,7 +2635,7 @@
+             /* .alloc_buffer        = */ ggml_backend_cpu_buffer_type_alloc_buffer,
+             /* .alloc_buffer_n      = */ NULL,
+             /* .get_alignment       = */ ggml_backend_cpu_buffer_type_get_alignment,
+-            /* .get_max_size        = */ NULL, // defaults to SIZE_MAX
++            /* .get_max_size        = */ ggml_backend_cpu_buffer_type_get_max_size,
+             /* .get_alloc_size      = */ NULL, // defaults to ggml_nbytes
+             /* .get_alloc_size_n    = */ NULL,
+             /* .is_host             = */ ggml_backend_cpu_buffer_type_is_host,
+--- a/src/ggml-vulkan/ggml-vulkan.cpp
++++ b/src/ggml-vulkan/ggml-vulkan.cpp
+@@ -4215,8 +4215,8 @@
+         if (GGML_VK_SUBALLOCATION_BLOCK_SIZE != nullptr) {
+             device->suballocation_block_size = std::stoull(GGML_VK_SUBALLOCATION_BLOCK_SIZE);
+         } else {
+-            // Limit batching of allocations to 1GB by default to avoid fragmentation issues
+-            device->suballocation_block_size = 1024*1024*1024;
++            // Keep weight allocation batches below PS5 large-allocation failures.
++            device->suballocation_block_size = 128*1024*1024;
+         }
+         device->suballocation_block_size = std::min(device->suballocation_block_size, device->max_memory_allocation_size);
+ 

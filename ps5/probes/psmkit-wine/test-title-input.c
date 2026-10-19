@@ -178,6 +178,7 @@ static void check_raw_source(unsigned slot, unsigned source)
     assert(!input_take_keyboard_raw_diagnostic(slot, source, &ordinal, &handle, (uint8_t *)&raw));
 }
 
+
 int main(void)
 {
     int status = -1;

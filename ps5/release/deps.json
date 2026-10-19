@@ -164,6 +164,18 @@
       "sha256": "8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da"
     },
     {
+      "name": "whisper.cpp-1.9.5",
+      "commit": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+      "url": "https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/d1be6fde11ac6e0407606b4e42fe72d34add8037",
+      "sha256": "645445da884df6dbd52b30f82d7be7c01d1767c938714e477e786b88d529e9f4"
+    },
+    {
+      "name": "ggml-0.26.0",
+      "commit": "d7cb574130e6f01ad25b3289685489200febcd74",
+      "url": "https://codeload.github.com/ggml-org/ggml/tar.gz/d7cb574130e6f01ad25b3289685489200febcd74",
+      "sha256": "6261129c119e648e4574a59e125f2d58953ecf32c5d0940f776a11c8f4082a21"
+    },
+    {
       "name": "freetype-2.14.3",
       "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz",
       "sha256": "36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f"

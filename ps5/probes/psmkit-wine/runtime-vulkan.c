@@ -14,6 +14,7 @@
 #include <wine/ps5_suspend.h>
 #include <vulkan/vulkan.h>
 #include "../localproc/psmkit-io.h"
+#include "../../title/voice-overlay-vulkan.h"
 
 extern PFN_vkVoidFunction vk_icdGetInstanceProcAddr(VkInstance, const char *);
 extern PFN_vkVoidFunction vk_common_GetDeviceProcAddr(VkDevice, const char *);
@@ -24,6 +25,7 @@ unsigned pw_title_get_gamepad(unsigned, struct wine_ps5_gamepad_state *, int);
 unsigned pw_title_set_gamepad_vibration(unsigned, unsigned, unsigned);
 void pw_title_enable_gamepad(int);
 void *pw_title_profile_proc(const char *);
+unsigned pw_title_voice_overlay(void);
 static VkResult title_create_instance(const VkInstanceCreateInfo *info,
                                      const VkAllocationCallbacks *allocator, VkInstance *instance)
 {
@@ -43,7 +45,11 @@ static VkResult title_create_swapchain(VkDevice device, const VkSwapchainCreateI
                                        const VkAllocationCallbacks *allocator, VkSwapchainKHR *swapchain)
 {
     PFN_vkCreateSwapchainKHR create = (PFN_vkCreateSwapchainKHR)vk_common_GetDeviceProcAddr(device, "vkCreateSwapchainKHR");
+    VkSwapchainCreateInfoKHR native = *info;
+    native.imageUsage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    info = &native;
     VkResult result = create(device, info, allocator, swapchain);
+    if (result == VK_SUCCESS) voice_overlay_vk_swapchain(device, info, *swapchain);
     if (result < 0)
     {
         char chain[96] = "";
@@ -179,7 +185,8 @@ static int title_compare_u32(const void *a, const void *b)
 
 static VkResult title_queue_present(VkQueue queue, const VkPresentInfoKHR *info)
 {
-    VkResult result = title_real_present(queue, info);
+    unsigned session = pw_title_voice_overlay();
+    VkResult result = voice_overlay_vk_present(queue, info, title_real_present, session);
     int64_t now = title_now_ns();
     atomic_store_explicit(&title_present_completed_ns, now, memory_order_relaxed);
     atomic_store_explicit(&title_hang_reported, 0, memory_order_relaxed);
@@ -207,6 +214,8 @@ static VkResult title_queue_present(VkQueue queue, const VkPresentInfoKHR *info)
 
 static PFN_vkVoidFunction title_get_device_proc(VkDevice device, const char *name)
 {
+    PFN_vkVoidFunction overlay = voice_overlay_vk_device_proc(name);
+    if (overlay && vk_common_GetDeviceProcAddr(device, name)) return overlay;
     if (!strcmp(name, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)title_create_swapchain;
     if (!strcmp(name, "vkQueuePresentKHR"))
     {
@@ -220,6 +229,8 @@ static PFN_vkVoidFunction title_get_device_proc(VkDevice device, const char *nam
 
 static PFN_vkVoidFunction title_get_instance_proc(VkInstance instance, const char *name)
 {
+    PFN_vkVoidFunction overlay = voice_overlay_vk_instance_proc(instance, name);
+    if (overlay) return overlay;
     if (!strcmp(name, "vkCreateInstance")) return (PFN_vkVoidFunction)title_create_instance;
     if (!strcmp(name, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)title_get_device_proc;
     if (!strcmp(name, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)title_create_swapchain;

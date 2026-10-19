@@ -9,11 +9,14 @@
 #include <unistd.h>
 static int test_clock_gettime(clockid_t clock, struct timespec *now);
 static int test_usleep(useconds_t usecs);
+static FILE *test_voice_fopen(const char *, const char *);
+#define fopen test_voice_fopen
 #define clock_gettime test_clock_gettime
 #define usleep test_usleep
 #include "runtime-input.c"
 #undef clock_gettime
 #undef usleep
+#undef fopen
 
 static int osk_calls, osk_open, vibration_calls, vibration_result;
 static int open_diagnostic_pending, raw_diagnostic_pending, raw_diagnostic_calls;
@@ -23,6 +26,25 @@ static int privilege_calls, phase_switch_calls;
 static uint8_t motors[2];
 static char logged_line[512];
 static char logged_output[8192];
+static const char *voice_test_setting;
+static unsigned voice_setting_reads, voice_captures, voice_starts, voice_finishes, voice_discards;
+static unsigned voice_warmup_requests;
+static int voice_result_ready;
+static struct pw_voice_result voice_result;
+static char ime_initial_text[VOICE_TEXT_BYTES];
+static int ime_show_result;
+static int voice_fopen_errno = ENOENT;
+static unsigned voice_setting_line_count, voice_hold_line_count;
+static FILE *test_voice_fopen(const char *path, const char *mode)
+{
+    assert(!strcmp(path, "/data/forever/prefix/drive_c/wineps5-voice.txt") && !strcmp(mode, "r"));
+    voice_setting_reads++;
+    if (!voice_test_setting) { errno = voice_fopen_errno; return NULL; }
+    FILE *file = tmpfile();
+    assert(file && fputs(voice_test_setting, file) >= 0);
+    rewind(file);
+    return file;
+}
 static int test_clock_gettime(clockid_t clock, struct timespec *now)
 {
     if (!testing_poll) return clock_gettime(clock, now);
@@ -92,12 +114,38 @@ int ime_start(int id) { assert(id == 1); osk_calls++; return 0; }
 int ime_resume(int id) { assert(id == 1); osk_calls++; osk_open = 1; return 0; }
 int ime_is_open(void) { return osk_open; }
 int ime_poll(struct ime_edit *edit) { (void)edit; return 0; }
+int ime_show_text(int id, const char *text)
+{
+    assert(id == 1);
+    snprintf(ime_initial_text, sizeof(ime_initial_text), "%s", text);
+    osk_calls++;
+    if (ime_show_result) return ime_show_result;
+    osk_open = 1; return 0;
+}
+size_t ime_copy_text(char *text, size_t size)
+{
+    int length = snprintf(text, size, "%s", ime_initial_text);
+    assert(length >= 0 && (size_t)length < size);
+    return length;
+}
+void pw_voice_capture(int id) { assert(id == 1); voice_captures++; }
+void pw_voice_start(void) { voice_starts++; }
+void pw_voice_finish(void) { voice_finishes++; }
+void pw_voice_discard(void) { voice_discards++; }
+void voice_overlay_vk_request_warmup(void) { voice_warmup_requests++; }
+int pw_voice_poll(struct pw_voice_result *out)
+{
+    if (!voice_result_ready) return 0;
+    *out = voice_result; voice_result_ready = 0; return 1;
+}
 void io_log(const char *format, ...)
 {
     va_list args;
     va_start(args, format);
     vsnprintf(logged_line, sizeof(logged_line), format, args);
     va_end(args);
+    if (strstr(logged_line, "voice setting path=") == logged_line) voice_setting_line_count++;
+    if (strstr(logged_line, "voice hold enabled=") == logged_line) voice_hold_line_count++;
     if (testing_poll)
     {
         size_t length = strlen(logged_output);
@@ -296,6 +344,203 @@ static void test_cursor_shapes(void)
         assert(shown_image[0] == (0xff000000u | 4095));
     }
     cursor_image = NULL;
+}
+
+static void expect_voice(unsigned flags, unsigned erase, const char *value)
+{
+    union ps5_title_input event;
+    uint16_t expected[VOICE_TEXT_UNITS];
+    unsigned length = voice_utf16(value, expected, VOICE_TEXT_UNITS);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    assert(event.header.type == PS5_DESKTOP_VOICE_EDIT);
+    struct ps5_desktop_voice_edit *edit = (void *)&event;
+    assert(edit->flags == flags && edit->erase == erase && edit->length == length);
+    assert(!memcmp(edit->text, expected, length * sizeof(*expected)));
+}
+static void test_voice_routing(void)
+{
+    struct input_event pad = {.kind = INPUT_PAD, .connected = 1, .touches = 1,
+        .touch_x = 100, .touch_y = 100, .code = PAD_TOUCHPAD,
+        .lx = 128, .ly = 128, .rx = 128, .ry = 128};
+    union ps5_title_input event;
+    uint64_t now = input_now_us() + 400000000;
+    while (pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0)) {}
+    pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+    user = 1;
+    voice_hold = (struct voice_hold){0};
+    voice_pending = (struct voice_pending){0};
+    voice_setting_logged = 0;
+    voice_setting_line_count = voice_hold_line_count = 0;
+    voice_test_setting = "voice=on";
+    unsigned reads = voice_setting_reads, captures = voice_captures, discards = voice_discards;
+    unsigned warmups = voice_warmup_requests;
+    route_pad(&pad, now, NULL);
+    assert(voice_captures == captures + 1 && voice_setting_reads == reads + 1);
+    assert(voice_warmup_requests == warmups + 1); /* Warm during deferral, not at visibility. */
+    assert(!pw_title_voice_overlay()); /* Deferring a press is not recording. */
+    assert(voice_setting_line_count == 1 && voice_setting_rc == 0);
+    assert(strstr(logged_line, "voice setting path=/data/forever/prefix/drive_c/wineps5-voice.txt rc=0"));
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    pad.touch_x = 180; /* Still held: the complete 80-unit roll is deferred. */
+    route_pad(&pad, now + 399000, NULL);
+    assert(!voice_starts);
+    assert(!pw_title_voice_overlay());
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    pad.code = 0; pad.touches = 0; pad.touch_x = pad.touch_y = 0;
+    route_pad(&pad, now + 399000, NULL);
+    assert(voice_discards == discards + 1 && !voice_finishes);
+    assert(voice_hold_line_count == 1);
+    assert(!strcmp(logged_line, "voice hold enabled=1 result=click held_ms=399 max_move=80 setting_rc=0"));
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.mouse.down);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+    pad.code = PAD_TOUCHPAD; pad.touches = 1; pad.touch_x = pad.touch_y = 100;
+    route_pad(&pad, now + 500000, NULL);
+    route_pad(&pad, now + 900000, NULL);
+    assert(voice_starts == 1);
+    unsigned overlay_session = pw_title_voice_overlay();
+    assert(overlay_session);
+    voice_tick(now + 900000);
+    expect_voice(PS5_DESKTOP_VOICE_ENTER_BEFORE, 0, "");
+    pad.touch_x = 1800; pad.touch_y = 900;
+    route_pad(&pad, now + 950000, NULL);
+    assert(voice_hold.phase == VOICE_RECORDING);
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    pad.touch_id++; pad.touches = 2;
+    route_pad(&pad, now + 951000, NULL);
+    assert(voice_hold.phase == VOICE_RECORDING);
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    pad.touch_id++; pad.touches = 1;
+    route_pad(&pad, now + 952000, NULL);
+    assert(voice_hold.phase == VOICE_RECORDING);
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    assert(pw_title_voice_overlay() == overlay_session); /* Recording stays visible despite motion. */
+    assert(voice_setting_line_count == 1); /* First-press path log is lifetime-once. */
+    voice_result = (struct pw_voice_result){.text = "hello"};
+    voice_result_ready = 1; voice_tick(now + 901000);
+    expect_voice(0, 0, "hello");
+    /* Saturation and lock contention retain the desired edit and mirror.
+     * Hardware queue overflow/reset cannot evict any admitted voice batch. */
+    union ps5_title_input empty;
+    struct ps5_desktop_voice_edit *batch = (void *)&empty;
+    memset(batch, 0, sizeof(*batch));
+    batch->header = (struct ps5_desktop_header){PS5_DESKTOP_VOICE_EDIT, sizeof(*batch)};
+    for (unsigned i = 0; i < VOICE_QUEUE_SIZE; i++) assert(voice_admit(batch));
+    voice_result = (struct pw_voice_result){.text = "helloworld"};
+    voice_result_ready = 1; voice_tick(now + 902000);
+    assert(voice_dirty && voice_typed_length == 5 && voice_count == VOICE_QUEUE_SIZE);
+    struct ps5_desktop_key hardware = {{PS5_DESKTOP_KEY, sizeof(hardware)}, 4, 1, 0};
+    for (unsigned i = 0; i <= INPUT_QUEUE_SIZE; i++) enqueue(&hardware);
+    assert(voice_count == VOICE_QUEUE_SIZE);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.header.type == PS5_TITLE_INPUT_RESET);
+    expect_voice(0, 0, "");
+    pthread_mutex_lock(&input_lock);
+    voice_tick(now + 903000);
+    assert(voice_dirty && voice_typed_length == 5);
+    pthread_mutex_unlock(&input_lock);
+    voice_tick(now + 904000);
+    assert(!voice_dirty && voice_typed_length == 10);
+    for (unsigned i = 1; i < VOICE_QUEUE_SIZE; i++) expect_voice(0, 0, "");
+    expect_voice(0, 0, "world");
+    while (pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0)) {}
+    pad.code = 0; route_pad(&pad, now + 1000000, NULL);
+    assert(voice_finishes == 1);
+    assert(!pw_title_voice_overlay()); /* Release hides before final text admission. */
+    voice_result = (struct pw_voice_result){.final = 1, .text = "help"};
+    voice_result_ready = 1; voice_tick(now + 1001000);
+    expect_voice(0, 7, "p");
+    assert(voice_pending.active);
+    assert(!pw_title_voice_overlay()); /* Pending text is never a visible cue. */
+    pad.code = PAD_R1; route_pad(&pad, now + 1002000, NULL);
+    voice_tick(now + 1002000);
+    expect_voice(PS5_DESKTOP_VOICE_ESCAPE_BEFORE | PS5_DESKTOP_VOICE_ENTER_BEFORE, 0, "/s help");
+    ime_show_result = -1;
+    pad.code = PAD_SQUARE; route_pad(&pad, now + 1003000, NULL);
+    voice_tick(now + 1003000);
+    assert(!voice_ime && !osk_open && voice_pending.active && voice_pending.prefix == 1);
+    pad.code = 0; route_pad(&pad, now + 1003100, NULL);
+    ime_show_result = 0;
+    pad.code = PAD_SQUARE; route_pad(&pad, now + 1003200, NULL);
+    voice_tick(now + 1003200);
+    assert(voice_ime && osk_open && !strcmp(ime_initial_text, "/s help"));
+    struct ime_edit capacity_edit = {.length = VOICE_TEXT_UNITS};
+    memset(ime_initial_text, 'a', VOICE_TEXT_UNITS);
+    assert(!pw_title_voice_overlay());
+    ime_initial_text[VOICE_TEXT_UNITS] = 0;
+    route_ime(&capacity_edit); voice_tick(now + 1003300);
+    expect_voice(0, 7, ime_initial_text);
+    assert(voice_typed_length == VOICE_TEXT_UNITS);
+    memcpy(ime_initial_text + VOICE_TEXT_UNITS - 2, "\xf0\x9f\x98\x80", 5);
+    route_ime(&capacity_edit); voice_tick(now + 1003400);
+    expect_voice(0, 2, "\xf0\x9f\x98\x80");
+    assert(voice_typed_length == VOICE_TEXT_UNITS && voice_typed[511] == 0xde00);
+    strcpy(ime_initial_text, "/s help");
+    route_ime(&capacity_edit); voice_tick(now + 1003500);
+    expect_voice(0, 511, "/s help");
+    strcpy(ime_initial_text, "/s hel!");
+    struct ime_edit edit = {.erase = 1, .length = 1, .text = {'!'}, .enter = 1};
+    route_ime(&edit); voice_tick(now + 1004000);
+    expect_voice(PS5_DESKTOP_VOICE_ENTER_AFTER, 1, "!");
+    assert(!voice_chat_open && !voice_ime);
+    osk_open = 0;
+    pad.code = 0; route_pad(&pad, now + 1100000, NULL);
+    pad.code = PAD_TOUCHPAD; route_pad(&pad, now + 1200000, NULL);
+    route_pad(&pad, now + 1600000, NULL); voice_tick(now + 1600000);
+    expect_voice(PS5_DESKTOP_VOICE_ENTER_BEFORE, 0, "");
+    voice_result = (struct pw_voice_result){.final = 1, .muted = 1};
+    voice_result_ready = 1; voice_tick(now + 1601000);
+    expect_voice(PS5_DESKTOP_VOICE_ESCAPE_AFTER, 0, "");
+    assert(!voice_pending.active && !voice_chat_open && voice_pulses == 3);
+    assert(!pw_title_voice_overlay()); /* A failed/muted session does not leave the cue visible. */
+    pad.code = 0; route_pad(&pad, now + 1700000, NULL);
+    /* A physical key takes over a live draft: no stale voice mutation or
+     * Escape is allowed to clobber the user's text, including queued edits. */
+    pad.code = PAD_TOUCHPAD; route_pad(&pad, now + 1800000, NULL);
+    route_pad(&pad, now + 2200000, NULL); voice_tick(now + 2200000);
+    expect_voice(PS5_DESKTOP_VOICE_ENTER_BEFORE, 0, "");
+    voice_result = (struct pw_voice_result){.text = "hello"};
+    voice_result_ready = 1; voice_tick(now + 2201000);
+    assert(voice_count == 1);
+    struct input_event key = {.kind = INPUT_KEY, .code = 0x2a, .down = 1};
+    on_input(&key, NULL);
+    assert(!voice_chat_open && !voice_pending.active);
+    assert(!pw_title_voice_overlay()); /* Physical keyboard takeover hides immediately. */
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    assert(event.header.type == PS5_DESKTOP_KEY && event.key.usage == 0x2a);
+    assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    key.down = 0; on_input(&key, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.key.down);
+    pad.code = 0; route_pad(&pad, now + 2300000, NULL);
+    /* Crossing the movement threshold replays down THEN all deferred motion. */
+    pad.touch_x = pad.touch_y = 100; pad.touch_id = 7;
+    pad.code = PAD_TOUCHPAD; route_pad(&pad, now + 2400000, NULL);
+    pad.touch_x = 181; route_pad(&pad, now + 2500000, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.mouse.down);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_MOVE | PS5_TITLE_MOUSE_RELATIVE) && event.mouse.x == 162);
+    pad.code = 0; route_pad(&pad, now + 2501000, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+    assert(!strcmp(logged_line, "voice hold enabled=1 result=drag held_ms=101 max_move=81 setting_rc=0"));
+    /* Voice disabled preserves the raw touchpad click even with IME open. */
+    voice_test_setting = "voice=off"; osk_open = 1;
+    pad.code = PAD_TOUCHPAD; route_pad(&pad, now + 2600000, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.mouse.down);
+    pad.code = 0; route_pad(&pad, now + 2601000, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+    osk_open = 0; voice_test_setting = NULL;
+    /* The errno diagnostics distinguish a game-parent open failure from
+     * a valid voice=off file, without exposing any setting file content. */
+    voice_setting_logged = 0;
+    voice_fopen_errno = EACCES;
+    pad.code = PAD_TOUCHPAD; route_pad(&pad, now + 2700000, NULL);
+    assert(voice_setting_rc == EACCES && voice_setting_line_count == 2);
+    assert(strstr(logged_line, "voice setting path="));
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && event.mouse.down);
+    pad.code = 0; route_pad(&pad, now + 2701000, NULL);
+    assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0) && !event.mouse.down);
+    assert(strstr(logged_line, "voice hold enabled=0 result=passthrough held_ms=1 max_move=0 setting_rc="));
+    int setting_rc = -1;
+    voice_fopen_errno = ENOENT;
+    assert(!voice_enabled(&setting_rc) && setting_rc == ENOENT);
 }
 
 int main(void)
@@ -637,6 +882,7 @@ int main(void)
         }
     }
     test_cursor_shapes();
+    test_voice_routing();
     puts("runtime GPU input queue/routing/XInput/IME: PASS");
     return 0;
 }

@@ -1,6 +1,7 @@
 /* As WoWPS5 does, read devices on a 4 ms native worker and send hardware
  * input only from a Wine message-pump thread. No compositor is linked here. */
 #include <stdio.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdatomic.h>
@@ -16,6 +17,7 @@
 #include "../../title/pointer.h"
 #include "../../title/ime.h"
 #include "../../title/cursor-arrow.h"
+#include "../../title/voice.h"
 #include "../localproc/psmkit-io.h"
 
 #define INPUT_QUEUE_SIZE 256
@@ -178,6 +180,12 @@ static void cursor_update(uint64_t now_us)
 static pthread_mutex_t input_lock = PTHREAD_MUTEX_INITIALIZER;
 static union ps5_title_input queue[INPUT_QUEUE_SIZE];
 static unsigned first, count;
+#define VOICE_QUEUE_SIZE 64
+/* Voice edits are transactions, not hardware state. Never evict them when
+ * the best-effort device queue resets: retry admission instead of losing text. */
+static union ps5_title_input voice_queue[VOICE_QUEUE_SIZE];
+static unsigned voice_first, voice_count;
+static atomic_int voice_queue_reset;
 static int reset_pending, user;
 static int cursor_x = PS5_DESKTOP_WIDTH / 2, cursor_y = PS5_DESKTOP_HEIGHT / 2;
 static int usb_mouse;
@@ -186,6 +194,14 @@ static atomic_int reset_requested;
 /* Counts for the 10 s "title input" klog line: events queued by the device
  * thread, taken by Wine, and resets (overflow or contention). */
 static atomic_uint stat_queued, stat_read, stat_resets;
+static atomic_uint voice_overlay_recording;
+static unsigned voice_overlay_sequence;
+
+/* Zero is the entire hidden fast path on the native present thread. */
+unsigned pw_title_voice_overlay(void)
+{
+    return atomic_load_explicit(&voice_overlay_recording, memory_order_relaxed);
+}
 
 /* As WoWPS5 does, retain a real XInput snapshot beside the desktop queue.
  * This separate lock never covers queue/Wine calls. Only GetState refreshes
@@ -337,12 +353,24 @@ static void enqueue(const void *message)
     pthread_mutex_unlock(&input_lock);
 }
 
+static int voice_admit(const struct ps5_desktop_voice_edit *edit)
+{
+    if (pthread_mutex_trylock(&input_lock)) return 0;
+    if (atomic_exchange(&voice_queue_reset, 0)) voice_first = voice_count = 0;
+    if (voice_count == VOICE_QUEUE_SIZE) { pthread_mutex_unlock(&input_lock); return 0; }
+    memcpy(&voice_queue[(voice_first + voice_count++) % VOICE_QUEUE_SIZE], edit, edit->header.size);
+    atomic_fetch_add(&stat_queued, 1);
+    pthread_mutex_unlock(&input_lock);
+    return 1;
+}
+
 int pw_title_read_input(union ps5_title_input *out, unsigned capacity,
                         int x, int y, int width, int height)
 {
     int result = 0;
     if (capacity < sizeof(*out)) return 0;
     pthread_mutex_lock(&input_lock);
+    if (atomic_exchange(&voice_queue_reset, 0)) voice_first = voice_count = 0;
     if (atomic_exchange(&reset_requested, 0))
     {
         first = count = 0;
@@ -364,6 +392,14 @@ int pw_title_read_input(union ps5_title_input *out, unsigned capacity,
         out->header = (struct ps5_desktop_header){PS5_TITLE_INPUT_RESET, sizeof(out->header)};
         reset_pending = 0;
         result = 1;
+    }
+    else if (voice_count)
+    {
+        memcpy(out, &voice_queue[voice_first], voice_queue[voice_first].header.size);
+        voice_first = (voice_first + 1) % VOICE_QUEUE_SIZE;
+        voice_count--;
+        result = 1;
+        atomic_fetch_add(&stat_read, 1);
     }
     else if (count)
     {
@@ -526,16 +562,261 @@ static unsigned gamepad_chord(unsigned raw, uint64_t now)
     return (raw & ~chord_pending & ~chord_swallowed) | chord_taps;
 }
 
+static struct voice_hold voice_hold;
+static struct voice_pending voice_pending;
+static uint16_t voice_typed[VOICE_TEXT_UNITS], voice_target[VOICE_TEXT_UNITS];
+static unsigned voice_typed_length, voice_target_length;
+static int voice_chat_open, voice_final, voice_ime, voice_dirty;
+static unsigned voice_opening;
+static int voice_retype;
+enum voice_control { VOICE_CONTROL_NONE, VOICE_CONTROL_SEND, VOICE_CONTROL_CANCEL, VOICE_CONTROL_EDIT };
+static enum voice_control voice_control;
+static unsigned voice_pulses;
+static uint64_t voice_pulse_at;
+static const char voice_setting_path[] = "/data/forever/prefix/drive_c/wineps5-voice.txt";
+static int voice_setting_rc = -1, voice_setting_logged;
+static void tap_key(unsigned usage);
+static void route_ime(const struct ime_edit *edit);
+
+static int voice_enabled(int *setting_rc)
+{
+    char text[16384];
+    FILE *file = fopen(voice_setting_path, "r");
+    size_t size;
+    *setting_rc = file ? 0 : errno;
+    if (!file) return 0;
+    size = fread(text, 1, sizeof(text) - 1, file);
+    int too_large = size == sizeof(text) - 1 && fgetc(file) != EOF;
+    int failed = ferror(file);
+    fclose(file);
+    if (too_large || failed) return 0;
+    text[size] = 0;
+    return voice_setting_enabled(text);
+}
+void voice_overlay_vk_request_warmup(void);
+
+int pw_title_voice_enabled(void)
+{
+    int status;
+    return voice_enabled(&status);
+}
+
+
+static void voice_pulse(unsigned count, uint64_t now)
+{
+    voice_pulses = count * 2;
+    voice_pulse_at = now;
+}
+static void voice_vibration(uint64_t now)
+{
+    if (!voice_pulses || now < voice_pulse_at) return;
+    pthread_mutex_lock(&gamepad_lock);
+    if (voice_pulses & 1)
+        gamepad_vibration(gamepad_enabled ? vibration_left : 0, gamepad_enabled ? vibration_right : 0);
+    else gamepad_vibration(18000, 18000);
+    pthread_mutex_unlock(&gamepad_lock);
+    --voice_pulses;
+    voice_pulse_at = now + 65000;
+}
+
+static unsigned voice_full_text(uint16_t text[VOICE_TEXT_UNITS])
+{
+    unsigned length = voice_utf16(voice_prefix(voice_pending.prefix), text, 15);
+    if (length) text[length++] = ' ';
+    memcpy(text + length, voice_typed, voice_typed_length * sizeof(*text));
+    return length + voice_typed_length;
+}
+
+static void voice_abandon(void)
+{
+    pw_voice_discard();
+    atomic_store_explicit(&voice_overlay_recording, 0, memory_order_relaxed);
+    if (voice_hold.phase == VOICE_DEFERRED) voice_hold.phase = VOICE_RECORDING;
+    voice_pending_end(&voice_pending);
+    voice_chat_open = voice_final = voice_ime = voice_dirty = voice_retype = 0;
+    voice_opening = 0;
+    voice_control = VOICE_CONTROL_NONE;
+    voice_typed_length = voice_target_length = 0;
+    atomic_store(&voice_queue_reset, 1);
+}
+
+static void voice_controls(unsigned buttons, int keyboard, int new_hold)
+{
+    struct voice_pending_result result = voice_pending_update(&voice_pending, buttons, keyboard, new_hold);
+    for (unsigned i = 0; i < result.count; i++)
+    {
+        switch (result.actions[i])
+        {
+        case VOICE_SEND: voice_control = VOICE_CONTROL_SEND; break;
+        case VOICE_CANCEL: voice_control = VOICE_CONTROL_CANCEL; break;
+        case VOICE_EDIT: voice_control = VOICE_CONTROL_EDIT; break;
+        case VOICE_ESCAPE: case VOICE_ENTER: case VOICE_PREFIX: break;
+        case VOICE_RETYPE: voice_retype = 1; break;
+        }
+    }
+}
+
+static void voice_tick(uint64_t now)
+{
+    struct pw_voice_result result;
+    if (pw_voice_poll(&result) && voice_chat_open)
+    {
+        if (result.failed || (result.final && result.muted))
+        {
+            voice_control = VOICE_CONTROL_CANCEL;
+            voice_final = voice_dirty = voice_retype = 0;
+            voice_pending_end(&voice_pending);
+            pw_voice_discard();
+            atomic_store_explicit(&voice_overlay_recording, 0, memory_order_relaxed);
+            voice_pulse(2, now);
+        }
+        else
+        {
+            voice_target_length = voice_utf16(result.text, voice_target, VOICE_TEXT_UNITS - 8);
+            voice_final = result.final;
+            voice_dirty = 1;
+        }
+    }
+    if (voice_chat_open && (voice_opening || voice_dirty || voice_retype || voice_control))
+    {
+        union ps5_title_input message;
+        struct ps5_desktop_voice_edit *edit = (void *)&message;
+        struct voice_delta delta;
+        memset(edit, 0, sizeof(*edit));
+        edit->flags = voice_opening;
+        if (voice_control == VOICE_CONTROL_CANCEL)
+            edit->flags |= PS5_DESKTOP_VOICE_ESCAPE_AFTER;
+        else if (voice_retype)
+        {
+            edit->flags |= PS5_DESKTOP_VOICE_ESCAPE_BEFORE | PS5_DESKTOP_VOICE_ENTER_BEFORE;
+            edit->length = voice_full_text(edit->text);
+        }
+        else if (voice_dirty)
+        {
+            voice_text_delta(voice_typed, voice_typed_length, voice_target, voice_target_length, &delta);
+            edit->erase = delta.erase;
+            edit->length = delta.length;
+            memcpy(edit->text, delta.text, delta.length * sizeof(*edit->text));
+        }
+        if (voice_control == VOICE_CONTROL_SEND) edit->flags |= PS5_DESKTOP_VOICE_ENTER_AFTER;
+        edit->header = (struct ps5_desktop_header){PS5_DESKTOP_VOICE_EDIT,
+            sizeof(*edit) + edit->length * sizeof(*edit->text)};
+        /* Keys and UTF-16 are one posted application FIFO transaction in
+         * Wine. The native hardware queue cannot reorder or evict this batch.
+         * Neither the mirror nor retained controls advance on backpressure. */
+        if ((edit->flags || edit->erase || edit->length) && !voice_admit(edit)) goto vibration;
+        voice_opening = voice_retype = 0;
+        if (voice_dirty && voice_control != VOICE_CONTROL_CANCEL)
+        {
+            memcpy(voice_typed, voice_target, voice_target_length * sizeof(*voice_typed));
+            voice_typed_length = voice_target_length;
+        }
+        voice_dirty = 0;
+        if (voice_control == VOICE_CONTROL_EDIT)
+        {
+            uint16_t full[VOICE_TEXT_UNITS];
+            char text[VOICE_TEXT_BYTES];
+            unsigned length = voice_full_text(full);
+            voice_utf8(full, length, text, sizeof(text));
+            if (user >= 0 && !ime_show_text(user, text))
+            {
+                voice_ime = 1;
+                memcpy(voice_typed, full, length * sizeof(*full));
+                memcpy(voice_target, full, length * sizeof(*full));
+                voice_typed_length = voice_target_length = length;
+            }
+            else voice_pending.active = 1; /* Keep the selected prefix on IME failure. */
+        }
+        else if (voice_control == VOICE_CONTROL_SEND || voice_control == VOICE_CONTROL_CANCEL)
+        {
+            voice_chat_open = voice_final = voice_ime = 0;
+            voice_typed_length = voice_target_length = 0;
+        }
+        voice_control = VOICE_CONTROL_NONE;
+        if (voice_final) { voice_pending_begin(&voice_pending); voice_final = 0; }
+    }
+vibration:
+    voice_vibration(now);
+}
+
 static void route_pad(const struct input_event *event, uint64_t now, void *context)
 {
     struct input_event pointer = *event, state = *event;
     unsigned buttons;
+    enum voice_hold_phase previous_hold = voice_hold.phase;
+    int new_hold = (event->code & PAD_TOUCHPAD) && voice_hold.phase == VOICE_IDLE;
+    int enabled = 0;
+    if (new_hold)
+    {
+        enabled = voice_enabled(&voice_setting_rc);
+        if (!voice_setting_logged)
+        {
+            io_log("voice setting path=%s rc=%d", voice_setting_path, voice_setting_rc);
+            voice_setting_logged = 1;
+        }
+    }
+    struct voice_hold_result voice = voice_hold_update(&voice_hold,
+        !!(event->code & PAD_TOUCHPAD), event->connected, event->touches,
+        event->touch_id, event->touch_x, event->touch_y, now, enabled);
+    if (voice.ended != VOICE_IDLE)
+    {
+        const char *result = voice.ended == VOICE_PASSTHROUGH ? "passthrough" :
+            voice.ended == VOICE_DRAG ? "drag" : voice.ended == VOICE_RECORDING ? "record" : "click";
+        io_log("voice hold enabled=%d result=%s held_ms=%u max_move=%u setting_rc=%d",
+            voice_hold.enabled, result, (unsigned)((now - voice_hold.pressed_us) / 1000),
+            voice_hold_max_move(&voice_hold), voice_setting_rc);
+    }
+    voice_controls(event->code, 0, new_hold);
+    if (voice.actions & VOICE_CAPTURE)
+    {
+        voice_overlay_vk_request_warmup();
+        pw_voice_capture(user);
+    }
+    if (voice.actions & VOICE_DISCARD)
+    {
+        pw_voice_discard();
+        atomic_store_explicit(&voice_overlay_recording, 0, memory_order_relaxed);
+        if (voice_chat_open && !event->connected)
+        {
+            voice_control = VOICE_CONTROL_CANCEL;
+            voice_final = voice_dirty = 0;
+        }
+    }
+    if (voice.actions & VOICE_START)
+    {
+        voice_opening = PS5_DESKTOP_VOICE_ENTER_BEFORE |
+            (voice_chat_open ? PS5_DESKTOP_VOICE_ESCAPE_BEFORE : 0);
+        voice_chat_open = 1;
+        voice_ime = voice_final = voice_dirty = 0;
+        voice_retype = 0;
+        voice_control = VOICE_CONTROL_NONE;
+        voice_typed_length = voice_target_length = 0;
+        pw_voice_start();
+        if (!++voice_overlay_sequence) ++voice_overlay_sequence;
+        atomic_store_explicit(&voice_overlay_recording,
+            (event->code & PAD_TOUCHPAD) ? voice_overlay_sequence : 0, memory_order_relaxed);
+        voice_pulse(1, now);
+    }
+    if (voice.actions & VOICE_FINISH)
+    {
+        atomic_store_explicit(&voice_overlay_recording, 0, memory_order_relaxed);
+        pw_voice_finish();
+    }
+    if (voice.actions & VOICE_CLICK)
+    {
+        struct pointer_event click = {.kind = POINTER_BUTTON, .code = MOUSE_LEFT, .down = 1};
+        usb_mouse = 1;
+        on_pointer(&click, context);
+        click.down = 0;
+        on_pointer(&click, context);
+        usb_mouse = 0;
+    }
     if (osk_chord_update(event->code, event->connected, now))
     {
         io_log("title pad chord action=osk");
         if (user >= 0) ime_resume(user);
     }
-    buttons = gamepad_chord(event->code, now);
+    buttons = gamepad_chord(event->code & ~voice_pending.swallowed, now);
     if (!event->connected)
     {
         chord_previous = chord_pending = chord_swallowed = chord_taps = 0;
@@ -558,7 +839,24 @@ static void route_pad(const struct input_event *event, uint64_t now, void *conte
         pointer.code = event->code & PAD_TOUCHPAD;
         pointer.lx = pointer.ly = pointer.rx = pointer.ry = 128;
     }
-    touchpad_motion(event);
+    if (voice.suppress_touch) pointer.code &= ~PAD_TOUCHPAD;
+    if (previous_hold == VOICE_DEFERRED && voice_hold.phase == VOICE_DRAG)
+    {
+        /* Deliver the withheld down before the accumulated drag, rather than
+         * rebasing at the threshold and turning a small drag into a click. */
+        pointer.touches = 0;
+        usb_mouse = 1;
+        pointer_input(&pointer, on_pointer, context);
+        usb_mouse = 0;
+        touch_active = !!event->touches;
+        touch_id = event->touch_id;
+        touch_x = voice_hold.x;
+        touch_y = voice_hold.y;
+        touchpad_motion(event);
+        return;
+    }
+    if (!voice.suppress_motion) touchpad_motion(event);
+    else touch_active = 0;
     /* GPU touchpad motion is handled above, not the product's absolute
      * trackpad/two-finger path. Zero touches makes every pad press a left
      * click; retaining PAD_TOUCHPAD also keeps that movie-skip escape hatch
@@ -576,6 +874,12 @@ static void on_input(const struct input_event *event, void *context)
         pad_sample = *event;
         route_pad(event, input_now_us(), context);
         return;
+    }
+    if (event->kind == INPUT_KEY)
+    {
+        if (voice_chat_open || voice_pending.active ||
+            voice_hold.phase == VOICE_DEFERRED || voice_hold.phase == VOICE_RECORDING) voice_abandon();
+        else voice_controls(voice_pending.previous, 1, 0);
     }
     if (event->kind == INPUT_MOUSE_MOVE)
     {
@@ -601,6 +905,16 @@ static void route_ime(const struct ime_edit *edit)
 {
     union ps5_title_input message;
     struct ps5_desktop_text *text = (void *)&message;
+    if (voice_ime)
+    {
+        char current[VOICE_TEXT_BYTES];
+        ime_copy_text(current, sizeof(current));
+        voice_target_length = voice_utf16(current, voice_target, VOICE_TEXT_UNITS);
+        voice_dirty = 1;
+        if (edit->enter) voice_control = VOICE_CONTROL_SEND;
+        if (edit->cancel) { voice_control = VOICE_CONTROL_CANCEL; voice_dirty = 0; }
+        return;
+    }
 
     for (unsigned i = 0; i < edit->erase; i++) tap_key(0x2a);
     if (edit->length)
@@ -725,6 +1039,7 @@ static void *poll_devices(void *unused)
             log_at = now;
         }
         if (ime_poll(&edit)) route_ime(&edit);
+        voice_tick(input_now_us());
         usleep(4000);
     }
     return NULL;

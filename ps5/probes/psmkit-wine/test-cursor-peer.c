@@ -270,13 +270,22 @@ static void NtTerminateProcess(HANDLE process, unsigned status) { (void)process;
 static void send_mouse(const struct ps5_desktop_mouse *mouse) { (void)mouse; delivered_input++; }
 static void send_key(const struct ps5_desktop_key *key) { (void)key; delivered_input++; }
 static void send_text(const struct ps5_desktop_text *text) { (void)text; delivered_input++; }
+static unsigned voice_delivered;
+static void send_voice_edit(const struct ps5_desktop_voice_edit *edit)
+{
+    assert(ps5_desktop_voice_edit_valid(edit, edit->header.size));
+    assert(edit->erase == PS5_DESKTOP_MAX_TEXT && edit->length == PS5_DESKTOP_MAX_TEXT);
+    assert(edit->text[PS5_DESKTOP_MAX_TEXT - 1] == 'a');
+    delivered_input++;
+    voice_delivered++;
+}
 static BOOL processing_events;
 static union {
     struct ps5_desktop_header header;
     struct ps5_desktop_hello hello;
     struct ps5_desktop_mouse mouse;
     struct ps5_desktop_key key;
-    unsigned char bytes[1024];
+    unsigned char bytes[PS5_DESKTOP_VOICE_MAX_MESSAGE];
 } input_event;
 static unsigned input_size;
 static uint64_t written_cursor_id;
@@ -384,6 +393,26 @@ static void test_split_old_input(void)
     close(pair[0]); close(pair[1]);
 }
 
+static void test_split_voice_input(void)
+{
+    int pair[2];
+    unsigned char bytes[PS5_DESKTOP_VOICE_MAX_MESSAGE];
+    struct ps5_desktop_voice_edit *edit = (void *)bytes;
+    memset(edit, 0, sizeof(*edit));
+    edit->header = (struct ps5_desktop_header){PS5_DESKTOP_VOICE_EDIT, sizeof(bytes)};
+    edit->flags = PS5_DESKTOP_VOICE_ESCAPE_BEFORE | PS5_DESKTOP_VOICE_ENTER_AFTER;
+    edit->erase = edit->length = PS5_DESKTOP_MAX_TEXT;
+    for (unsigned i = 0; i < edit->length; i++) edit->text[i] = 'a';
+    assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+    desktop_fd = pair[0]; input_size = delivered_input = voice_delivered = 0;
+    processing_events = FALSE;
+    assert(send(pair[1], bytes, 9, 0) == 9);
+    assert(!read_event() && input_size == 9);
+    assert(send(pair[1], bytes + 9, sizeof(bytes) - 9, 0) == sizeof(bytes) - 9);
+    assert(PS5_ProcessEvents(0) && delivered_input == 1 && voice_delivered == 1 && !input_size);
+    close(pair[0]); close(pair[1]);
+}
+
 static void *activate_other_desktop_thread(void *unused)
 {
     (void)unused;
@@ -438,6 +467,7 @@ int main(void)
     test_capabilities();
     test_late_capability_publication();
     test_split_old_input();
+    test_split_voice_input();
     test_cursor_before_desktop();
     puts("cursor peers: PASS (bounded/fair 128x64x64 replay, split input, late HELLO, per-thread desktop activation)");
     return 0;

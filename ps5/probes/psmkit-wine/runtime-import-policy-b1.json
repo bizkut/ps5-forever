@@ -4646,6 +4646,20 @@
       "binding": "strong",
       "module": "wineps5.so",
       "owner": "title_win32u",
+      "symbol": "NtUserGetForegroundWindow",
+      "target": "NtUserGetForegroundWindow"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtUserGetGUIThreadInfo",
+      "target": "NtUserGetGUIThreadInfo"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
       "symbol": "NtUserGetIconInfo",
       "target": "NtUserGetIconInfo"
     },
@@ -4676,6 +4690,20 @@
       "owner": "title_win32u",
       "symbol": "NtUserMessageCall",
       "target": "NtUserMessageCall"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtUserPostMessage",
+      "target": "NtUserPostMessage"
+    },
+    {
+      "binding": "strong",
+      "module": "wineps5.so",
+      "owner": "title_win32u",
+      "symbol": "NtUserQueryWindow",
+      "target": "NtUserQueryWindow"
     },
     {
       "binding": "strong",
@@ -6820,6 +6848,10 @@
     "xinput1_4.so"
   ],
   "native_gpu_parent": {
+    "sceAudioInClose": "libSceAudioIn.prx",
+    "sceAudioInInit": "libSceAudioIn.prx",
+    "sceAudioInInput": "libSceAudioIn.prx",
+    "sceAudioInOpen": "libSceAudioIn.prx",
     "sceAudioOutClose": "libSceAudioOut.prx",
     "sceAudioOutInit": "libSceAudioOut.prx",
     "sceAudioOutOpen": "libSceAudioOut.prx",
@@ -6843,6 +6875,7 @@
     "scePadOpen": "libScePad.prx",
     "scePadRead": "libScePad.prx",
     "scePadSetVibration": "libScePad.prx",
+    "scePthreadSetprio": "libkernel.prx",
     "sceSysmoduleLoadModule": "libSceSysmodule.prx",
     "sceSystemServiceGetHdrToneMapLuminance": "libSceSystemService.prx",
     "sceUserServiceGetInitialUser": "libSceUserService.prx",
@@ -6985,6 +7018,13 @@
       "sceHttp2GetStatusCode": "libSceHttp2.prx",
       "sceHttp2GetResponseContentLength": "libSceHttp2.prx",
       "sceHttp2ReadData": "libSceHttp2.prx",
+      "sceHttp2AbortRequest": "libSceHttp2.prx",
+      "sceHttp2AddRequestHeader": "libSceHttp2.prx",
+      "sceHttp2GetAllResponseHeaders": "libSceHttp2.prx",
+      "sceHttp2SetAutoRedirect": "libSceHttp2.prx",
+      "sceHttp2SetResolveTimeOut": "libSceHttp2.prx",
+      "sceHttp2SetConnectTimeOut": "libSceHttp2.prx",
+      "sceHttp2SetRecvTimeOut": "libSceHttp2.prx",
       "sceSslInit": "libSceSsl.prx",
       "sceSslTerm": "libSceSsl.prx",
       "sceNetInit": "libSceNet.prx",

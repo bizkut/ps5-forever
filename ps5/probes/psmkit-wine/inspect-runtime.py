@@ -138,7 +138,7 @@ if args.profile == 'b1':
             'libSceLibcInternal.sprx', 'libSceMouse.sprx', 'libSceNet.sprx',
             'libSceNetCtl.sprx', 'libScePad.sprx', 'libSceSysmodule.sprx',
             'libSceSystemService.sprx', 'libSceUserService.sprx', 'libSceVideoOut.sprx',
-            'libSceAgc.prx', 'libSceIme.prx', 'libSceAgcDriver.prx',
+            'libSceAgc.prx', 'libSceIme.prx', 'libSceAudioIn.prx', 'libSceAgcDriver.prx',
         ]
         EXPECTED_PARENT_NEEDED = [
             name.replace('.sprx', '.prx') for name in EXPECTED_PARENT_PRE_NEEDED]
@@ -801,7 +801,8 @@ gpu = build_manifest.get('gpu', {})
 require(gpu.get('enabled') == selected.get('gpu', False),
         'native GPU selection differs from the profile')
 require({Path(path).name for path in gpu.get('parent_sources', [])} ==
-        ({'runtime-vulkan.c', 'runtime-input.c', 'input.c', 'pointer.c', 'ime.c'}
+        ({'runtime-vulkan.c', 'runtime-input.c', 'input.c', 'pointer.c', 'ime.c', 'voice-state.c',
+          'voice-overlay-raster.c', 'voice-overlay-vulkan.c'}
          if selected.get('gpu', False) else set()),
         'native GPU parent source inventory drift')
 expected_radv = (Path(os.environ.get('PS5_RADV_INSTALL', str(here / '../../build/radv-release-patched'))) /

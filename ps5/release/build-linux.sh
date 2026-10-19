@@ -4,7 +4,9 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 if [[ ${1:-} != --container ]]; then
-    [[ $# == 2 ]] || { echo "usage: $0 SOURCE_ROOT NN.NNN.NNN" >&2; exit 2; }
+    [[ $# == 2 || ( $# == 3 && $3 == --whisper-only ) ]] || {
+        echo "usage: $0 SOURCE_ROOT NN.NNN.NNN [--whisper-only]" >&2; exit 2;
+    }
     sources=$(cd -- "$1" && pwd)
     tag=$2
     image=forever-launcher-linux:ubuntu-24.04
@@ -24,10 +26,11 @@ if [[ ${1:-} != --container ]]; then
         --env "FOREVER_CLEAN_CACHE=${FOREVER_CLEAN_CACHE:-0}" \
         --env "FOREVER_CONTAINER_IMAGE_ID=$image_id" \
         --env "PS5_MESA_REVISION=${PS5_MESA_REVISION:-}" "$image" \
-        bash /sources/ps5-proton/ps5-wow/ps5/release/build-linux.sh --container "$tag"
+        bash /sources/ps5-proton/ps5-wow/ps5/release/build-linux.sh --container "$tag" "${@:3}"
 fi
-[[ $# == 2 && $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
-    echo 'the container entry requires Linux x86_64 and a content-version tag' >&2; exit 2;
+[[ ( $# == 2 || ( $# == 3 && $3 == --whisper-only ) ) &&
+   $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
+    echo 'the container entry requires Linux x86_64, a content-version tag and optional --whisper-only' >&2; exit 2;
 }
 tag=$2
 root=/sources
@@ -206,6 +209,18 @@ cache_key_radv() {
         --value "PS5_MESA_FORK=$PS5_MESA_FORK" \
         --value "LLVM_CONFIG=${LLVM_CONFIG:-}"
 }
+cache_key_whisper() {
+    local radv_key
+    radv_key=$(cache_key_radv)
+    cache_key_common whisper \
+        --source PS5_PayloadSDK \
+        --source vkd3d-proton/khronos/Vulkan-Headers \
+        --download whisper.cpp-1.9.5 --download ggml-0.26.0 \
+        --path "$wow/ps5/build-whisper.sh" \
+        --path "$wow/ps5/whisper" \
+        --path "$wow/ps5/build-common.sh" \
+        --value "radv-output-key=$radv_key"
+}
 cache_key_freetype() {
     cache_key_common freetype \
         --source PS5_PayloadSDK --download freetype-2.14.3 \
@@ -298,6 +313,13 @@ build_radv_cached() {
     cached_build radv "$key" \
         ps5-proton/ps5-wow/ps5/build/radv-release-patched -- \
         python3 ps5/radv/build-radv.py
+}
+build_whisper_cached() {
+    local key
+    key=$(cache_key_whisper)
+    cached_build whisper "$key" \
+        ps5-proton/ps5-wow/ps5/build/whisper -- \
+        bash ps5/build-whisper.sh
 }
 build_freetype_cached() {
     local key
@@ -393,6 +415,15 @@ cleanup() {
     rm -rf "$logs/tools"
     exit "$status"
 }
+# Dependency-only rebuilds reuse the release stage/cache implementation without
+# touching Wine, title outputs or their qualification. SDK and RADV must exist.
+if [[ ${3:-} == --whisper-only ]]; then
+    stage whisper build_whisper_cached
+    python3 "$cache_helper" size --cache "$FOREVER_BUILD_CACHE"
+    printf 'BUILD_COMPLETE seconds=%s stage=whisper prefix=%s\n' \
+        "$((SECONDS - started))" "$wow/ps5/build/whisper"
+    exit 0
+fi
 trap cleanup EXIT
 stage inputs validate_sources
 stage host-tests make -s -C ps5/probes/psmkit-wine test \
@@ -402,6 +433,7 @@ stage host-tests make -s -C ps5/probes/psmkit-wine test \
 stage sdk build_sdk
 stage host-tools build_host_tools
 stage radv build_radv_cached
+stage whisper build_whisper_cached
 stage freetype build_freetype_cached
 stage gnutls build_gnutls_cached
 stage wine build_wine

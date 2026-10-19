@@ -36,6 +36,11 @@ B1_CONFIG_ARG := $(if $(B1_PROFILE_CONFIG),--profile-config "$(B1_PROFILE_CONFIG
 TITLE_DESKTOP := ../../title/main.c ../../title/hub.c ../../title/compositor.c \
 	../../title/forever-menu.c ../../title/addonforge-client.c ../../title/display.c \
 	../../title/input.c ../../title/pointer.c ../../title/ime.c
+TITLE_VOICE := ../../title/voice.cpp ../../title/voice.h ../../title/voice-state.c \
+	../../title/voice-state.h ../../title/stubs/libSceAudioIn_stub.c
+TITLE_VOICE += ../../title/voice-model.h forever-download.h
+TITLE_VOICE += ../../title/voice-overlay-raster.c ../../title/voice-overlay-raster.h \
+	../../title/voice-overlay-vulkan.c ../../title/voice-overlay-vulkan.h ../../title/bitmap-font.h
 
 .PHONY: all descriptor test test-startup-routing test-runtime-profile pe runtime runtime-b1 runtime-b1-dual runtime-child runtime-parent runtime-qualification test-staged
 all: descriptor pe
@@ -62,7 +67,7 @@ runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
 		runtime-parent.h runtime-relaunch.h wow-channels.h writebroker-autostart.h writebroker-menu.h \
 		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-profile.h runtime-input.c \
-		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) \
+		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) $(TITLE_VOICE) \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
 		../../title/addonforge-security.h ../../title/menu-font.h \
 		../../title/menu-diag.h ../../title/tools/make-menu-font.py \
@@ -120,7 +125,9 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
 		$(HOST_OUT)/test-direct-commit $(HOST_OUT)/test-direct-cache $(HOST_OUT)/test-direct-fail-fast $(HOST_OUT)/test-vm-cpu \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
-		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-runtime-relaunch $(HOST_OUT)/test-wow-channels \
+		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-title-voice \
+		$(HOST_OUT)/test-title-voice-overlay $(HOST_OUT)/test-title-voice-overlay-vulkan \
+		$(HOST_OUT)/test-runtime-relaunch $(HOST_OUT)/test-wow-channels \
 		$(HOST_OUT)/test-battlenet-restart $(HOST_OUT)/test-audio-mixer \
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
@@ -148,6 +155,9 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 	$(HOST_OUT)/test-runtime-input
 	$(HOST_OUT)/test-title-input
 	$(HOST_OUT)/test-title-ime
+	$(HOST_OUT)/test-title-voice
+	$(HOST_OUT)/test-title-voice-overlay
+	$(HOST_OUT)/test-title-voice-overlay-vulkan
 	$(HOST_OUT)/test-runtime-relaunch
 	$(HOST_OUT)/test-wow-channels
 	$(HOST_OUT)/test-battlenet-restart
@@ -219,6 +229,7 @@ test-desktop-surface: $(HOST_OUT)/test-desktop-surface
 $(HOST_OUT)/test-desktop-surface: test-desktop-surface.c build-desktop-surface-test.py \
 		../../title/compositor.c ../../title/compositor.h ../../title/display.h \
 		../../title/forever-menu.c ../../title/forever-menu.h ../../title/menu-font.h \
+		../../title/bitmap-font.h \
 		$(WINE_SRC)/dlls/wineps5.drv/window.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
 		$(WINE_SRC)/include/wine/ps5_desktop.h $(WINE_SRC)/include/wine/ps5_title.h \
 		runtime-parent.c protocol.h
@@ -268,7 +279,7 @@ $(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h wow-channel
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
-$(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h writebroker-menu.h \
+$(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h forever-download.h ../../title/voice-model.h writebroker-menu.h \
 		forever-setup.h wow-channels.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-forever-menu.c \
@@ -315,10 +326,12 @@ $(HOST_OUT)/test-battlenet-restart: test-battlenet-restart.c \
 
 $(HOST_OUT)/test-runtime-input: test-runtime-input.c runtime-input.c ../../title/pointer.c \
 		../../title/input.h ../../title/pointer.h ../../title/ime.h ../../title/cursor-arrow.h \
+		../../title/voice.h ../../title/voice-state.h ../../title/voice-state.c \
+		forever-menu-settings.h forever-setup.h ../../title/forever-menu.h \
 		$(WINE_SRC)/include/wine/ps5_title_input.h $(WINE_SRC)/include/wine/ps5_desktop.h \
 		$(WINE_SRC)/include/wine/ps5_title_gamepad.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread -I "$(WINE_SRC)/include" test-runtime-input.c ../../title/pointer.c -o $@
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread -I "$(WINE_SRC)/include" test-runtime-input.c ../../title/pointer.c ../../title/voice-state.c -o $@
 
 $(HOST_OUT)/test-title-input: test-title-input.c ../../title/input.c ../../title/input.h
 	mkdir -p $(HOST_OUT)
@@ -327,6 +340,24 @@ $(HOST_OUT)/test-title-input: test-title-input.c ../../title/input.c ../../title
 $(HOST_OUT)/test-title-ime: test-title-ime.c ../../title/ime.c ../../title/ime.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+$(HOST_OUT)/test-title-voice: test-title-voice.c ../../title/voice-state.c ../../title/voice-state.h ../../title/input.h \
+		forever-menu-settings.h forever-setup.h ../../title/forever-menu.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-title-voice.c ../../title/voice-state.c -o $@
+
+$(HOST_OUT)/test-title-voice-overlay: test-title-voice-overlay.c ../../title/voice-overlay-raster.c \
+		../../title/voice-overlay-raster.h ../../title/bitmap-font.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-title-voice-overlay.c ../../title/voice-overlay-raster.c -o $@ -lm
+
+$(HOST_OUT)/test-title-voice-overlay-vulkan: test-title-voice-overlay-vulkan.c ../../title/voice-overlay-vulkan.c \
+		../../title/voice-overlay-vulkan.h ../../title/voice-overlay-raster.c ../../title/voice-overlay-raster.h \
+		../../title/bitmap-font.h ../../../vkd3d-proton/khronos/Vulkan-Headers/include/vulkan/vulkan_core.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread \
+		-I ../../../vkd3d-proton/khronos/Vulkan-Headers/include \
+		test-title-voice-overlay-vulkan.c ../../title/voice-overlay-raster.c -o $@
 
 $(HOST_OUT)/test-runtime-imports: test-runtime-imports.py runtime_imports.py runtime_profiles.py \
 		runtime-import-policy.json Makefile

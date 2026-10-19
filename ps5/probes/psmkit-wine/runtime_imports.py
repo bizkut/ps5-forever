@@ -64,7 +64,19 @@ B1_DESKTOP_NATIVE_IMPORTS = {
     "sceVideoOutWaitVblank": "libSceVideoOut.prx",
 }
 
+# Product microphone imports belong exclusively to the GPU parent. AudioIn
+# captures 16-kHz mono blocks; inference workers run below render priority.
+B1_VOICE_NATIVE_IMPORTS = {
+    "sceAudioInClose": "libSceAudioIn.prx",
+    "sceAudioInInit": "libSceAudioIn.prx",
+    "sceAudioInInput": "libSceAudioIn.prx",
+    "sceAudioInOpen": "libSceAudioIn.prx",
+    "scePthreadSetprio": "libkernel.prx",
+}
+
+
 B1_GPU_NATIVE_IMPORTS = {
+    **B1_VOICE_NATIVE_IMPORTS,
     # GPU input reuses the product's device/inline-IME implementations only.
     **{name: provider for name, provider in B1_DESKTOP_NATIVE_IMPORTS.items()
        if not name.startswith("sceVideoOut") and name != "sceSystemServiceHideSplashScreen"},
@@ -239,6 +251,13 @@ def native_role_imports(profile_name="p1w", *, headless=False, gpu=False):
             "sceHttp2GetStatusCode": "libSceHttp2.prx",
             "sceHttp2GetResponseContentLength": "libSceHttp2.prx",
             "sceHttp2ReadData": "libSceHttp2.prx",
+            "sceHttp2AbortRequest": "libSceHttp2.prx",
+            "sceHttp2AddRequestHeader": "libSceHttp2.prx",
+            "sceHttp2GetAllResponseHeaders": "libSceHttp2.prx",
+            "sceHttp2SetAutoRedirect": "libSceHttp2.prx",
+            "sceHttp2SetResolveTimeOut": "libSceHttp2.prx",
+            "sceHttp2SetConnectTimeOut": "libSceHttp2.prx",
+            "sceHttp2SetRecvTimeOut": "libSceHttp2.prx",
             "sceSslInit": "libSceSsl.prx",
             "sceSslTerm": "libSceSsl.prx",
             "sceNetInit": "libSceNet.prx",
@@ -335,6 +354,8 @@ B1_WIN32U_EXPORTS = {
     "NtGdiGetDCDword", "NtUserCallHwnd", "NtUserCallHwndParam", "NtUserCallNoParam",
     "NtUserCallOneParam", "NtUserGetAncestor", "NtUserGetDCEx",
     "NtUserGetObjectInformation", "NtUserGetProp", "NtUserGetThreadDesktop",
+    # Ordered voice edits resolve the focused GUI queue once per batch.
+    "NtUserGetForegroundWindow", "NtUserGetGUIThreadInfo", "NtUserPostMessage", "NtUserQueryWindow",
     "NtUserMessageCall", "NtUserReleaseDC", "NtUserSetProp",
     "__wine_get_opengl_driver", "__wine_get_vulkan_driver", "__wine_set_user_driver",
     "window_surface_add_ref", "window_surface_create", "window_surface_release",

@@ -2,6 +2,22 @@
   "schema": 1,
   "description": "Authentic release licence inputs. Source paths are repository- or archive-relative. Copies do not replace upstream licences. COPYRIGHT-NOTICES assets are verbatim source comment excerpts, not a component linkage claim.",
   "files": {
+    "whisper.cpp/LICENSE": {
+      "component": "whisper.cpp",
+      "path": "LICENSE",
+      "revision": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+      "url": "https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/d1be6fde11ac6e0407606b4e42fe72d34add8037",
+      "archive_sha256": "645445da884df6dbd52b30f82d7be7c01d1767c938714e477e786b88d529e9f4",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    "ggml/LICENSE": {
+      "component": "ggml",
+      "path": "LICENSE",
+      "revision": "d7cb574130e6f01ad25b3289685489200febcd74",
+      "url": "https://codeload.github.com/ggml-org/ggml/tar.gz/d7cb574130e6f01ad25b3289685489200febcd74",
+      "archive_sha256": "6261129c119e648e4574a59e125f2d58953ecf32c5d0940f776a11c8f4082a21",
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
     "AddonForge/LICENSE": {
       "component": "AddonForge",
       "path": "LICENSE",

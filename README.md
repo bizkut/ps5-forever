@@ -136,8 +136,17 @@ write to `/data/forever/prefix`, see [Troubleshooting](#troubleshooting).
 | **F12** on a USB keyboard | Opens or closes the Forever menu while Battle.net is open |
 | **L2** | Escape in Battle.net (closes an open Battle.net dialog or dropdown) |
 | **L3 + R3** (press both sticks briefly) | Opens the on-screen keyboard |
+| Hold the touchpad (still, about 0.4 s) | Voice-to-Text: speech is typed into WoW chat |
 
 The controller is turned on in WoW by default (WoW's own gamepad mode).
+
+With Voice-to-Text enabled, hold the touchpad still and speak into the DualSense
+microphone. A red-dot **Listening** panel appears in the middle of the screen
+while recording and disappears on release. While the text is in the chat box,
+**Cross** sends it, **Circle**
+cancels, and **Square** opens the on-screen keyboard to edit. **L1/R1** cycle
+the chat channel through **/s /p /i /g /raid /r**. The DualSense **Mute** button
+mutes the microphone: a muted mic types nothing.
 
 In Battle.net, the mouse cursor hides after three seconds without pointer
 movement. Move the pointer or click to show it again. A new visible cursor
@@ -150,10 +159,13 @@ keyboard. Use the D-pad and Cross; press Circle or Options at the top level to
 close, or click with a mouse. The menu can:
 
 - turn frame generation, HDR and the performance overlay on or off;
+- turn **Voice-to-Text** On/Off (first use downloads a **190 MB speech model**);
 - browse, install, update and remove add-ons for the selected WoW version;
 - install a curated starter pack;
 - remove Battle.net while keeping installed games and their settings;
 - remove and reinstall Battle.net from a fresh installer download.
+
+**Proximity Voice Chat** is coming later; it is not available yet.
 
 Each app start shows a ten-second hint for **Options** over Battle.net.
 

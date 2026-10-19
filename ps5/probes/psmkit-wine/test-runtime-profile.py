@@ -288,8 +288,25 @@ for roles in (native_role_imports('b1'), native_role_imports('b1', headless=True
               native_role_imports('p1w')):
     assert 'sceAgcInit' not in roles['parent']
     assert 'sceAgcDriverSubmitDcb' not in roles['parent']
+voice_symbols = {'sceAudioInInit', 'sceAudioInOpen', 'sceAudioInInput', 'sceAudioInClose'}
+assert {name for name in gpu_roles['parent'] if name.startswith('sceAudioIn')} == voice_symbols
+assert all(gpu_roles['parent'][name] == 'libSceAudioIn.prx' for name in voice_symbols)
+assert gpu_roles['parent']['scePthreadSetprio'] == 'libkernel.prx'
+for roles in (native_role_imports('b1'), native_role_imports('b1', headless=True),
+              native_role_imports('p1w')):
+    assert not voice_symbols.intersection(roles['parent'])
+    assert not voice_symbols.intersection(roles['child'])
+assert not voice_symbols.intersection(gpu_roles['child'])
+for symbol in ('sceHttp2AbortRequest', 'sceHttp2AddRequestHeader', 'sceHttp2GetAllResponseHeaders',
+               'sceHttp2SetAutoRedirect', 'sceHttp2SetResolveTimeOut',
+               'sceHttp2SetConnectTimeOut', 'sceHttp2SetRecvTimeOut'):
+    assert native_role_imports('b1')['parent'][symbol] == 'libSceHttp2.prx'
+    assert symbol not in gpu_roles['parent'] and symbol not in gpu_roles['child']
 assert len(p1w['module_paths']) == 3
 reviewed = load_policy(Path(__file__).with_name('runtime-import-policy-b1.json'), profile_name='b1')
+for symbol in ('NtUserGetForegroundWindow', 'NtUserGetGUIThreadInfo', 'NtUserPostMessage', 'NtUserQueryWindow'):
+    assert any(row == {'module': 'wineps5.so', 'binding': 'strong', 'owner': 'title_win32u',
+                       'symbol': symbol, 'target': symbol} for row in reviewed)
 gpu_surfaces = {name: {'strong': set(), 'weak': set()} for name in gpu['module_paths']}
 for row in reviewed:
     gpu_surfaces[row['module']][row['binding']].add(row['symbol'])

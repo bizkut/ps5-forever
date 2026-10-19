@@ -47,23 +47,118 @@ Source validation and the full host suite run before the SDK and runtime builds.
 
 The tag must equal the source `sce_sys/param.json` content version. This builds
 the Docker image, then builds the SDK, native title tooling/clean-room libc,
-patched RADV, FreeType, GnuTLS, Wine, vkd3d-proton, DXVK, the patched
+patched RADV, whisper.cpp/ggml, FreeType, GnuTLS, Wine, vkd3d-proton, DXVK, the patched
 AddonForge headless core, both B1 roles, and the release archive. Generated
 Wine server headers are restored on exit. Use an empty source/output directory
 for a cold build; rerunning can reuse outputs.
 
 Outputs under `ps5-wow/ps5/build/`:
 
+- `whisper/{include,lib}`: target speech-engine headers and five static archives.
 - `title-psmkit-wine-b1/`: independently qualified maintenance and game roles.
 - `release/PPSA99030.zip`: catalog archive, with size and SHA-256 in the output.
 - `release/logs/`: complete per-stage logs and `timings.tsv` (seconds/status).
+
+### Voice-to-Text dependencies
+
+`ps5/build-whisper.sh` runs after SDK, native tooling and RADV, before the title
+runtime build. Its source archives are SHA-256-pinned in
+`ps5/release/deps.json`: whisper.cpp 1.9.5 at
+`d1be6fde11ac6e0407606b4e42fe72d34add8037` and ggml 0.26.0 at
+`d7cb574130e6f01ad25b3289685489200febcd74`. whisper's bundled ggml is not used.
+The install is `ps5/build/whisper/{include,lib}` and contains `libwhisper.a`,
+`libggml.a`, `libggml-base.a`, `libggml-cpu.a` and `libggml-vulkan.a`.
+
+After the SDK and RADV outputs exist, rerun just the real release speech stage:
+
+```sh
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.014 --whisper-only
+```
+
+This uses the same `build_whisper_cached` function and cache as a full release,
+without running host tests, rebuilding prerequisites, or touching Wine/title
+outputs. It is not runtime qualification. Inside the release container, the
+equivalent entry is `bash ps5/release/build-linux.sh --container 01.000.014 --whisper-only`.
+Both use `PS5_PAYLOAD_SDK=/sources/PS5_Vulkan/.deps/native/ps5-payload-sdk`.
+The underlying `ps5/build-whisper.sh` also supports direct invocation:
+`PS5_WHISPER_BUILD` and `PS5_WHISPER_INSTALL` select empty work/install
+directories for a cold build; defaults are `ps5/build/whisper-build` and
+`ps5/build/whisper`. A completed install with a matching input stamp is skipped.
+
+The CMake toolchain targets `x86_64-sie-ps5`, libc++, PIC and emulated TLS.
+CPU AVX/AVX2/FMA/F16C and Vulkan are enabled; host-native tuning, AVX-512,
+OpenMP, BLAS and ccache are disabled. The container's pinned `glslc` generates
+Vulkan shaders with a host shader-generator executable. Vulkan C/C++ headers
+come from the pinned vkd3d-proton Vulkan-Headers checkout; a private include
+shim exposes only SPIR-V headers, not host libc headers. The recipe preserves
+the SDK `isascii` compatibility header, no-host-libm override, `GGML_MAX_NAME=160`,
+and 192 MiB CPU / 128 MiB Vulkan allocation-block limits. The speech model is
+downloaded at runtime, never bundled into the dependency or release archives.
+
+The game-parent hold classifier allows an 80-touch-unit radial excursion from
+the press origin before 400 ms (not accumulated finger travel). A change in
+contact ID or touch count rebases that origin instead of counting as movement.
+After recording starts, touchpad motion and button state stay suppressed until
+release, even if the finger moves beyond the slop.
+
+The native game-parent present bridge draws a centred red-dot **Listening**
+cue only while the recording hold is active. It reuses the compositor's 5x7
+bitmap font and one immutable host-visible raster per swapchain. Visible
+presents submit a cached transfer command buffer on the present queue, waiting
+on the application's original semaphores and signalling an image-owned semaphore
+for the real present. With voice enabled, the raster and every image's command
+buffer/fence/semaphore are prepared at swapchain creation when the present family
+is known, otherwise at the first hidden present. Copy commands are pre-recorded
+there to warm the RADV meta-copy path before the first cue. A live enable requests
+the same preparation during the 400-ms press deferral. Visible holds never allocate,
+rasterize or record resources. Preparation logs
+`voice overlay warmup format=<VkFormat> images=<count> status=<VkResult>`.
+Hidden presents retain the original wait list and never submit or copy overlay
+work; after this one-time preparation they remain direct presents.
+The copy is submitted after the FG output deadline hold, so it can wait behind
+intervening game rendering (`vkd3d-proton/libs/vkd3d/swapchain.c:4170-4183`).
+That visible-only scheduling delay is accepted for brief recording holds;
+outside holds the direct present path and FG scheduling are unchanged.
+Swapchain recreation/destroy retires the overlay resources with the device idle.
+Supported formats are BGRA8/RGBA8 UNORM/SRGB and A2B10G10R10/A2R10G10B10;
+ST2084 10-bit uses the PQ palette (200-nit white). Other formats skip the cue.
+Each visible recording session logs `voice overlay format=<VkFormat> shown=<0|1>`
+once, with no transcript or microphone data.
+
+At the first touchpad press the game parent logs
+`voice setting path=/data/forever/prefix/drive_c/wineps5-voice.txt rc=<errno>`.
+Every press end logs
+`voice hold enabled=<0|1> result=<passthrough|click|drag|record> held_ms=<uint> max_move=<uint> setting_rc=<errno>`.
+The setting result is the `fopen` errno (0 on success, -1 if not attempted);
+`max_move` is the peak radial excursion rounded up to an integer touch unit.
+These diagnostics contain neither setting-file contents nor audio/transcript text.
+
+All native downloads disable sceHttp2 automatic redirects, which can return
+the final status/length without its body. The shared stream follows
+301/302/303/307/308 with fresh GET requests, at most five redirects per attempt.
+Locations must resolve to HTTPS (relative paths use the current URL directory);
+empty, overlong and downgrade locations are rejected. Redirect bodies are
+discarded. Every voice-model retry starts again at the pinned resolve URL,
+and Range is reapplied at each hop instead of caching an expiring CDN URL.
+Both installer and model downloads log
+`forever: download hop=<n> status=<http> host=<host> length=<bytes>`;
+only the hostname is logged, never a CDN path or presigned query.
+Voice attempts also log `forever: voice model first_read=<result>`.
+The installer still tries its direct versioned fallback if the Live URL fails.
+
+Only voice-model transfers retry premature EOF/receive errors: at most six
+attempts with cancelable 1/2/4/8/8-second backoff. A resumed response must be
+206 with a matching `Content-Range` before bytes enter the streaming SHA-256;
+a 200 response to a Range request resets/truncates the staged download.
+Logs contain resume offsets and failure byte/status/attempt fields. The
+Battle.net installer remains non-resuming.
 
 ### Persistent release-build cache
 
 Linux release builds keep compiled outputs in `SOURCE_ROOT/.cache` so the
 self-hosted runner can reuse them even though checkout cleans
-`ps5-wow/ps5/build`. RADV, FreeType, GnuTLS, vkd3d-proton, DXVK and
-AddonForge entries are keyed by their pinned sources and downloads, build
+`ps5-wow/ps5/build`. RADV, whisper.cpp/ggml, FreeType, GnuTLS, vkd3d-proton, DXVK
+and AddonForge entries are keyed by their pinned sources and downloads, build
 recipes, container image ID, and relevant toolchain environment. Every restored
 entry is checked against a
 SHA-256 manifest; a mismatch is a cache miss and rebuilds that stage. Wine keeps
@@ -231,8 +326,8 @@ remain in force.
 ## Pinned inputs and limits
 
 `Dockerfile` pins the Ubuntu 24.04 image by digest and Ubuntu apt packages
-(including LLVM/Clang 18 and 19, SPIR-V translator/libclc 19, glslang, Python,
-bison, CMake and autotools) by the immutable 2026-10-01 archive snapshot.
+(including LLVM/Clang 18 and 19, SPIR-V translator/libclc 19, glslang, glslc,
+SPIR-V headers, Python, bison, CMake and autotools) by the immutable 2026-10-01 archive snapshot.
 LLVM 19 builds native/title code and RADV's LLVM-dependent host tools.
 llvm-mingw 20260922/UCRT (LLVM 23.1.2) and rustup-init 1.28.2 are SHA-256
 checked; Rust 1.99.1 and the `x86_64-pc-windows-gnullvm` target are exact

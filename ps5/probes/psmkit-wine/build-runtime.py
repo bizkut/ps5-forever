@@ -677,7 +677,9 @@ gpu_sources = []
 if selected.get('gpu', False):
     title = (here / '../../title').resolve()
     gpu_sources = [here / 'runtime-vulkan.c', here / 'runtime-input.c',
-                   title / 'input.c', title / 'pointer.c', title / 'ime.c']
+                   title / 'input.c', title / 'pointer.c', title / 'ime.c',
+                   title / 'voice-state.c', title / 'voice-overlay-raster.c',
+                   title / 'voice-overlay-vulkan.c']
 radv_archive = (Path(os.environ.get('PS5_RADV_INSTALL', str(here / '../../build/radv-release-patched'))) /
                 'lib/libvulkan_radeon.ps5.a').resolve()
 if gpu_sources and not radv_archive.is_file():

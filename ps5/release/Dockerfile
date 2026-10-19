@@ -22,7 +22,7 @@ RUN printf '%s\n' \
       clang-18 clang-19 lld-18 lld-19 llvm-18-dev llvm-19-dev \
       libclang-19-dev libclang-cpp19-dev libclang-rt-19-dev \
       libclc-19 libclc-19-dev libllvmspirvlib-19-dev \
-      glslang-tools spirv-tools libdrm-dev libelf-dev libexpat1-dev libzstd-dev \
+      glslang-tools glslc spirv-headers spirv-tools libdrm-dev libelf-dev libexpat1-dev libzstd-dev \
       libfreetype-dev python3 python3-venv python3-pip zlib1g-dev \
     && rm -rf /var/lib/apt/lists/* /tmp/ca-bootstrap.pem
 RUN python3 -m venv /opt/venv \

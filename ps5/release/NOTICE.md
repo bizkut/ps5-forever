@@ -20,6 +20,9 @@ source and build instructions.
 | [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) 2.3.0 shaders | MIT | FSR 3 optical flow and interpolation shaders |
 | [DXVK](https://github.com/doitsujin/dxvk), PS5 fork | zlib | `dxgi.dll` |
 | [Mesa](https://mesa3d.org/) RADV, via [PS5_Mesa](https://github.com/mihawk-99/PS5_Mesa) | MIT (per-file notices in the Mesa source) | the Vulkan driver linked into the app |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) 1.9.5 | MIT | Voice-to-Text speech recognition, statically linked into the game parent |
+| [ggml](https://github.com/ggml-org/ggml) 0.26.0, with PS5 allocation limits | MIT | whisper.cpp CPU and Vulkan inference backends |
+| [OpenAI Whisper](https://github.com/openai/whisper) speech model weights | MIT | Voice-to-Text model, downloaded at runtime on first use; not included in the release ZIP |
 | [PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) (mihawk-99) | GPL-3.0-or-later; bundled components retain their notices | Vulkan loader integration and title build tools |
 | [PS5_PayloadSDK](https://github.com/mihawk-99/PS5_PayloadSDK) (mihawk-99), from [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) | GPL-3.0-or-later; libc and toolchain components retain their notices | toolchain, libc and `sce_module/libc.prx` |
 | [FreeType](https://freetype.org/) | FTL or GPL-2.0-or-later | `wine-title/lib/libfreetype.so`; this distribution is based in part on the work of the FreeType Team |

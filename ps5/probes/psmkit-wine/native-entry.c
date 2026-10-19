@@ -18,10 +18,16 @@
 #include "../../title/addonforge-security.h"
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
+#if !PW_RUNTIME_HEADLESS
+static void forever_title_voice_shutdown(void);
+#endif
 #include "title-icon.h"
 #endif
 #if defined(PW_PARENT_ROLE) && PW_RUNTIME_GPU
 #include <ps5platform/klog.h>
+#if defined(PW_RUNTIME_B1)
+#include "../../title/voice.h"
+#endif
 void *pw_title_vulkan_proc(const char *);
 int pw_title_input_start(void);
 #endif
@@ -1436,6 +1442,13 @@ static void pw_title_log_begin(void)
 }
 void __attribute__((noreturn)) pw_native_exit(int status)
 {
+#if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE)
+#if PW_RUNTIME_GPU
+    pw_voice_shutdown();
+#elif !PW_RUNTIME_HEADLESS
+    forever_title_voice_shutdown();
+#endif
+#endif
 #ifdef PW_RUNTIME_B1
     /* Every queued line first; the exit lines below are written synchronously. */
     pw_title_log_shutdown();
@@ -1548,21 +1561,7 @@ void __attribute__((noreturn)) pw_native_exit(int status)
 }
 
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE)
-int sceNetInit(void);
-int sceNetPoolCreate(const char *, int, int);
-int sceNetPoolDestroy(int);
-int sceSslInit(size_t);
-int sceSslTerm(int);
-int sceHttp2Init(int, int, size_t, int);
-int sceHttp2Term(int);
-int sceHttp2CreateTemplate(int, const char *, int, int);
-int sceHttp2DeleteTemplate(int);
-int sceHttp2CreateRequestWithURL(int, const char *, const char *, uint64_t);
-int sceHttp2DeleteRequest(int);
-int sceHttp2SendRequest(int, const void *, size_t);
-int sceHttp2GetStatusCode(int, int *);
-int sceHttp2GetResponseContentLength(int, int *, uint64_t *);
-int sceHttp2ReadData(int, void *, size_t);
+#include "forever-download.h"
 #if !PW_RUNTIME_HEADLESS
 void title_desktop_message(const char *);
 #endif
@@ -1585,84 +1584,38 @@ static void b1_wait(void)
     for (;;) pthread_cond_wait(&condition, &mutex);
 }
 
-#define B1_DOWNLOAD_CALL(label, call) \
-    do { *step = label; if ((result = (call)) < 0) goto done; } while (0)
-
-/* One GET into the temporary file. Returns 0 only when it holds the whole
- * announced length and an MZ image; otherwise the failing step's code. */
-static int b1_fetch_installer(int tmpl, const char *url, const char *part, const char **step,
-                              uint64_t *total, uint64_t *length)
+static void b1_download_hop(void *unused, int hop, int status, const char *host, uint64_t length)
 {
-    static unsigned char buffer[65536];
-    const uint64_t cap = 256u * 1024u * 1024u;
-    int req = -1, fd = -1, result = 0, status = 0, length_type = 0;
-    uint64_t progress = UINT64_MAX;
-    unsigned char first[2] = {0};
-    char message[160];
-
-    *total = *length = 0;
-    B1_DOWNLOAD_CALL("creating request", req = sceHttp2CreateRequestWithURL(tmpl, "GET", url, 0));
-    B1_DOWNLOAD_CALL("sending request", sceHttp2SendRequest(req, NULL, 0));
-    B1_DOWNLOAD_CALL("reading HTTP status", sceHttp2GetStatusCode(req, &status));
-    *step = "HTTP status is not 200";
-    if (status != 200) { result = status; goto done; }
-    B1_DOWNLOAD_CALL("reading content length", sceHttp2GetResponseContentLength(req, &length_type, length));
-    /* A length the server does not announce (chunked) is checked only by the cap. */
-    if (length_type != 0) *length = 0;
-    *step = "invalid announced installer length";
-    if (*length && (*length < 2 || *length > cap)) { result = EINVAL; goto done; }
-    B1_DOWNLOAD_CALL("opening temporary installer", fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, 0666));
-    for (;;)
-    {
-        B1_DOWNLOAD_CALL("reading installer", sceHttp2ReadData(req, buffer, sizeof(buffer)));
-        if (!result) break;
-        size_t count = (size_t)result, offset = 0;
-        *step = "installer exceeds announced length or 256 MiB";
-        if (count > cap - *total || (*length && count > *length - *total)) { result = EFBIG; goto done; }
-        for (size_t i = 0; *total + i < 2 && i < count; i++) first[*total + i] = buffer[i];
-        *step = "writing installer";
-        while (offset < count)
-        {
-            ssize_t written = write(fd, buffer + offset, count - offset);
-            if (written < 0 && errno == EINTR) continue;
-            if (written <= 0) { result = written < 0 ? errno : EIO; goto done; }
-            offset += (size_t)written;
-        }
-        *total += count;
-        if (*total / (1024u * 1024u) != progress || *total == *length)
-        {
-            progress = *total / (1024u * 1024u);
-            if (*length)
-                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f of %.1f MB",
-                         (double)*total / (1024 * 1024), (double)*length / (1024 * 1024));
-            else
-                snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f MB",
-                         (double)*total / (1024 * 1024));
-            b1_message(message);
-        }
-    }
-    *step = "installer length or MZ signature mismatch";
-    if ((*length && *total != *length) || *total < 2 || first[0] != 'M' || first[1] != 'Z') { result = EINVAL; goto done; }
-    *step = "closing installer";
-    result = close(fd);
-    fd = -1;
-    if (result) result = errno;
-done:
-    if (fd >= 0) close(fd);
-    if (req >= 0) sceHttp2DeleteRequest(req);
-    return result;
+    (void)unused;
+    io_log("forever: download hop=%d status=%d host=%s length=%llu",
+           hop, status, host, (unsigned long long)length);
 }
 
-/* Native I/O stays off the desktop thread. Publish only a complete installer.
- * The Live URL redirects to the current versioned file; when that download
- * fails (one console received the 200 and length but no body), the direct
- * versioned file is tried once before giving up. */
+
+static void b1_download_progress(void *opaque, uint64_t total, uint64_t length)
+{
+    uint64_t *progress = opaque;
+    char message[160];
+    if (total / (1024u * 1024u) == *progress && total != length) return;
+    *progress = total / (1024u * 1024u);
+    if (length)
+        snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f of %.1f MB",
+                 (double)total / (1024 * 1024), (double)length / (1024 * 1024));
+    else
+        snprintf(message, sizeof(message), "Downloading the Battle.net installer: %.1f MB",
+                 (double)total / (1024 * 1024));
+    b1_message(message);
+}
+
+/* Native I/O stays off the desktop thread. The shared stream follows the Live
+ * URL with fresh GETs; retain the direct versioned URL as a second chance. */
 static int b1_download_installer(void)
 {
     static const char *const urls[] = {PW_RUNTIME_INSTALLER_URL, PW_RUNTIME_INSTALLER_FALLBACK_URL};
     const char *part = PW_RUNTIME_INSTALLER_CWD "/.Battle.net-Setup.exe.part";
-    int pool = -1, ssl = -1, http = -1, tmpl = -1, result = 0, complete = 0, logged = 0;
-    uint64_t total = 0, length = 0;
+    struct forever_https http = {-1, -1, -1, -1};
+    int result = 0, complete = 0, logged = 0;
+    uint64_t total = 0, length = 0, progress = UINT64_MAX;
     const char *what = "creating prefix directory", **step = &what;
     char message[640], directory[] = PW_RUNTIME_INSTALLER_CWD;
     unsigned int i = 0;
@@ -1677,17 +1630,16 @@ static int b1_download_installer(void)
         *p = saved;
         if (!saved) break;
     }
-    /* DT_NEEDED loads Net/SSL/HTTP2, as in the measured HTTPS title probe.
-     * SceHttp2's default redirect handling follows the Live URL's 302. */
-    B1_DOWNLOAD_CALL("initializing Net", sceNetInit());
-    B1_DOWNLOAD_CALL("creating network pool", pool = sceNetPoolCreate("b1-installer", 64 * 1024, 0));
-    B1_DOWNLOAD_CALL("initializing SSL", ssl = sceSslInit(256 * 1024));
-    B1_DOWNLOAD_CALL("initializing HTTP2", http = sceHttp2Init(pool, ssl, 256 * 1024, 1));
-    B1_DOWNLOAD_CALL("creating HTTP2 template", tmpl = sceHttp2CreateTemplate(http, "Mozilla/5.0", 3, 1));
+    result = forever_https_open(&http, step);
+    if (result) goto done;
     for (i = 0; i < sizeof(urls) / sizeof(urls[0]); i++)
     {
         if (i) b1_message("Retrying the Battle.net installer download from its direct link...");
-        result = b1_fetch_installer(tmpl, urls[i], part, step, &total, &length);
+        struct forever_download download = {
+            .url = urls[i], .part = part, .destination = PW_RUNTIME_INSTALLER_UNIX,
+            .cap = 256u * 1024u * 1024u, .mz = 1,
+            .progress = b1_download_progress, .hop = b1_download_hop, .opaque = &progress};
+        result = forever_download_run(http.tmpl, &download, step, &total, &length);
         if (!result) break;
         io_log("b1 parent installer download failed: %s result=%#x bytes=%llu length=%llu url=%u",
                *step, result, (unsigned long long)total, (unsigned long long)length, i);
@@ -1695,14 +1647,10 @@ static int b1_download_installer(void)
     }
     if (result) goto done;
     logged = 0;
-    *step = "publishing installer";
-    if (rename(part, PW_RUNTIME_INSTALLER_UNIX)) { result = errno; goto done; }
+    /* The shared stream publishes only a complete, synced installer. */
     complete = 1;
 done:
-    if (tmpl >= 0) sceHttp2DeleteTemplate(tmpl);
-    if (http >= 0) sceHttp2Term(http);
-    if (ssl >= 0) sceSslTerm(ssl);
-    if (pool >= 0) sceNetPoolDestroy(pool);
+    forever_https_close(&http);
     if (!complete)
     {
         unlink(part);
@@ -1717,7 +1665,6 @@ done:
     io_log("b1 parent installer downloaded bytes=%llu url=%u", (unsigned long long)total, i);
     return 0;
 }
-#undef B1_DOWNLOAD_CALL
 #endif
 #endif
 
@@ -2039,7 +1986,209 @@ int forever_title_menu_load(struct forever_menu_values *values)
         FOREVER_DRIVE_C "/wineps5-fg.txt",
         FOREVER_DRIVE_C "/wineps5-hdr-output.txt",
         FOREVER_DRIVE_C "/wineps5-hud.txt",
-        &values->frame_generation, &values->hdr, &values->hud);
+        FOREVER_DRIVE_C "/wineps5-voice.txt",
+        &values->frame_generation, &values->hdr, &values->hud, &values->voice);
+}
+
+void title_desktop_voice_status(const char *, int, int);
+
+static struct
+{
+    pthread_mutex_t lock, lifecycle;
+    pthread_t thread;
+    int busy, joinable, canceled, stopping, request, progress;
+} forever_voice_download = {
+    .lock = PTHREAD_MUTEX_INITIALIZER, .lifecycle = PTHREAD_MUTEX_INITIALIZER,
+    .request = -1, .progress = -1};
+
+static int forever_voice_download_canceled(void *unused)
+{
+    int canceled;
+    (void)unused;
+    pthread_mutex_lock(&forever_voice_download.lock);
+    canceled = forever_voice_download.canceled;
+    pthread_mutex_unlock(&forever_voice_download.lock);
+    return canceled;
+}
+
+static void forever_voice_download_request(void *unused, int request)
+{
+    (void)unused;
+    pthread_mutex_lock(&forever_voice_download.lock);
+    forever_voice_download.request = request;
+    if (request >= 0 && forever_voice_download.canceled) sceHttp2AbortRequest(request);
+    pthread_mutex_unlock(&forever_voice_download.lock);
+}
+
+static void forever_voice_download_progress(void *unused, uint64_t total, uint64_t length)
+{
+    char message[FOREVER_MENU_STATUS_BYTES];
+    int progress = length ? (int)(total * 100 / length) : 0;
+    (void)unused;
+    pthread_mutex_lock(&forever_voice_download.lock);
+    if (!forever_voice_download.canceled && progress != forever_voice_download.progress)
+    {
+        forever_voice_download.progress = progress;
+        snprintf(message, sizeof(message), "Downloading voice model\xe2\x80\xa6 %d%%", progress);
+        title_desktop_voice_status(message, 0, 1);
+    }
+    pthread_mutex_unlock(&forever_voice_download.lock);
+}
+
+static void forever_voice_download_resumed(void *unused, int attempt, uint64_t offset, int status)
+{
+    (void)unused;
+    io_log("forever: voice model resume attempt=%d offset=%llu status=%d",
+           attempt, (unsigned long long)offset, status);
+}
+
+static void forever_voice_download_first_read(void *unused, int result)
+{
+    (void)unused;
+    io_log("forever: voice model first_read=%d", result);
+}
+
+/* Re-enabling an installed model also verifies it, off the render thread. */
+static int forever_voice_model_verified(void)
+{
+    unsigned char buffer[65536];
+    struct sha256_context hash;
+    struct stat file;
+    int fd, result = EINVAL;
+    uint64_t total = 0;
+    if (stat(FOREVER_VOICE_MODEL_PATH, &file) || !S_ISREG(file.st_mode) ||
+        file.st_size < 0 || (uint64_t)file.st_size != FOREVER_VOICE_MODEL_BYTES) return 0;
+    if ((fd = open(FOREVER_VOICE_MODEL_PATH, O_RDONLY)) < 0) return 0;
+    sha256_init(&hash);
+    while (!forever_voice_download_canceled(NULL))
+    {
+        ssize_t count = read(fd, buffer, sizeof(buffer));
+        if (count < 0 && errno == EINTR) continue;
+        if (count < 0 || (uint64_t)count > FOREVER_VOICE_MODEL_BYTES - total) break;
+        if (!count)
+        {
+            if (total == FOREVER_VOICE_MODEL_BYTES)
+                result = forever_download_digest(&hash, FOREVER_VOICE_MODEL_SHA256);
+            break;
+        }
+        total += (uint64_t)count;
+        sha256_update(&hash, buffer, (size_t)count);
+    }
+    close(fd);
+    return !result;
+}
+
+static void *forever_voice_download_worker(void *unused)
+{
+    struct forever_https http = {-1, -1, -1, -1};
+    struct forever_download_info info = {0};
+    struct forever_download download = {
+        .url = FOREVER_VOICE_MODEL_URL, .part = FOREVER_VOICE_MODEL_PATH ".part",
+        .destination = FOREVER_VOICE_MODEL_PATH, .size = FOREVER_VOICE_MODEL_BYTES,
+        .sha256 = FOREVER_VOICE_MODEL_SHA256, .resume = 1, .info = &info,
+        .canceled = forever_voice_download_canceled,
+        .request = forever_voice_download_request,
+        .progress = forever_voice_download_progress,
+        .resumed = forever_voice_download_resumed, .hop = b1_download_hop,
+        .first_read = forever_voice_download_first_read};
+    const char *step = "creating voice directory";
+    uint64_t total = 0, length = 0;
+    char message[FOREVER_MENU_STATUS_BYTES];
+    int result = 0;
+    (void)unused;
+    if (!forever_voice_model_verified())
+    {
+        result = forever_mkdirs("/data/forever/voice");
+        if (!result && !forever_voice_download_canceled(NULL))
+            result = forever_https_open(&http, &step);
+        if (!result)
+            result = forever_download_run(http.tmpl, &download, &step, &total, &length);
+    }
+    forever_https_close(&http);
+    pthread_mutex_lock(&forever_voice_download.lock);
+    if (!forever_voice_download.canceled)
+    {
+        if (!result)
+        {
+            step = "saving voice setting";
+            result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-voice.txt", "voice", 1);
+        }
+        if (result)
+        {
+            snprintf(message, sizeof(message), "Voice model failed: %s (%#x). Voice-to-Text is off.",
+                     step, result);
+            io_log("forever: voice model failed step=%s result=%#x total=%llu length=%llu status=%d attempt=%d",
+                   step, result, (unsigned long long)total, (unsigned long long)length,
+                   info.status, info.attempt);
+        }
+        else
+            snprintf(message, sizeof(message), "Voice-to-Text is on. Hold the touchpad still to speak.");
+        title_desktop_voice_status(message, !result, 0);
+    }
+    forever_voice_download.busy = 0;
+    pthread_mutex_unlock(&forever_voice_download.lock);
+    /* Any interrupted stream is disposable; the published model is kept. */
+    unlink(FOREVER_VOICE_MODEL_PATH ".part");
+    return NULL;
+}
+
+/* Closing the popup never joins network I/O on the compositor thread. Abort
+ * wakes the worker; its cancellation checks prevent later status/setting writes. */
+void forever_title_voice_cancel(void)
+{
+    pthread_mutex_lock(&forever_voice_download.lock);
+    forever_voice_download.canceled = 1;
+    if (forever_voice_download.request >= 0)
+        sceHttp2AbortRequest(forever_voice_download.request);
+    pthread_mutex_unlock(&forever_voice_download.lock);
+}
+
+static void forever_title_voice_shutdown(void)
+{
+    pthread_mutex_lock(&forever_voice_download.lifecycle);
+    forever_voice_download.stopping = 1;
+    forever_title_voice_cancel();
+    if (forever_voice_download.joinable)
+    {
+        pthread_join(forever_voice_download.thread, NULL);
+        forever_voice_download.joinable = 0;
+    }
+    pthread_mutex_unlock(&forever_voice_download.lifecycle);
+}
+
+static int forever_title_voice_enable(void)
+{
+    int result;
+    pthread_mutex_lock(&forever_voice_download.lifecycle);
+    pthread_mutex_lock(&forever_voice_download.lock);
+    if (forever_voice_download.busy || forever_voice_download.stopping)
+    {
+        pthread_mutex_unlock(&forever_voice_download.lock);
+        pthread_mutex_unlock(&forever_voice_download.lifecycle);
+        return -EBUSY;
+    }
+    pthread_mutex_unlock(&forever_voice_download.lock);
+    if (forever_voice_download.joinable)
+    {
+        pthread_join(forever_voice_download.thread, NULL);
+        forever_voice_download.joinable = 0;
+    }
+    /* Never leave an old on token behind if download/verification fails. */
+    result = forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-voice.txt", "voice", 0);
+    if (!result)
+    {
+        pthread_mutex_lock(&forever_voice_download.lock);
+        forever_voice_download.canceled = 0;
+        forever_voice_download.busy = 1;
+        forever_voice_download.progress = -1;
+        result = pthread_create(&forever_voice_download.thread, NULL, forever_voice_download_worker, NULL);
+        if (result) forever_voice_download.busy = 0;
+        else forever_voice_download.joinable = 1;
+        pthread_mutex_unlock(&forever_voice_download.lock);
+        if (result) result = -result;
+    }
+    pthread_mutex_unlock(&forever_voice_download.lifecycle);
+    return result ? result : 1; /* asynchronous; commit only after verification */
 }
 
 void title_desktop_addons_snapshot(const struct forever_addon_snapshot *);
@@ -2604,6 +2753,9 @@ int forever_title_menu_action(enum forever_menu_command command, int enabled)
     pthread_t thread;
     switch (command)
     {
+    case FOREVER_MENU_COMMAND_SET_VOICE:
+        if (enabled) return forever_title_voice_enable();
+        return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-voice.txt", "voice", 0);
     case FOREVER_MENU_COMMAND_SET_FRAME_GENERATION:
         result = forever_menu_rewrite_switch(
             FOREVER_DRIVE_C "/wineps5-fg.txt", "fg", enabled);
