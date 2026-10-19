@@ -2,7 +2,7 @@
 
 ## Record description (`apps/PPSA99030.json`, `description`)
 
-Battle.net launcher for World of Warcraft with an add-on manager and Voice-to-Text for WoW chat; Options opens the Forever menu, hold the touchpad to dictate.
+Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a built-in add-on manager; press Options for the Forever menu and L3+R3 for the on-screen keyboard.
 
 ## Release notes (GitHub release description, shown by the catalog)
 
