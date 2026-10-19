@@ -2,9 +2,27 @@
 
 ## Record description (`apps/PPSA99030.json`, `description`)
 
-Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a built-in add-on manager; press Options for the Forever menu and L3+R3 for the on-screen keyboard.
+Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a built-in add-on manager and Voice-to-Text for WoW chat; press Options for the Forever menu, L3+R3 for the on-screen keyboard and hold the touchpad to dictate.
 
 ## Release notes (GitHub release description, shown by the catalog)
+
+### Forever Launcher 01.000.015
+
+**New: Voice-to-Text for WoW chat.** Hold the touchpad and speak; your words are typed into WoW's chat box as you talk.
+
+- Turn it on in the Forever menu (**Voice-to-Text: On**). The first time, it downloads a 190 MB speech model (Whisper small, multilingual) and checks it before use. It is off by default.
+- In WoW, hold the touchpad still for about half a second. The controller buzzes, a red-dot **Listening** panel appears in the middle of the screen, and WoW's chat box opens on your last chat channel. Release when you finish speaking.
+- The text waits in the chat box: **Cross** sends it, **Circle** cancels, **Square** opens the on-screen keyboard to correct it, and **L1/R1** switch the channel through /s, /p, /i, /g, /raid and /r.
+- Speech is recognised on the PS5 itself, on the GPU, using whisper.cpp. Nothing is uploaded, and audio is never saved. The microphone is only open while you hold the touchpad.
+- The DualSense **Mute** button still mutes the microphone: a muted microphone types nothing.
+- Touchpad clicks and drags work as before. With Voice-to-Text on, a touchpad press held still for half a second starts dictation instead of holding the mouse button.
+- Uses about 1 GB of graphics memory once you first dictate, until WoW closes. Tested in WoW on one console with English speech; other languages are recognised by the same model but have not been tested.
+- **Proximity Voice Chat** is listed in the Forever menu as coming later.
+
+Other changes:
+
+- Add-ons Find: results now filter as you type with the on-screen keyboard, not only after you close it.
+- Downloads follow web redirects themselves: the PS5's built-in redirect handling returned empty files. This fixes the speech-model download. The Battle.net installer uses the same handling but has not been retested on a console.
 
 ### Forever Launcher 01.000.014
 

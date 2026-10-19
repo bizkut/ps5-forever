@@ -27,27 +27,18 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.014
+## What's new in 01.000.015
 
-- **Every World of Warcraft version:** Retail, Classic, Classic Era,
-  Anniversary, Forever, the betas and PTR start with Battle.net's **Play**
-  button. The launcher finds installed versions by their folders, so new
-  versions need no update.
-- **Add-ons for every version:** the Forever menu's add-on manager searches,
-  installs, updates and removes add-ons per WoW version, from GitHub,
-  WoWInterface, Tukui and Wago (with your own Wago key).
-- **Faster Battle.net downloads and Scan and Repair:** game data writes are
-  collected into large blocks, and Battle.net's updater reuses memory. On a test
-  console a Retail download ran at about 21 MB/s, against 12 MB/s on 01.000.013
-  and about 4 MB/s before 01.000.013, when the disk was the limit.
-- **Forever menu:** press **Options** over Battle.net for frame generation, HDR,
-  the performance overlay, Add-ons and reinstalling Battle.net. A hint shows the
-  button for ten seconds at every start.
-- Battle.net no longer crashes while the Add-ons page is open.
-- The mouse cursor hides after three seconds without movement in Battle.net.
-- All Windows system DLLs in `/data/forever` are kept identical to the app's
-  Wine files, and startup repairs folders under `/data/forever` that other tools
-  left unwritable.
+- **Voice-to-Text for WoW chat:** turn it on in the Forever menu, then in WoW
+  hold the touchpad still and speak. A **Listening** panel appears and your
+  words are typed into WoW's chat box as you talk. **Cross** sends, **Circle**
+  cancels, **Square** opens the on-screen keyboard to correct the text, and
+  **L1/R1** switch the chat channel. Speech is recognised on the PS5's GPU with
+  whisper.cpp; nothing is uploaded and no audio is saved. The first use
+  downloads a 190 MB speech model. See [Controls](#controls).
+- **Add-ons Find** filters results as you type on the on-screen keyboard.
+- Downloads follow web redirects themselves, because the PS5's built-in
+  redirect handling returned empty files.
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 
