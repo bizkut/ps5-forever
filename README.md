@@ -27,18 +27,19 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.015
+## What's new in 01.000.016
 
-- **Voice-to-Text for WoW chat:** turn it on in the Forever menu, then in WoW
-  hold the touchpad still and speak. A **Listening** panel appears and your
-  words are typed into WoW's chat box as you talk. **Cross** sends, **Circle**
-  cancels, **Square** opens the on-screen keyboard to correct the text, and
-  **L1/R1** switch the chat channel. Speech is recognised on the PS5's GPU with
-  whisper.cpp; nothing is uploaded and no audio is saved. The first use
-  downloads a 190 MB speech model. See [Controls](#controls).
-- **Add-ons Find** filters results as you type on the on-screen keyboard.
-- Downloads follow web redirects themselves, because the PS5's built-in
-  redirect handling returned empty files.
+- **Faster Battle.net installs:** reinstalling Battle.net took about 3 minutes
+  instead of 12 on a test console.
+- **Faster Blizzard game downloads:** downloads of every Blizzard game now
+  combine small disk writes, not only WoW's.
+- **Exit Battle.net** at the bottom of the Forever menu closes Battle.net and
+  returns to the PS5 home screen, after a confirmation.
+- **Invert mouse scroll** (on by default) reverses the USB mouse wheel.
+- Fixes a rare crash during Battle.net start-up.
+
+01.000.015 added **Voice-to-Text for WoW chat**: turn it on in the Forever
+menu, then hold the touchpad in WoW and speak. See [Controls](#controls).
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 

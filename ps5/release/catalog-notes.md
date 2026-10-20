@@ -6,6 +6,17 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.016
+
+**Faster Battle.net installs and Blizzard game downloads.**
+
+- Reinstalling Battle.net took about 3 minutes instead of 12 on a test console: the update agent's many small writes are now combined into large ones, including its overlapped writes, which were never combined before.
+- Downloads of every Blizzard game now combine their small writes too, not only WoW's. A StarCraft II download that spent 6–9 s of every 10 s waiting on the disk now spends about 3 s, so the connection is the limit.
+- **Exit Battle.net** at the bottom of the Forever menu closes Battle.net properly and returns to the PS5 home screen, after a confirmation (Cancel is the default).
+- **Invert mouse scroll** in the Forever menu reverses the USB mouse wheel. It is on by default; touchpad and stick scrolling are unchanged.
+- Fixes a rare crash during Battle.net start-up when one of its processes ended at an unlucky moment.
+- If Battle.net is reinstalled, Classic Era and Anniversary may need **Update** or **Scan and Repair** in Battle.net once before they start again.
+
 ### Forever Launcher 01.000.015
 
 **New: Voice-to-Text for WoW chat.** Hold the touchpad and speak; your words are typed into WoW's chat box as you talk.
