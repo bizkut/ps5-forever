@@ -1018,6 +1018,67 @@ static void test_find_search_and_github(void)
 }
 
 
+static void test_exit_menu(void)
+{
+    static struct forever_menu_state menu;
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 1, 0};
+    char text[FOREVER_MENU_TEXT_BYTES];
+    const char *close_row, *exit_row;
+
+    forever_menu_init(&menu);
+    forever_menu_open(&menu, &values);
+    forever_menu_render(&menu, text, sizeof(text));
+    close_row = strstr(text, " Close\n");
+    exit_row = strstr(text, " Exit Battle.net\n");
+    assert(close_row && exit_row && close_row < exit_row);
+    assert(!strcmp(exit_row, " Exit Battle.net\n\n"));
+    assert(FOREVER_MENU_LINE_EXIT == FOREVER_MENU_LINE_CLOSE + 1);
+    forever_menu_move(&menu, -1);
+    assert(menu.selected == FOREVER_MENU_EXIT);
+    forever_menu_move(&menu, -1);
+    assert(menu.selected == FOREVER_MENU_CLOSE);
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_CLOSE);
+    forever_menu_move(&menu, 1);
+    assert(menu.selected == FOREVER_MENU_EXIT);
+    forever_menu_move(&menu, 1);
+    assert(menu.selected == FOREVER_MENU_FRAME_GENERATION);
+
+    assert(forever_menu_click_line(&menu, FOREVER_MENU_LINE_EXIT).command ==
+           FOREVER_MENU_COMMAND_NONE);
+    assert(menu.selected == FOREVER_MENU_EXIT && menu.page == FOREVER_MENU_CONFIRM_EXIT);
+    assert(!menu.confirmation_selected);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Exit Battle.net and Forever Launcher?"));
+    assert(strstr(text, "> Cancel\n") && strstr(text, "  Exit\n"));
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_MAIN && menu.selected == FOREVER_MENU_EXIT);
+
+    forever_menu_select(&menu);
+    forever_menu_move(&menu, 1);
+    assert(menu.confirmation_selected);
+    assert(forever_menu_back(&menu).command == FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_MAIN && menu.selected == FOREVER_MENU_EXIT);
+    forever_menu_select(&menu);
+    assert(!menu.confirmation_selected);
+    assert(forever_menu_click_line(&menu, FOREVER_MENU_LINE_CANCEL).command ==
+           FOREVER_MENU_COMMAND_NONE);
+    assert(menu.page == FOREVER_MENU_MAIN && menu.selected == FOREVER_MENU_EXIT);
+    forever_menu_select(&menu);
+    forever_menu_move(&menu, -1);
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_EXIT);
+    forever_menu_back(&menu);
+    forever_menu_select(&menu);
+    assert(forever_menu_click_line(&menu, FOREVER_MENU_LINE_CONFIRM).command ==
+           FOREVER_MENU_COMMAND_EXIT);
+
+    forever_menu_open(&menu, &values);
+    menu.voice_downloading = 1;
+    forever_menu_click_line(&menu, FOREVER_MENU_LINE_EXIT);
+    assert(menu.page == FOREVER_MENU_CONFIRM_EXIT);
+    assert(forever_menu_click_line(&menu, FOREVER_MENU_LINE_CONFIRM).command ==
+           FOREVER_MENU_COMMAND_EXIT); /* the native lifetime guard refuses a busy exit */
+}
+
 static void test_state_machine(void)
 {
     static struct forever_menu_state menu;
@@ -1031,7 +1092,7 @@ static void test_state_machine(void)
     forever_menu_open(&menu, &values);
     assert(menu.page == FOREVER_MENU_MAIN && menu.selected == FOREVER_MENU_FRAME_GENERATION);
     forever_menu_move(&menu, -1);
-    assert(menu.selected == FOREVER_MENU_CLOSE);
+    assert(menu.selected == FOREVER_MENU_EXIT);
     forever_menu_move(&menu, 1);
     assert(menu.selected == FOREVER_MENU_FRAME_GENERATION);
     forever_menu_move(&menu, 1);
@@ -1257,6 +1318,7 @@ int main(void)
     test_hdr_config();
     test_deletion_scope();
     test_state_machine();
+    test_exit_menu();
     test_find_search_and_github();
     test_wago_menu();
     snprintf(command, sizeof(command), "rm -rf '%s'", root);

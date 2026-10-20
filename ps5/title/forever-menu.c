@@ -15,6 +15,7 @@ static const enum forever_menu_item selectable[] = {
     FOREVER_MENU_REINSTALL,
     FOREVER_MENU_UNINSTALL,
     FOREVER_MENU_CLOSE,
+    FOREVER_MENU_EXIT,
 };
 
 static struct forever_menu_result none(void)
@@ -75,6 +76,7 @@ void forever_menu_move(struct forever_menu_state *menu, int direction)
     }
     if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL ||
         menu->page == FOREVER_MENU_CONFIRM_UNINSTALL ||
+        menu->page == FOREVER_MENU_CONFIRM_EXIT ||
         menu->page == FOREVER_MENU_ADDON_CONFIRM)
     {
         menu->confirmation_selected = !menu->confirmation_selected;
@@ -230,19 +232,22 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
                      "Removing add-on..." : "Installing starter pack...");
         return addon_result(menu, command, row->key);
     }
-    if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL || menu->page == FOREVER_MENU_CONFIRM_UNINSTALL)
+    if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL ||
+        menu->page == FOREVER_MENU_CONFIRM_UNINSTALL || menu->page == FOREVER_MENU_CONFIRM_EXIT)
     {
         enum forever_menu_page page = menu->page;
         if (!menu->confirmation_selected)
         {
             menu->page = FOREVER_MENU_MAIN;
             menu->selected = page == FOREVER_MENU_CONFIRM_REINSTALL ?
-                FOREVER_MENU_REINSTALL : FOREVER_MENU_UNINSTALL;
+                FOREVER_MENU_REINSTALL : page == FOREVER_MENU_CONFIRM_UNINSTALL ?
+                FOREVER_MENU_UNINSTALL : FOREVER_MENU_EXIT;
             return none();
         }
         return (struct forever_menu_result){
             .command = page == FOREVER_MENU_CONFIRM_REINSTALL ? FOREVER_MENU_COMMAND_REINSTALL :
-                                                                    FOREVER_MENU_COMMAND_UNINSTALL};
+                page == FOREVER_MENU_CONFIRM_UNINSTALL ? FOREVER_MENU_COMMAND_UNINSTALL :
+                                                        FOREVER_MENU_COMMAND_EXIT};
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
     {
@@ -286,7 +291,8 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
         return none();
     }
     if (menu->page != FOREVER_MENU_MAIN) return none();
-    if (menu->voice_downloading && menu->selected != FOREVER_MENU_CLOSE) return none();
+    if (menu->voice_downloading && menu->selected != FOREVER_MENU_CLOSE &&
+        menu->selected != FOREVER_MENU_EXIT) return none();
     switch (menu->selected)
     {
     case FOREVER_MENU_FRAME_GENERATION:
@@ -329,6 +335,10 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
         return none();
     case FOREVER_MENU_CLOSE:
         return (struct forever_menu_result){.command = FOREVER_MENU_COMMAND_CLOSE};
+    case FOREVER_MENU_EXIT:
+        menu->page = FOREVER_MENU_CONFIRM_EXIT;
+        menu->confirmation_selected = 0;
+        return none();
     }
     return none();
 }
@@ -697,12 +707,14 @@ struct forever_menu_result forever_menu_back(struct forever_menu_state *menu)
         copy_status(menu, "Finishing add-on changes...");
         return addon_result(menu, FOREVER_MENU_COMMAND_ADDONS_CLOSE, NULL);
     }
-    if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL || menu->page == FOREVER_MENU_CONFIRM_UNINSTALL)
+    if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL ||
+        menu->page == FOREVER_MENU_CONFIRM_UNINSTALL || menu->page == FOREVER_MENU_CONFIRM_EXIT)
     {
         enum forever_menu_page page = menu->page;
         menu->page = FOREVER_MENU_MAIN;
         menu->selected = page == FOREVER_MENU_CONFIRM_REINSTALL ?
-            FOREVER_MENU_REINSTALL : FOREVER_MENU_UNINSTALL;
+            FOREVER_MENU_REINSTALL : page == FOREVER_MENU_CONFIRM_UNINSTALL ?
+            FOREVER_MENU_UNINSTALL : FOREVER_MENU_EXIT;
         return none();
     }
     if (menu->page == FOREVER_MENU_MAIN || menu->page == FOREVER_MENU_NOTICE)
@@ -739,6 +751,7 @@ struct forever_menu_result forever_menu_click_line(struct forever_menu_state *me
         case FOREVER_MENU_LINE_REINSTALL: menu->selected = FOREVER_MENU_REINSTALL; break;
         case FOREVER_MENU_LINE_UNINSTALL: menu->selected = FOREVER_MENU_UNINSTALL; break;
         case FOREVER_MENU_LINE_CLOSE: menu->selected = FOREVER_MENU_CLOSE; break;
+        case FOREVER_MENU_LINE_EXIT: menu->selected = FOREVER_MENU_EXIT; break;
         default: return none();
         }
         return forever_menu_select(menu);
@@ -767,6 +780,7 @@ struct forever_menu_result forever_menu_click_line(struct forever_menu_state *me
     }
     if (menu->page == FOREVER_MENU_CONFIRM_REINSTALL ||
         menu->page == FOREVER_MENU_CONFIRM_UNINSTALL ||
+        menu->page == FOREVER_MENU_CONFIRM_EXIT ||
         menu->page == FOREVER_MENU_ADDON_CONFIRM)
     {
         if (line == FOREVER_MENU_LINE_CANCEL) menu->confirmation_selected = 0;
@@ -939,6 +953,7 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
                  "%s Uninstall Battle.net...\n"
                  " ---------------------------------------------\n"
                  "%s Close\n"
+                 "%s Exit Battle.net\n"
                  "\n%s",
                  mark(menu->selected == FOREVER_MENU_FRAME_GENERATION),
                  frame_generation_name(menu->values.frame_generation),
@@ -950,7 +965,8 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
                  mark(menu->selected == FOREVER_MENU_ADDONS),
                  mark(menu->selected == FOREVER_MENU_REINSTALL),
                  mark(menu->selected == FOREVER_MENU_UNINSTALL),
-                 mark(menu->selected == FOREVER_MENU_CLOSE), menu->status);
+                 mark(menu->selected == FOREVER_MENU_CLOSE),
+                 mark(menu->selected == FOREVER_MENU_EXIT), menu->status);
         return;
     }
     if (menu->page == FOREVER_MENU_ADDON_PAGE)
@@ -1018,6 +1034,19 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
                  "\n"
                  "\n"
                  "\n%s Cancel\n%s Uninstall Battle.net\n",
+                 mark(!menu->confirmation_selected), mark(menu->confirmation_selected));
+        return;
+    }
+    if (menu->page == FOREVER_MENU_CONFIRM_EXIT)
+    {
+        snprintf(text, size,
+                 " Exit Battle.net and Forever Launcher?\n"
+                 " ---------------------------------------------\n"
+                 " Stops Battle.net and its update agent, then\n"
+                 " returns to the PS5 home screen.\n"
+                 " Installed games and their settings stay.\n"
+                 "\n"
+                 "\n%s Cancel\n%s Exit\n",
                  mark(!menu->confirmation_selected), mark(menu->confirmation_selected));
         return;
     }

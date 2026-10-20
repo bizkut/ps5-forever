@@ -155,7 +155,8 @@ close, or click with a mouse. The menu can:
 - browse, install, update and remove add-ons for the selected WoW version;
 - install a curated starter pack;
 - remove Battle.net while keeping installed games and their settings;
-- remove and reinstall Battle.net from a fresh installer download.
+- remove and reinstall Battle.net from a fresh installer download;
+- close Battle.net and the app (**Exit Battle.net**).
 
 **Proximity Voice Chat** is coming later; it is not available yet.
 

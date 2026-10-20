@@ -423,11 +423,13 @@ enum forever_menu_lifetime
     FOREVER_MENU_ACTIVE,
     FOREVER_MENU_TERMINAL_NOTICE,
     FOREVER_MENU_REINSTALL_READY,
+    FOREVER_MENU_EXIT_READY,
 };
 static pthread_mutex_t forever_menu_lifetime_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t forever_menu_lifetime_changed = PTHREAD_COND_INITIALIZER;
 static int forever_menu_operation;
 static atomic_int forever_menu_relaunch_pending;
+static atomic_int forever_menu_exit_pending;
 #endif
 /* This start found no initialized Wine prefix in /data/forever: it runs
  * wineboot -i instead of Battle.net, then restarts the app. */
@@ -1503,6 +1505,14 @@ void __attribute__((noreturn)) pw_native_exit(int status)
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
 #if !PW_RUNTIME_HEADLESS
+    if (atomic_load(&forever_menu_exit_pending))
+    {
+        io_log("forever: exit requested; LoadExec path=exit");
+        fflush(NULL);
+        int result = sceSystemServiceLoadExec("exit", NULL);
+        io_log("forever: exit LoadExec returned result=%d; waiting for app close", result);
+        for (;;) usleep(100000);
+    }
     if (atomic_load(&forever_menu_relaunch_pending))
     {
         io_log("forever: Battle.net reinstall restart; LoadExec path=/app0/eboot.bin");
@@ -2162,6 +2172,14 @@ static int forever_title_voice_enable(void)
 {
     int result;
     pthread_mutex_lock(&forever_voice_download.lifecycle);
+    pthread_mutex_lock(&forever_menu_lifetime_lock);
+    result = forever_menu_operation == FOREVER_MENU_IDLE ? 0 : -EBUSY;
+    pthread_mutex_unlock(&forever_menu_lifetime_lock);
+    if (result)
+    {
+        pthread_mutex_unlock(&forever_voice_download.lifecycle);
+        return result;
+    }
     pthread_mutex_lock(&forever_voice_download.lock);
     if (forever_voice_download.busy || forever_voice_download.stopping)
     {
@@ -2748,6 +2766,20 @@ static void *pw_forever_menu_remove(void *argument)
     return NULL;
 }
 
+static void *pw_forever_menu_exit(void *argument)
+{
+    int error;
+    (void)argument;
+    title_desktop_menu_status("Closing Battle.net...", 0);
+    error = pw_supervisor_quiesce_children();
+    io_log("forever: exit quiesce result=%d", error);
+    if (error) pw_supervisor_end_children();
+    atomic_store(&forever_menu_exit_pending, 1);
+    forever_title_menu_finish_lifetime(FOREVER_MENU_EXIT_READY);
+    wine_ps5_title_native_request_exit(0);
+    return NULL;
+}
+
 int forever_title_menu_action(enum forever_menu_command command, int enabled)
 {
     const char *permission_message;
@@ -2807,8 +2839,17 @@ int forever_title_menu_action(enum forever_menu_command command, int enabled)
         return result;
     case FOREVER_MENU_COMMAND_REINSTALL:
     case FOREVER_MENU_COMMAND_UNINSTALL:
-        if ((result = forever_title_menu_begin_lifetime())) return result;
-        result = pthread_create(&thread, NULL, pw_forever_menu_remove,
+    case FOREVER_MENU_COMMAND_EXIT:
+        pthread_mutex_lock(&forever_voice_download.lifecycle);
+        pthread_mutex_lock(&forever_voice_download.lock);
+        result = forever_voice_download.busy || forever_voice_download.stopping ? -EBUSY : 0;
+        pthread_mutex_unlock(&forever_voice_download.lock);
+        if (!result) result = forever_title_menu_begin_lifetime();
+        pthread_mutex_unlock(&forever_voice_download.lifecycle);
+        if (result) return result;
+        result = pthread_create(&thread, NULL,
+                                command == FOREVER_MENU_COMMAND_EXIT ?
+                                    pw_forever_menu_exit : pw_forever_menu_remove,
                                 (void *)(uintptr_t)command);
         if (result)
         {

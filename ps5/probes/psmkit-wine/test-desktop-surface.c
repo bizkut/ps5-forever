@@ -458,6 +458,7 @@ static void test_menu_overlay(void)
     struct display_rect panel, title = {0}, selected = {0}, hdr = {0};
     struct display_rect fg_value = {0}, hdr_value = {0}, hud_value = {0}, addons_value = {0};
     struct display_rect mouse_value = {0}, voice_value = {0}, proximity_value = {0};
+    struct display_rect close_row = {0}, exit_row = {0}, cancel = {0}, confirm = {0};
     struct display_rect addon_row = {0}, addon_value = {0}, hint = {0}, status = {0}, query_line = {0};
     char text[FOREVER_MENU_TEXT_BYTES];
     unsigned antialiased = 0, title_pixels = 0, hint_text_pixels = 0;
@@ -513,13 +514,20 @@ static void test_menu_overlay(void)
     check(menu_rect.right - menu_rect.left == MENU_PANEL_WIDTH,
           "menu uses the large fixed-width TV panel");
     check(menu_rect.top >= 0 && menu_rect.bottom <= DISPLAY_HEIGHT,
-          "main menu including mouse scroll and both voice rows fits on screen");
+          "main menu including the final Exit Battle.net row fits on screen");
     check(compositor_menu_line_bounds(0, &title) &&
           compositor_menu_line_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &selected) &&
           compositor_menu_line_bounds(FOREVER_MENU_LINE_HDR, &hdr),
           "menu publishes title and item geometry");
     check(compositor_menu_line_at((hdr.left + hdr.right) / 2, (hdr.top + hdr.bottom) / 2) ==
           FOREVER_MENU_LINE_HDR, "mouse hit testing follows the HDR row geometry");
+    check(compositor_menu_line_bounds(FOREVER_MENU_LINE_CLOSE, &close_row) &&
+          compositor_menu_line_bounds(FOREVER_MENU_LINE_EXIT, &exit_row) &&
+          close_row.bottom <= exit_row.top && exit_row.bottom < menu_rect.bottom,
+          "Exit Battle.net is below Close inside the menu panel");
+    check(compositor_menu_line_at((exit_row.left + exit_row.right) / 2,
+                                  (exit_row.top + exit_row.bottom) / 2) ==
+          FOREVER_MENU_LINE_EXIT, "mouse hit testing reaches the final Exit Battle.net row");
     check(compositor_menu_value_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &fg_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_HDR, &hdr_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_HUD, &hud_value) &&
@@ -548,6 +556,31 @@ static void test_menu_overlay(void)
     check(image[(size_t)panel.top * DISPLAY_WIDTH + panel.left - 1] == BACKGROUND,
           "menu drawing changes nothing outside its panel");
     write_menu_preview();
+    menu.selected = FOREVER_MENU_EXIT;
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(image[(size_t)(exit_row.top + 2) * DISPLAY_WIDTH + exit_row.left + 2] ==
+          MENU_SELECTION, "Exit Battle.net has a full-width selection highlight");
+    assert(forever_menu_select(&menu).command == FOREVER_MENU_COMMAND_NONE);
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_text_supported(text) && compositor_menu_title_fits() &&
+          menu_rect.top >= 0 && menu_rect.bottom <= DISPLAY_HEIGHT,
+          "Exit Battle.net confirmation title and panel fit on screen");
+    check(compositor_menu_line_bounds(FOREVER_MENU_LINE_CANCEL, &cancel) &&
+          compositor_menu_line_bounds(FOREVER_MENU_LINE_CONFIRM, &confirm) &&
+          compositor_menu_line_at((cancel.left + cancel.right) / 2,
+                                  (cancel.top + cancel.bottom) / 2) ==
+          FOREVER_MENU_LINE_CANCEL &&
+          compositor_menu_line_at((confirm.left + confirm.right) / 2,
+                                  (confirm.top + confirm.bottom) / 2) ==
+          FOREVER_MENU_LINE_CONFIRM,
+          "Exit confirmation Cancel and Exit rows retain their click geometry");
+    check(image[(size_t)(cancel.top + 2) * DISPLAY_WIDTH + cancel.left + 2] ==
+          MENU_SELECTION, "Exit confirmation highlights Cancel by default");
+    forever_menu_back(&menu);
     menu.selected = FOREVER_MENU_INVERT_SCROLL;
     forever_menu_commit(&menu, FOREVER_MENU_COMMAND_SET_INVERT_SCROLL, 1);
     forever_menu_render(&menu, text, sizeof(text));

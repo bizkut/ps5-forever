@@ -982,11 +982,13 @@ static void apply_menu_result(struct forever_menu_result result)
         return;
     }
     if (result.command == FOREVER_MENU_COMMAND_REINSTALL ||
-        result.command == FOREVER_MENU_COMMAND_UNINSTALL)
+        result.command == FOREVER_MENU_COMMAND_UNINSTALL ||
+        result.command == FOREVER_MENU_COMMAND_EXIT)
     {
         forever_menu_progress(&menu, result.command == FOREVER_MENU_COMMAND_REINSTALL ?
                               "Stopping Battle.net before reinstalling..." :
-                              "Stopping Battle.net before removing it...");
+                              result.command == FOREVER_MENU_COMMAND_UNINSTALL ?
+                              "Stopping Battle.net before removing it..." : "Closing Battle.net...");
         render_menu();
         error = forever_title_menu_action(result.command, 0);
 #ifdef FOREVER_MENU_DIAG
@@ -994,7 +996,11 @@ static void apply_menu_result(struct forever_menu_result result)
                result.command, error);
 #endif
         if (!error) return;
-        snprintf(status, sizeof(status), "Could not start the operation (error %d).", -error);
+        if (error == -EBUSY && result.command == FOREVER_MENU_COMMAND_EXIT)
+            snprintf(status, sizeof(status),
+                     "Another operation is still running. Wait for it to finish before exiting.");
+        else
+            snprintf(status, sizeof(status), "Could not start the operation (error %d).", -error);
         forever_menu_notice(&menu, status);
         render_menu();
         return;
