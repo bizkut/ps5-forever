@@ -180,10 +180,11 @@ resume; the process limit and Battle.net's updater/game reserve stay unchanged.
 Add-ons are checked against the selected channel's product and client version,
 and go into that channel's own `Interface/AddOns` folder. Find and Starter packs
 cover Retail (including PTR/beta), Classic MoP, Anniversary, Classic Era and
-Forever. Find uses [layday's GitHub add-on catalogue](https://github.com/layday/github-wow-addon-catalogue),
-merged with Forever's curated rows and compatible WoWInterface/Tukui entries.
-The GitHub index is cached for 24 hours, secondary indexes for six hours;
-offline use keeps the last good cache or the build's bundled GitHub snapshot.
+Forever. Find uses [Forever's own GitHub add-on catalogue](https://github.com/bizkut/github-wow-addon-catalogue),
+derived from [layday's GPL-3.0 catalogue](https://github.com/layday/github-wow-addon-catalogue),
+and compatible WoWInterface/Tukui entries. Our list refreshes daily and the
+launcher checks it at most once every 24 hours; offline use keeps the last good
+cache or the build's bundled snapshot.
 **Add from GitHub link…** remains available. Unknown products say “Add-ons aren't
 supported for this WoW version yet”; they never receive another flavour's files.
 

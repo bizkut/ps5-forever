@@ -15,6 +15,7 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 - **Exit Battle.net** at the bottom of the Forever menu closes Battle.net properly and returns to the PS5 home screen, after a confirmation (Cancel is the default).
 - **Invert mouse scroll** in the Forever menu reverses the USB mouse wheel. It is on by default; touchpad and stick scrolling are unchanged.
 - Fixes a rare crash during Battle.net start-up when one of its processes ended at an unlucky moment.
+- The add-on list is now our own, refreshed daily, and includes the newest Forever add-ons.
 - If Battle.net is reinstalled, Classic Era and Anniversary may need **Update** or **Scan and Repair** in Battle.net once before they start again.
 
 ### Forever Launcher 01.000.015

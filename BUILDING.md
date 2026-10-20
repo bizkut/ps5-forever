@@ -301,10 +301,16 @@ remain in force.
   token, final-channel mapping and behavioural tests; the upstream checkout is
   copied before patching and is never modified.
 - CI uses the committed `ps5/addonforge/github-catalogue.csv` snapshot, not a
-  live fetch: 609,505 bytes, 2,421 rows, SHA-256
-  `8d5b512a8bf7b2d6107f2b2a2407a0f24485752cca6e58b6771c7a7b856dbd09`.
+  live fetch: 742,020 bytes, 2,674 rows, SHA-256
+  `e41a07c1a9af69ddd3378feafc9c2e21adb28fbe52633ea3ff5bfd5bcac21763`.
   It is compiled into the core and packaged as
   `wine-title/addonforge/github-catalogue.csv`; runtime refreshes remain separate.
+- `0009-own-catalogue-release-streams.patch` uses Forever's daily-refreshed
+  [catalogue fork](https://github.com/bizkut/github-wow-addon-catalogue), which
+  remains GPL-3.0 and credits layday. Optional tag-prefix, asset-name and folder
+  columns keep monorepo and multi-pack installs and updates on their selected
+  release stream; old layday-format rows remain valid. Downloads stream to disk
+  under a 4 GiB cap and title mutations allow 30 minutes for large audio packs.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,

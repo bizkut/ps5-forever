@@ -562,6 +562,19 @@ Classic Era failure is not established.
   never fetches a live CSV. `build.py --catalogue-snapshot` replays the same
   bytes for both cold builds.
   Generated notices include the catalogue attribution and full GPL-3.0 text.
+- `0009-own-catalogue-release-streams.patch` switches both the runtime endpoint
+  and bundled input schema to
+  [Forever's catalogue fork](https://github.com/bizkut/github-wow-addon-catalogue),
+  derived from layday's GPL-3.0 data. Optional trailing CSV fields select a
+  literal release-tag prefix, an exact or single-wildcard asset name, and the
+  installed folder set. Plain layday-format rows still parse with empty
+  selectors. Install and update pass the same selectors, so monorepo packs
+  never cross tag streams; folder-first reconciliation attaches hand-installed
+  copies to the matching row even when several rows share one repository.
+  Exact asset rows also separate distinct add-ons published in one release.
+  Add-on downloads stream to disk with a 4 GiB safety cap; the title allows
+  30 minutes for install/update/remove operations so the largest catalogue
+  audio packs can download and extract without the loopback request expiring.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
   cached for six hours with last-good fallback. WoWInterface downloads use
@@ -615,6 +628,15 @@ Classic Era failure is not established.
   Find row counts were Retail 2,320; MoP 640; Anniversary 1,040; Era 1,131;
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
+  The 0009 receipt pins patch SHA-256
+  `8282c3d53d47a279bae4679d45e0b58db087e44ede95c08b56b50f03021a0a78`.
+  Both cold Windows builds produced
+  `9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88`
+  (3,430,400 bytes). Forever's customized snapshot contains 2,674 rows,
+  is 742,020 bytes, and has SHA-256
+  `e41a07c1a9af69ddd3378feafc9c2e21adb28fbe52633ea3ff5bfd5bcac21763`.
+  All 42 enabled offline headless Rust tests passed; the live endpoint/archive
+  qualification remains separately opt-in.
   The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows
   129 and 2,999, and explicit overflow rejection. Menu and desktop-surface
   host tests also passed after moving their enlarged fixtures off the stack.

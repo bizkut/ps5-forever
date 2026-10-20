@@ -13,6 +13,7 @@ source and build instructions.
 | [Proton](https://github.com/ValveSoftware/Proton) (Valve) | per component, see Proton's `LICENSE` and `dist.LICENSE` | starting point of the build system and Wine tree |
 | [Wine](https://www.winehq.org/), PS5 fork | LGPL-2.1-or-later | runs Battle.net and WoW; all files below `wine-title/` except those listed below |
 | [AddonForge](https://github.com/Topher121/AddonForge) 0.3.0, patched headless core | MIT; Rust dependencies retain their licences in `licenses/AddonForge/` and the generated runtime notice | `wine-title/addonforge/addonforge-core.exe`, add-on catalogue/install/update/remove core |
+| [Forever's github-wow-addon-catalogue fork](https://github.com/bizkut/github-wow-addon-catalogue), derived from [layday's catalogue](https://github.com/layday/github-wow-addon-catalogue) | GPL-3.0 | daily refreshed and bundled `wine-title/addonforge/github-catalogue.csv` data; copyright layday, bizkut and contributors |
 | [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton), PS5 fork | Combined frame-generation build: GPL-3.0-or-later; underlying vkd3d-proton code retains LGPL-2.1-or-later | `d3d12.dll`, `d3d12core.dll` |
 | [Eden](https://eden-emu.dev/) frame generation (commit `67bada77`), via [ProsperoEden](https://github.com/blackbearreloaded/ProsperoEden) | GPL-3.0-or-later | `vkd3d-proton/libs/vkd3d/wineps5_fg*` |
 | [lsfg-vk](https://github.com/PancakeTAS/lsfg-vk) | GPL-3.0-or-later | the Lossless Scaling frame-generation code Eden's port is based on |
