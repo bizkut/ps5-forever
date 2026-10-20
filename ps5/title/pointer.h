@@ -37,6 +37,8 @@ void pointer_init(int width, int height);
 /* GPU fallback keeps the historical Options -> Escape mapping. Maintenance
  * leaves it disabled because the title consumes Options for its menu. */
 void pointer_options_escape(int enabled);
+/* Invert only USB mouse wheel/tilt; touchpad and stick scroll are unchanged. */
+void pointer_set_invert_scroll(int enabled);
 /* Feeds one input event. */
 void pointer_input(const struct input_event *event, pointer_handler handler, void *context);
 /* Once a frame, after the frame's input: stick motion, scrolling and key

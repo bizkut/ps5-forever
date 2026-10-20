@@ -97,14 +97,15 @@ static inline int forever_menu_read_frame_generation(
 }
 
 static inline int forever_menu_read_settings(
-    const char *frame_generation, const char *hdr, const char *hud, const char *voice,
-    enum forever_frame_generation *frame_generation_value, int *hdr_value, int *hud_value,
-    int *voice_value)
+    const char *frame_generation, const char *hdr, const char *hud, const char *mouse,
+    const char *voice, enum forever_frame_generation *frame_generation_value,
+    int *hdr_value, int *hud_value, int *invert_scroll_value, int *voice_value)
 {
     int first = 0, error;
     *frame_generation_value = FOREVER_FG_ON;
     *hdr_value = 1;
     *hud_value = 0;
+    *invert_scroll_value = 1;
     *voice_value = 0;
     error = forever_menu_read_frame_generation(
         frame_generation, FOREVER_FG_ON, frame_generation_value);
@@ -112,6 +113,8 @@ static inline int forever_menu_read_settings(
     error = forever_menu_read_switch(hdr, "hdr", 1, hdr_value);
     if (error && !first) first = error;
     error = forever_menu_read_switch(hud, "hud", 0, hud_value);
+    if (error && !first) first = error;
+    error = forever_menu_read_switch(mouse, "invert_scroll", 1, invert_scroll_value);
     if (error && !first) first = error;
     error = forever_menu_read_switch(voice, "voice", 0, voice_value);
     if (error && !first) first = error;

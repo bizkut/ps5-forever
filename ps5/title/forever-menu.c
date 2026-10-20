@@ -9,6 +9,7 @@ static const enum forever_menu_item selectable[] = {
     FOREVER_MENU_FRAME_GENERATION,
     FOREVER_MENU_HDR,
     FOREVER_MENU_HUD,
+    FOREVER_MENU_INVERT_SCROLL,
     FOREVER_MENU_VOICE,
     FOREVER_MENU_ADDONS,
     FOREVER_MENU_REINSTALL,
@@ -299,6 +300,9 @@ struct forever_menu_result forever_menu_select(struct forever_menu_state *menu)
     case FOREVER_MENU_HUD:
         return (struct forever_menu_result){
             .command = FOREVER_MENU_COMMAND_SET_HUD, .enabled = !menu->values.hud};
+    case FOREVER_MENU_INVERT_SCROLL:
+        return (struct forever_menu_result){
+            .command = FOREVER_MENU_COMMAND_SET_INVERT_SCROLL, .enabled = !menu->values.invert_scroll};
     case FOREVER_MENU_VOICE:
         if (menu->voice_downloading) return none();
         return (struct forever_menu_result){
@@ -726,6 +730,7 @@ struct forever_menu_result forever_menu_click_line(struct forever_menu_state *me
         case FOREVER_MENU_LINE_FRAME_GENERATION: menu->selected = FOREVER_MENU_FRAME_GENERATION; break;
         case FOREVER_MENU_LINE_HDR: menu->selected = FOREVER_MENU_HDR; break;
         case FOREVER_MENU_LINE_HUD: menu->selected = FOREVER_MENU_HUD; break;
+        case FOREVER_MENU_LINE_INVERT_SCROLL: menu->selected = FOREVER_MENU_INVERT_SCROLL; break;
         case FOREVER_MENU_LINE_VOICE: menu->selected = FOREVER_MENU_VOICE; break;
         case FOREVER_MENU_LINE_PROXIMITY_VOICE:
             copy_status(menu, "Proximity Voice Chat is coming later.");
@@ -781,6 +786,7 @@ void forever_menu_commit(struct forever_menu_state *menu, enum forever_menu_comm
         break;
     case FOREVER_MENU_COMMAND_SET_HDR: menu->values.hdr = !!enabled; break;
     case FOREVER_MENU_COMMAND_SET_HUD: menu->values.hud = !!enabled; break;
+    case FOREVER_MENU_COMMAND_SET_INVERT_SCROLL: menu->values.invert_scroll = !!enabled; break;
     case FOREVER_MENU_COMMAND_SET_VOICE: menu->values.voice = !!enabled; break;
     default: return;
     }
@@ -923,6 +929,7 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
                  "%s Frame generation\t%s\n"
                  "%s HDR\t%s\n"
                  "%s Performance overlay\t%s\n"
+                 "%s Invert mouse scroll\t%s\n"
                  "%s Voice-to-Text\t%s\n"
                  "  Proximity Voice Chat\tComing later\n"
                  " ---------------------------------------------\n"
@@ -937,6 +944,8 @@ void forever_menu_render(const struct forever_menu_state *menu, char *text, size
                  frame_generation_name(menu->values.frame_generation),
                  mark(menu->selected == FOREVER_MENU_HDR), menu->values.hdr ? "On" : "Off",
                  mark(menu->selected == FOREVER_MENU_HUD), menu->values.hud ? "On" : "Off",
+                 mark(menu->selected == FOREVER_MENU_INVERT_SCROLL),
+                 menu->values.invert_scroll ? "On" : "Off",
                  mark(menu->selected == FOREVER_MENU_VOICE), menu->values.voice ? "On" : "Off",
                  mark(menu->selected == FOREVER_MENU_ADDONS),
                  mark(menu->selected == FOREVER_MENU_REINSTALL),

@@ -453,11 +453,11 @@ static void write_addon_preview(const char *name)
 static void test_menu_overlay(void)
 {
     static struct forever_menu_state menu;
-    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0};
+    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0, 0};
     static struct forever_addon_snapshot snapshot = {0};
     struct display_rect panel, title = {0}, selected = {0}, hdr = {0};
     struct display_rect fg_value = {0}, hdr_value = {0}, hud_value = {0}, addons_value = {0};
-    struct display_rect voice_value = {0}, proximity_value = {0};
+    struct display_rect mouse_value = {0}, voice_value = {0}, proximity_value = {0};
     struct display_rect addon_row = {0}, addon_value = {0}, hint = {0}, status = {0}, query_line = {0};
     char text[FOREVER_MENU_TEXT_BYTES];
     unsigned antialiased = 0, title_pixels = 0, hint_text_pixels = 0;
@@ -513,7 +513,7 @@ static void test_menu_overlay(void)
     check(menu_rect.right - menu_rect.left == MENU_PANEL_WIDTH,
           "menu uses the large fixed-width TV panel");
     check(menu_rect.top >= 0 && menu_rect.bottom <= DISPLAY_HEIGHT,
-          "main menu including both voice rows fits on screen");
+          "main menu including mouse scroll and both voice rows fits on screen");
     check(compositor_menu_line_bounds(0, &title) &&
           compositor_menu_line_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &selected) &&
           compositor_menu_line_bounds(FOREVER_MENU_LINE_HDR, &hdr),
@@ -523,13 +523,15 @@ static void test_menu_overlay(void)
     check(compositor_menu_value_bounds(FOREVER_MENU_LINE_FRAME_GENERATION, &fg_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_HDR, &hdr_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_HUD, &hud_value) &&
+          compositor_menu_value_bounds(FOREVER_MENU_LINE_INVERT_SCROLL, &mouse_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_VOICE, &voice_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_PROXIMITY_VOICE, &proximity_value) &&
           compositor_menu_value_bounds(FOREVER_MENU_LINE_ADDONS, &addons_value) &&
           fg_value.right == hdr_value.right && hdr_value.right == hud_value.right &&
-          hud_value.right == voice_value.right && voice_value.right == proximity_value.right &&
+          hud_value.right == mouse_value.right && mouse_value.right == voice_value.right &&
+          voice_value.right == proximity_value.right &&
           proximity_value.right == addons_value.right,
-          "item and voice values share one right-aligned column");
+          "item, mouse scroll and voice values share one right-aligned column");
     check(compositor_menu_line_at(menu_rect.left - 1, (hdr.top + hdr.bottom) / 2) == -1,
           "mouse outside menu selects nothing");
     check(image[(size_t)(selected.top + 2) * DISPLAY_WIDTH + selected.left + 2] ==
@@ -546,6 +548,17 @@ static void test_menu_overlay(void)
     check(image[(size_t)panel.top * DISPLAY_WIDTH + panel.left - 1] == BACKGROUND,
           "menu drawing changes nothing outside its panel");
     write_menu_preview();
+    menu.selected = FOREVER_MENU_INVERT_SCROLL;
+    forever_menu_commit(&menu, FOREVER_MENU_COMMAND_SET_INVERT_SCROLL, 1);
+    forever_menu_render(&menu, text, sizeof(text));
+    compositor_menu(text);
+    compositor_compose();
+    check(compositor_menu_line_at((mouse_value.left + mouse_value.right) / 2,
+                                  (mouse_value.top + mouse_value.bottom) / 2) ==
+          FOREVER_MENU_LINE_INVERT_SCROLL, "mouse hit testing follows the invert-scroll row");
+    check(menu_rect.top >= 0 && menu_rect.bottom <= DISPLAY_HEIGHT,
+          "selected mouse-scroll row fits inside the menu");
+    write_addon_preview("invert-mouse-scroll");
     menu.selected = FOREVER_MENU_VOICE;
     menu.voice_downloading = 1;
     forever_menu_status(&menu, "Downloading voice model\xe2\x80\xa6 37%");

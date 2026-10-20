@@ -637,10 +637,47 @@ static void test_download_redirects(void)
                                     FOREVER_VOICE_MODEL_URL, url) == EINVAL);
 }
 
+static void test_mouse_scroll_menu(void)
+{
+    static struct forever_menu_state menu;
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 0, 0};
+    struct forever_menu_result result;
+    char text[FOREVER_MENU_TEXT_BYTES];
+    forever_menu_init(&menu);
+    forever_menu_open(&menu, &values);
+    forever_menu_render(&menu, text, sizeof(text));
+    const char *hud = strstr(text, "Performance overlay\tOff");
+    const char *mouse = strstr(text, "Invert mouse scroll\tOff");
+    const char *voice = strstr(text, "Voice-to-Text\tOff");
+    assert(hud && mouse && voice && hud < mouse && mouse < voice);
+    assert(FOREVER_MENU_LINE_INVERT_SCROLL == FOREVER_MENU_LINE_HUD + 1);
+    assert(FOREVER_MENU_LINE_VOICE == FOREVER_MENU_LINE_INVERT_SCROLL + 1);
+    result = forever_menu_click_line(&menu, FOREVER_MENU_LINE_INVERT_SCROLL);
+    assert(result.command == FOREVER_MENU_COMMAND_SET_INVERT_SCROLL && result.enabled);
+    assert(!menu.values.invert_scroll); /* commit only after a successful save */
+    forever_menu_status(&menu, "Could not save the setting (error 13).");
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Invert mouse scroll\tOff") && strstr(text, "error 13"));
+    forever_menu_commit(&menu, result.command, result.enabled);
+    assert(menu.values.invert_scroll && !menu.status[0]);
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Invert mouse scroll\tOn"));
+    result = forever_menu_select(&menu);
+    assert(result.command == FOREVER_MENU_COMMAND_SET_INVERT_SCROLL && !result.enabled);
+    forever_menu_commit(&menu, result.command, result.enabled);
+    assert(!menu.values.invert_scroll);
+    forever_menu_move(&menu, -1);
+    assert(menu.selected == FOREVER_MENU_HUD);
+    forever_menu_move(&menu, 1);
+    assert(menu.selected == FOREVER_MENU_INVERT_SCROLL);
+    forever_menu_move(&menu, 1);
+    assert(menu.selected == FOREVER_MENU_VOICE);
+}
+
 static void test_voice_menu(void)
 {
     static struct forever_menu_state menu;
-    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 0};
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 0, 0};
     struct forever_menu_result result;
     char text[FOREVER_MENU_TEXT_BYTES];
     forever_menu_init(&menu);
@@ -683,8 +720,8 @@ static void test_voice_menu(void)
 
 static void test_key_rewrite(void)
 {
-    char path[1024], fg[1024], hdr[1024], hud[1024], voice[1024];
-    int enabled = -1, hdr_enabled = -1, hud_enabled = -1, voice_enabled = -1;
+    char path[1024], fg[1024], hdr[1024], hud[1024], mouse[1024], voice[1024];
+    int enabled = -1, hdr_enabled = -1, hud_enabled = -1, invert_scroll = -1, voice_enabled = -1;
     enum forever_frame_generation fg_mode = FOREVER_FG_OFF;
 
     make_path(path, sizeof(path), "switches/drive_c/wineps5-fg.txt");
@@ -706,16 +743,45 @@ static void test_key_rewrite(void)
     make_path(hdr, sizeof(hdr), "switches/drive_c/independent-hdr.txt");
     make_path(hud, sizeof(hud), "switches/drive_c/independent-hud.txt");
     make_path(voice, sizeof(voice), "switches/drive_c/independent-voice.txt");
+    make_path(mouse, sizeof(mouse), "switches/drive_c/wineps5-mouse.txt");
+    assert(!forever_menu_read_switch(mouse, "invert_scroll", 0, &invert_scroll) && !invert_scroll);
+    assert(!forever_menu_rewrite_switch(mouse, "invert_scroll", 1));
+    assert(text_is("switches/drive_c/wineps5-mouse.txt", "invert_scroll=on\n"));
+    put("switches/drive_c/wineps5-mouse.txt", "speed=2\tinvert_scroll=off\nother=keep\n");
+    assert(!forever_menu_rewrite_switch(mouse, "invert_scroll", 1));
+    assert(text_is("switches/drive_c/wineps5-mouse.txt",
+                   "speed=2\tinvert_scroll=on\nother=keep\n"));
+    assert(!forever_menu_read_switch(mouse, "invert_scroll", 0, &invert_scroll) && invert_scroll);
+    assert(!forever_menu_rewrite_switch(mouse, "invert_scroll", 0));
+    assert(text_is("switches/drive_c/wineps5-mouse.txt",
+                   "speed=2\tinvert_scroll=off\nother=keep\n"));
+    put("switches/drive_c/wineps5-mouse.txt", "invert_scroll=invalid other=keep\n");
+    assert(forever_menu_read_switch(mouse, "invert_scroll", 0, &invert_scroll) == -EINVAL);
+    assert(!invert_scroll);
+    assert(!forever_menu_rewrite_switch(mouse, "invert_scroll", 1));
+    assert(text_is("switches/drive_c/wineps5-mouse.txt", "invert_scroll=on other=keep\n"));
     put("switches/drive_c/independent-fg.txt", "fg=invalid\n");
     put("switches/drive_c/independent-hdr.txt", "hdr=off\n");
     put("switches/drive_c/independent-hud.txt", "hud=on\n");
     assert(!forever_menu_read_switch(voice, "voice", 0, &voice_enabled) && !voice_enabled);
     put("switches/drive_c/independent-voice.txt", "voice=on device=default\n");
-    assert(forever_menu_read_settings(fg, hdr, hud, voice,
-        &fg_mode, &hdr_enabled, &hud_enabled, &voice_enabled) == -EINVAL);
+    assert(forever_menu_read_settings(fg, hdr, hud, mouse, voice,
+        &fg_mode, &hdr_enabled, &hud_enabled, &invert_scroll, &voice_enabled) == -EINVAL);
     assert(fg_mode == FOREVER_FG_ON);
     assert(!hdr_enabled && hud_enabled); /* one bad setting cannot hide the other two */
     assert(voice_enabled); /* bad FG must not hide the independent voice setting */
+    assert(invert_scroll); /* bad FG must not hide the independent mouse setting */
+    put("switches/drive_c/independent-fg.txt", "fg=on\n");
+    put("switches/drive_c/wineps5-mouse.txt", "invert_scroll=on invert_scroll=off\n");
+    assert(forever_menu_read_settings(fg, hdr, hud, mouse, voice,
+        &fg_mode, &hdr_enabled, &hud_enabled, &invert_scroll, &voice_enabled) == -EINVAL);
+    assert(invert_scroll && voice_enabled && hud_enabled && !hdr_enabled); /* invalid: default On */
+    assert(forever_menu_rewrite_switch(mouse, "invert_scroll", 1) == -EINVAL);
+    assert(text_is("switches/drive_c/wineps5-mouse.txt", "invert_scroll=on invert_scroll=off\n"));
+    assert(!unlink(mouse));
+    assert(!forever_menu_read_settings(fg, hdr, hud, mouse, voice,
+        &fg_mode, &hdr_enabled, &hud_enabled, &invert_scroll, &voice_enabled));
+    assert(invert_scroll); /* no mouse file: On by default */
     assert(!forever_menu_rewrite_switch(voice, "voice", 0));
     assert(text_is("switches/drive_c/independent-voice.txt", "voice=off device=default\n"));
     assert(!forever_menu_rewrite_switch(voice, "voice", 1));
@@ -806,7 +872,7 @@ static void test_deletion_scope(void)
 
 static void open_find(struct forever_menu_state *menu, struct forever_addon_snapshot *snapshot)
 {
-    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0};
+    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0, 0};
     forever_menu_init(menu);
     forever_menu_open(menu, &values);
     menu->page = FOREVER_MENU_ADDON_PAGE;
@@ -955,7 +1021,7 @@ static void test_find_search_and_github(void)
 static void test_state_machine(void)
 {
     static struct forever_menu_state menu;
-    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0};
+    struct forever_menu_values values = {FOREVER_FG_AUTO, 1, 0, 0, 0};
     static struct forever_addon_snapshot snapshot = {.tab = FOREVER_ADDON_FIND};
     struct forever_menu_result result;
     char text[FOREVER_MENU_TEXT_BYTES];
@@ -970,6 +1036,8 @@ static void test_state_machine(void)
     assert(menu.selected == FOREVER_MENU_FRAME_GENERATION);
     forever_menu_move(&menu, 1);
     forever_menu_move(&menu, 1);
+    forever_menu_move(&menu, 1);
+    assert(menu.selected == FOREVER_MENU_INVERT_SCROLL);
     forever_menu_move(&menu, 1);
     assert(menu.selected == FOREVER_MENU_VOICE);
     forever_menu_move(&menu, 1);
@@ -1184,6 +1252,7 @@ int main(void)
     test_voice_download();
     test_voice_resume();
     test_download_redirects();
+    test_mouse_scroll_menu();
     test_voice_menu();
     test_hdr_config();
     test_deletion_scope();

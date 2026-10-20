@@ -7,16 +7,20 @@
 #include <setjmp.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
+static int test_pthread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
 static int test_clock_gettime(clockid_t clock, struct timespec *now);
 static int test_usleep(useconds_t usecs);
 static FILE *test_voice_fopen(const char *, const char *);
 #define fopen test_voice_fopen
 #define clock_gettime test_clock_gettime
 #define usleep test_usleep
+#define pthread_create test_pthread_create
 #include "runtime-input.c"
 #undef clock_gettime
 #undef usleep
 #undef fopen
+#undef pthread_create
 
 static int osk_calls, osk_open, vibration_calls, vibration_result;
 static int open_diagnostic_pending, raw_diagnostic_pending, raw_diagnostic_calls;
@@ -35,15 +39,37 @@ static char ime_initial_text[VOICE_TEXT_BYTES];
 static int ime_show_result;
 static int voice_fopen_errno = ENOENT;
 static unsigned voice_setting_line_count, voice_hold_line_count;
+static const char *mouse_test_setting;
+static unsigned mouse_setting_reads, input_start_calls;
 static FILE *test_voice_fopen(const char *path, const char *mode)
 {
-    assert(!strcmp(path, "/data/forever/prefix/drive_c/wineps5-voice.txt") && !strcmp(mode, "r"));
-    voice_setting_reads++;
-    if (!voice_test_setting) { errno = voice_fopen_errno; return NULL; }
+    const char *text;
+    assert(!strcmp(mode, "r"));
+    if (!strcmp(path, "/data/forever/prefix/drive_c/wineps5-mouse.txt"))
+    {
+        mouse_setting_reads++;
+        text = mouse_test_setting;
+        if (!text) { errno = ENOENT; return NULL; }
+    }
+    else
+    {
+        assert(!strcmp(path, "/data/forever/prefix/drive_c/wineps5-voice.txt"));
+        voice_setting_reads++;
+        text = voice_test_setting;
+        if (!text) { errno = voice_fopen_errno; return NULL; }
+    }
     FILE *file = tmpfile();
-    assert(file && fputs(voice_test_setting, file) >= 0);
+    assert(file && fputs(text, file) >= 0);
     rewind(file);
     return file;
+}
+static int test_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                               void *(*start)(void *), void *arg)
+{
+    (void)thread;
+    assert(!attr && start == poll_devices && !arg);
+    input_start_calls++;
+    return EAGAIN; /* Exercise startup without creating an unbounded device worker. */
 }
 static int test_clock_gettime(clockid_t clock, struct timespec *now)
 {
@@ -543,12 +569,98 @@ static void test_voice_routing(void)
     assert(!voice_enabled(&setting_rc) && setting_rc == ENOENT);
 }
 
+static struct pointer_event wheel_event;
+static unsigned wheel_events;
+static void record_wheel(const struct pointer_event *event, void *context)
+{
+    (void)context;
+    assert(event->kind == POINTER_WHEEL);
+    wheel_event = *event;
+    wheel_events++;
+}
+
+static void test_mouse_scroll(void)
+{
+    struct input_event wheel = {.kind = INPUT_MOUSE_WHEEL, .dx = 2, .dy = -3};
+    pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
+    pointer_input(&wheel, record_wheel, NULL);
+    assert(wheel_event.dx == 240 && wheel_event.dy == 360); /* default is unchanged */
+    for (int enabled = 0; enabled <= 1; enabled++)
+    {
+        pointer_set_invert_scroll(enabled);
+        pointer_cancel(); /* input focus changes must preserve the preference */
+        unsigned before = wheel_events;
+        pointer_input(&wheel, record_wheel, NULL);
+        assert(wheel_events == before + 1);
+        assert(wheel_event.dx == (enabled ? -240 : 240));
+        assert(wheel_event.dy == (enabled ? -360 : 360));
+        wheel.dx = -wheel.dx; wheel.dy = -wheel.dy;
+        pointer_input(&wheel, record_wheel, NULL);
+        assert(wheel_event.dx == (enabled ? 240 : -240));
+        assert(wheel_event.dy == (enabled ? 360 : -360));
+        wheel.dx = -wheel.dx; wheel.dy = -wheel.dy;
+
+        struct input_event pad = {.kind = INPUT_PAD, .connected = 1,
+            .lx = 128, .ly = 128, .rx = 128, .ry = 128,
+            .touches = 2, .touch_id = 1, .touch_x = 100, .touch_y = 100};
+        pointer_input(&pad, record_wheel, NULL);
+        pad.touch_x += 7; pad.touch_y -= 9;
+        pointer_input(&pad, record_wheel, NULL);
+        assert(wheel_event.dx == -14 && wheel_event.dy == -18);
+        pointer_cancel();
+        pad.touches = 0; pad.rx = 0; pad.ry = 0;
+        pointer_input(&pad, record_wheel, NULL);
+        pointer_frame(1000000, record_wheel, NULL);
+        pointer_frame(1100000, record_wheel, NULL);
+        assert(wheel_event.dx == -96 && wheel_event.dy == 96);
+    }
+    pointer_set_invert_scroll(0);
+    pointer_cancel();
+}
+
+static void test_mouse_scroll_startup(void)
+{
+    static const struct { const char *text; int enabled; } cases[] = {
+        {NULL, 1}, {"speed=2\n", 1}, {"invert_scroll=off\n", 0},
+        {"speed=2\tinvert_scroll=on\nother=keep\n", 1},
+        {"speed=2\tinvert_scroll=off\nother=keep\n", 0},
+        {"invert_scroll=invalid\n", 1}, {"invert_scroll=OFF\n", 1},
+        {"invert_scroll=on invert_scroll=off\n", 1},
+        {"other_invert_scroll=off\n", 1}, {"invert_scroll=off-extra\n", 1},
+    };
+    struct input_event wheel = {.kind = INPUT_MOUSE_WHEEL, .dx = 1, .dy = 1};
+    union ps5_title_input event;
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        mouse_test_setting = cases[i].text;
+        pointer_set_invert_scroll(!cases[i].enabled);
+        unsigned reads_before = mouse_setting_reads;
+        unsigned starts_before = input_start_calls;
+        assert(pw_title_input_start() == EAGAIN);
+        assert(mouse_setting_reads == reads_before + 1 && input_start_calls == starts_before + 1);
+        mouse_test_setting = "invert_scroll=invalid\n"; /* no per-event reread */
+        on_input(&wheel, NULL);
+        assert(pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+        assert(event.header.type == PS5_DESKTOP_MOUSE);
+        assert(event.mouse.kind == (PS5_DESKTOP_MOUSE_WHEEL | PS5_TITLE_MOUSE_RELATIVE));
+        assert(event.mouse.wheel_x == (cases[i].enabled ? -120 : 120));
+        assert(event.mouse.wheel_y == (cases[i].enabled ? 120 : -120));
+        assert(mouse_setting_reads == reads_before + 1);
+        assert(!pw_title_read_input(&event, sizeof(event), 0, 0, 0, 0));
+    }
+    mouse_test_setting = NULL;
+    pointer_set_invert_scroll(0);
+    pointer_cancel();
+}
+
 int main(void)
 {
     union ps5_title_input event;
     struct ps5_desktop_key key = {{PS5_DESKTOP_KEY, sizeof(key)}, 4, 1, 0};
     struct input_event device = {.kind = INPUT_MOUSE_MOVE, .dx = -100, .dy = 75};
     struct pointer_event pointer = {.kind = POINTER_MOVE};
+    test_mouse_scroll();
+    test_mouse_scroll_startup();
     {
         const unsigned chord = PAD_L3 | PAD_R3;
         assert(!osk_chord_update(PAD_L3 | PAD_CROSS, 1, 0));

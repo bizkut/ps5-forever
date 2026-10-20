@@ -1986,8 +1986,10 @@ int forever_title_menu_load(struct forever_menu_values *values)
         FOREVER_DRIVE_C "/wineps5-fg.txt",
         FOREVER_DRIVE_C "/wineps5-hdr-output.txt",
         FOREVER_DRIVE_C "/wineps5-hud.txt",
+        FOREVER_DRIVE_C "/wineps5-mouse.txt",
         FOREVER_DRIVE_C "/wineps5-voice.txt",
-        &values->frame_generation, &values->hdr, &values->hud, &values->voice);
+        &values->frame_generation, &values->hdr, &values->hud,
+        &values->invert_scroll, &values->voice);
 }
 
 void title_desktop_voice_status(const char *, int, int);
@@ -2753,6 +2755,12 @@ int forever_title_menu_action(enum forever_menu_command command, int enabled)
     pthread_t thread;
     switch (command)
     {
+    case FOREVER_MENU_COMMAND_SET_INVERT_SCROLL:
+        result = forever_menu_rewrite_switch(
+            FOREVER_DRIVE_C "/wineps5-mouse.txt", "invert_scroll", enabled);
+        permission_message = forever_setting_permission_message(result);
+        if (permission_message) forever_say(permission_message);
+        return result;
     case FOREVER_MENU_COMMAND_SET_VOICE:
         if (enabled) return forever_title_voice_enable();
         return forever_menu_rewrite_switch(FOREVER_DRIVE_C "/wineps5-voice.txt", "voice", 0);

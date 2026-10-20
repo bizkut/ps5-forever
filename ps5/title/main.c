@@ -893,7 +893,7 @@ static void close_menu(void)
 
 static void open_menu(void)
 {
-    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 0};
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 1, 0};
     int error;
     compositor_hint_stop();
     menu_hint_started = 1;
@@ -902,6 +902,7 @@ static void open_menu(void)
     release_forwarded_input();
     pointer_cancel();
     error = forever_title_menu_load(&values);
+    pointer_set_invert_scroll(values.invert_scroll);
     forever_menu_open(&menu, &values);
     if (error)
     {
@@ -1008,7 +1009,12 @@ static void apply_menu_result(struct forever_menu_result result)
         menu.voice_downloading = 1;
         forever_menu_status(&menu, "Checking voice model\xe2\x80\xa6");
     }
-    else if (!error) forever_menu_commit(&menu, result.command, result.enabled);
+    else if (!error)
+    {
+        forever_menu_commit(&menu, result.command, result.enabled);
+        if (result.command == FOREVER_MENU_COMMAND_SET_INVERT_SCROLL)
+            pointer_set_invert_scroll(result.enabled);
+    }
     else
     {
         snprintf(status, sizeof(status), "Could not save the setting (error %d).", -error);
@@ -1184,6 +1190,9 @@ static int desktop_open(void)
     fprintf(stderr, "input user=%d status=%#x %s\n", user, result, input_describe());
     pointer_init(DISPLAY_WIDTH, DISPLAY_HEIGHT);
 #ifdef PS5_TITLE_EMBEDDED
+    struct forever_menu_values values = {FOREVER_FG_ON, 1, 0, 1, 0};
+    forever_title_menu_load(&values);
+    pointer_set_invert_scroll(values.invert_scroll);
     forever_menu_init(&menu);
     memset(physical_keys, 0, sizeof(physical_keys));
     memset(forwarded_keys, 0, sizeof(forwarded_keys));

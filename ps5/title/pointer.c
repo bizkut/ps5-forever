@@ -49,6 +49,7 @@ static uint32_t touch_click;
 static int held_left, held_right;
 static int text_chord;         /* L3+R3 held together, not yet released */
 static int options_escape;
+static int invert_scroll;
 
 static void emit_move(pointer_handler handler, void *context)
 {
@@ -95,6 +96,11 @@ void pointer_init(int w, int h)
 void pointer_options_escape(int enabled)
 {
     options_escape = !!enabled;
+}
+
+void pointer_set_invert_scroll(int enabled)
+{
+    invert_scroll = !!enabled;
 }
 
 void pointer_position(int *x, int *y)
@@ -202,7 +208,9 @@ void pointer_input(const struct input_event *e, pointer_handler handler, void *c
         handler(&(struct pointer_event){.kind = POINTER_BUTTON, .code = e->code, .down = e->down}, context);
         break;
     case INPUT_MOUSE_WHEEL:
-        handler(&(struct pointer_event){.kind = POINTER_WHEEL, .dx = e->dx * 120, .dy = -e->dy * 120},
+        handler(&(struct pointer_event){.kind = POINTER_WHEEL,
+                                        .dx = e->dx * (invert_scroll ? -120 : 120),
+                                        .dy = e->dy * (invert_scroll ? 120 : -120)},
                 context);
         break;
     case INPUT_PAD:

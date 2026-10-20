@@ -150,6 +150,7 @@ keyboard. Use the D-pad and Cross; press Circle or Options at the top level to
 close, or click with a mouse. The menu can:
 
 - turn frame generation, HDR and the performance overlay on or off;
+- turn **Invert mouse scroll** on or off (USB mouse wheel only; on by default);
 - turn **Voice-to-Text** On/Off (first use downloads a **190 MB speech model**);
 - browse, install, update and remove add-ons for the selected WoW version;
 - install a curated starter pack;

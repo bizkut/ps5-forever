@@ -19,6 +19,7 @@
 #include "../../title/cursor-arrow.h"
 #include "../../title/voice.h"
 #include "../localproc/psmkit-io.h"
+#include "forever-menu-settings.h"
 
 #define INPUT_QUEUE_SIZE 256
 
@@ -578,6 +579,22 @@ static int voice_setting_rc = -1, voice_setting_logged;
 static void tap_key(unsigned usage);
 static void route_ime(const struct ime_edit *edit);
 
+/* On unless the file says exactly invert_scroll=off, as the menu reads it. */
+static int mouse_invert_scroll_enabled(void)
+{
+    char text[FOREVER_MENU_FILE_BYTES];
+    FILE *file = fopen("/data/forever/prefix/drive_c/wineps5-mouse.txt", "r");
+    size_t size, begin = 0, end = 0;
+    if (!file) return 1;
+    size = fread(text, 1, sizeof(text), file);
+    int too_large = size == sizeof(text) && fgetc(file) != EOF;
+    int failed = ferror(file);
+    fclose(file);
+    if (too_large || failed ||
+        forever_menu_switch_span(text, size, "invert_scroll", &begin, &end) != 1) return 1;
+    return !(end - begin == 3 && !memcmp(text + begin, "off", 3));
+}
+
 static int voice_enabled(int *setting_rc)
 {
     char text[16384];
@@ -1053,6 +1070,7 @@ int pw_title_input_start(void)
     io_log("input user=%d status=%#x %s", user, status, input_describe());
     pointer_init(PS5_DESKTOP_WIDTH, PS5_DESKTOP_HEIGHT);
     pointer_options_escape(1);
+    pointer_set_invert_scroll(mouse_invert_scroll_enabled());
     if ((status = cursor_allocate())) return status;
     status = pthread_create(&thread, NULL, poll_devices, NULL);
     if (!status) pthread_detach(thread);
