@@ -69,11 +69,12 @@ def main():
     catalogue_license = Path(__file__).with_name('github-catalogue-LICENSE.txt').read_text()
     lines.extend([
         '', '=' * 78,
-        'Bundled data: github-wow-addon-catalogue',
-        'Copyright layday and github-wow-addon-catalogue contributors.',
-        'Source: https://github.com/layday/github-wow-addon-catalogue',
-        'Catalogue: https://raw.githubusercontent.com/layday/github-wow-addon-catalogue/main/addons.csv',
-        'Licence: GNU GPL version 3 (GPL-3.0). Data is bundled unmodified.',
+        'Bundled data: bizkut/github-wow-addon-catalogue',
+        'Copyright layday, bizkut and github-wow-addon-catalogue contributors.',
+        'Source: https://github.com/bizkut/github-wow-addon-catalogue',
+        'Based on: https://github.com/layday/github-wow-addon-catalogue',
+        'Catalogue: https://raw.githubusercontent.com/bizkut/github-wow-addon-catalogue/main/addons.csv',
+        'Licence: GNU GPL version 3 (GPL-3.0). The fork expands and refreshes the data.',
         'The exact catalogue snapshot SHA-256 is recorded in build-receipt.json.',
         '-' * 78,
         catalogue_license.rstrip(),

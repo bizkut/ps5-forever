@@ -15,7 +15,7 @@ TOOLCHAIN = '1.99.1'
 TARGET = 'x86_64-pc-windows-gnullvm'
 UPSTREAM = '0dc9ab28f207f86e33770e359f2345043ef19585'
 GITHUB_CATALOGUE_URL = (
-    'https://raw.githubusercontent.com/layday/github-wow-addon-catalogue/main/addons.csv')
+    'https://raw.githubusercontent.com/bizkut/github-wow-addon-catalogue/main/addons.csv')
 
 
 def catalogue_snapshot(path):
@@ -30,9 +30,15 @@ def catalogue_snapshot(path):
             etag = response.headers.get('ETag')
     if len(data) > 4 * 1024 * 1024:
         raise SystemExit('GitHub catalogue exceeds 4 MiB')
-    rows = list(csv.DictReader(io.StringIO(data.decode('utf-8'))))
+    reader = csv.DictReader(io.StringIO(data.decode('utf-8')))
+    rows = list(reader)
     required = {'id', 'name', 'full_name', 'url', 'description', 'flavors', 'has_release_json'}
-    if not rows or not required.issubset(rows[0]):
+    selectors = {'release_tag_prefix', 'asset_name_pattern', 'folders'}
+    fields = set(reader.fieldnames or ())
+    selector_fields = fields & selectors
+    if (not rows or not required.issubset(fields) or
+            selector_fields not in (set(), selectors) or
+            any(not row['id'] or not row['full_name'] for row in rows)):
         raise SystemExit('invalid GitHub catalogue snapshot')
     return data, {
         'url': GITHUB_CATALOGUE_URL,

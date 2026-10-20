@@ -1,0 +1,573 @@
+diff --git a/src-tauri/src/catalog.rs b/src-tauri/src/catalog.rs
+index 4d97061..c9e289f 100644
+--- a/src-tauri/src/catalog.rs
++++ b/src-tauri/src/catalog.rs
+@@ -9,7 +9,7 @@ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
+ pub const REMOTE_URL: &str =
+     "https://raw.githubusercontent.com/Topher121/AddonForge/main/catalog/forever.json";
+ pub const GITHUB_URL: &str =
+-    "https://raw.githubusercontent.com/layday/github-wow-addon-catalogue/main/addons.csv";
++    "https://raw.githubusercontent.com/bizkut/github-wow-addon-catalogue/main/addons.csv";
+ pub const BUNDLED_GITHUB: &str = include_str!("../../catalog/github.csv");
+ const GITHUB_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+ const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
+@@ -17,7 +17,7 @@ const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+ 
+ #[derive(Deserialize)]
+ struct GithubRow {
+-    id: u64,
++    id: String,
+     name: String,
+     full_name: String,
+     url: String,
+@@ -26,13 +26,19 @@ struct GithubRow {
+     curse_id: String,
+     wago_id: String,
+     wowi_id: String,
++    #[serde(default)]
++    release_tag_prefix: String,
++    #[serde(default)]
++    asset_name_pattern: String,
++    #[serde(default)]
++    folders: String,
+ }
+ 
+ fn parse_github(text: &str) -> anyhow::Result<Vec<GithubRow>> {
+     let mut reader = csv::Reader::from_reader(text.as_bytes());
+     let rows: Vec<GithubRow> = reader.deserialize().collect::<Result<_, _>>()?;
+     anyhow::ensure!(!rows.is_empty() && rows.iter().all(|r|
+-        r.id != 0 && r.full_name.split('/').all(|part| !matches!(part, "." | ".."))
++        !r.id.is_empty() && r.full_name.split('/').all(|part| !matches!(part, "." | ".."))
+             && r.url.strip_prefix("https://github.com/") == Some(r.full_name.as_str())
+             && crate::sources::parse_github_repo(&r.full_name).as_deref() == Some(&r.full_name)),
+         "Invalid GitHub add-on catalogue");
+@@ -50,6 +56,9 @@ fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<Cata
+         github: Some(r.full_name.clone()), url: Some(r.url.clone()),
+         wowi: r.wowi_id.parse().ok(), curse: r.curse_id.parse().ok(),
+         wago: if r.wago_id.is_empty() { None } else { Some(r.wago_id.clone()) },
++        release_tag_prefix: (!r.release_tag_prefix.is_empty()).then(|| r.release_tag_prefix.clone()),
++        asset_name_pattern: (!r.asset_name_pattern.is_empty()).then(|| r.asset_name_pattern.clone()),
++        folders: r.folders.split(',').filter(|f| !f.is_empty()).map(str::to_string).collect(),
+         forever: Some(true), ..Default::default()
+     }).collect()
+ }
+@@ -195,6 +204,12 @@ pub struct CatalogEntry {
+     /// and no release.json.
+     #[serde(default)]
+     pub asset_hint: Option<String>,
++    /// Optional GitHub release tag prefix. Install and update stay in this stream.
++    #[serde(default)]
++    pub release_tag_prefix: Option<String>,
++    /// Exact or one-wildcard GitHub release asset filename.
++    #[serde(default)]
++    pub asset_name_pattern: Option<String>,
+     /// Top-level AddOns folders the release installs (used to match what's
+     /// already on disk to this entry).
+     #[serde(default)]
+@@ -499,6 +514,8 @@ mod live_tests {
+     const CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen\n\
+         42,Quoted,Owner/Repo,https://github.com/Owner/Repo,\"Comma, \"\"quote\"\"\nand newline\",2026-10-18,\"mainline,mists,bcc,classic,forever\",123,key,7,True,2026-10-18\n\
+         43,Other,Owner/Other,https://github.com/Owner/Other,Other,2026-10-18,wrath,,,,False,2026-10-18\n";
++    const EXTENDED_CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen,release_tag_prefix,asset_name_pattern,folders\n\
++        42:quests-audio,Spoken Quests Audio (All),Owner/Repo,https://github.com/Owner/Repo,Audio,2026-10-18,forever,,,,False,2026-10-18,quests-audio/,SpokenQuestsAudioAll-2.4.0.zip,\"SpokenQuestsAudioAlliance,SpokenQuestsAudioHorde\"\n";
+ 
+     fn oversized_chunked_server(prefix: String, fill: u8, suffix: &'static str, lying_length: bool)
+         -> (String, std::thread::JoinHandle<()>) {
+@@ -548,7 +565,7 @@ mod live_tests {
+                 CSV_FIXTURE.replace("42,Quoted", "99,Quoted"), b'\n', "", lying_length);
+             let rows = github_index(&client, &url, &github_path, true).await;
+             server.join().unwrap();
+-            assert_eq!(rows[0].id, 42);
++            assert_eq!(rows[0].id, "42");
+             assert_eq!(std::fs::read(&github_path).unwrap(), github);
+ 
+             let (url, server) = oversized_chunked_server("[{\"id\":99,\"padding\":\"".into(), b'x', "\"}]", lying_length);
+@@ -597,6 +614,25 @@ mod live_tests {
+         assert!(parse_github(&CSV_FIXTURE.replace("Owner/Repo", "../escape")).is_err());
+     }
+ 
++    #[test]
++    fn extended_csv_selectors_and_folders_round_trip_while_old_rows_default_empty() {
++        let old = github_entries(&parse_github(CSV_FIXTURE).unwrap(), Flavor::Forever);
++        assert_eq!(old.len(), 1);
++        assert!(old[0].release_tag_prefix.is_none());
++        assert!(old[0].asset_name_pattern.is_none());
++        assert!(old[0].folders.is_empty());
++
++        let extended = github_entries(
++            &parse_github(EXTENDED_CSV_FIXTURE).unwrap(), Flavor::Forever);
++        assert_eq!(extended.len(), 1);
++        assert_eq!(extended[0].id, "gh-42:quests-audio");
++        assert_eq!(extended[0].release_tag_prefix.as_deref(), Some("quests-audio/"));
++        assert_eq!(extended[0].asset_name_pattern.as_deref(),
++            Some("SpokenQuestsAudioAll-2.4.0.zip"));
++        assert_eq!(extended[0].folders,
++            ["SpokenQuestsAudioAlliance", "SpokenQuestsAudioHorde"]);
++    }
++
+     #[test]
+     fn cache_replacement_preserves_last_good_until_success_and_on_failure() {
+         let dir = std::env::temp_dir().join(format!("af-cache-replace-{}", std::process::id()));
+@@ -753,7 +789,10 @@ mod live_tests {
+                 let source = entry.github.as_ref().map(|r| Source::Github(r.clone()))
+                     .or_else(|| entry.tukui.as_ref().map(|s| Source::Tukui(s.clone()))).unwrap();
+                 let remote = crate::sources::resolve(&client, &source,
+-                    ResolveOpts { flavor, asset_hint: entry.asset_hint.as_deref(), ..Default::default() })
++                    ResolveOpts { flavor, asset_hint: entry.asset_hint.as_deref(),
++                        release_tag_prefix: entry.release_tag_prefix.as_deref(),
++                        asset_name_pattern: entry.asset_name_pattern.as_deref(),
++                        ..Default::default() })
+                     .await.unwrap_or_else(|e| panic!("{} {id} resolve: {e}", flavor.id()));
+                 assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
+                 let zip = crate::install::download(&client, &remote.download_url,
+diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
+index ef847c1..19198e7 100644
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -137,6 +137,12 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
+     let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
+ }
+ 
++const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
++
++fn add_download_bytes(total: u64, chunk: usize) -> Option<u64> {
++    total.checked_add(chunk as u64).filter(|next| *next <= MAX_DOWNLOAD_BYTES)
++}
++
+ pub async fn download(
+     client: &reqwest::Client,
+     url: &str,
+@@ -173,10 +179,8 @@ pub async fn download(
+         let mut total: u64 = 0;
+         while let Some(chunk) = stream.next().await {
+             let chunk = chunk?;
+-            total += chunk.len() as u64;
+-            if total > 512 * 1024 * 1024 {
+-                anyhow::bail!("download exceeded 512 MB; refusing");
+-            }
++            total = add_download_bytes(total, chunk.len())
++                .ok_or_else(|| anyhow::anyhow!("download exceeded 4 GiB; refusing"))?;
+             file.write_all(&chunk)?;
+         }
+         file.flush()?;
+@@ -511,6 +515,15 @@ mod tests {
+         let _ = fs::remove_dir_all(root);
+     }
+ 
++    #[test]
++    fn download_limit_accepts_large_audio_packs_without_overflow() {
++        let spoken_pack = 1570_u64 * 1024 * 1024;
++        assert_eq!(add_download_bytes(0, spoken_pack as usize), Some(spoken_pack));
++        assert_eq!(add_download_bytes(MAX_DOWNLOAD_BYTES - 1, 1), Some(MAX_DOWNLOAD_BYTES));
++        assert!(add_download_bytes(MAX_DOWNLOAD_BYTES, 1).is_none());
++        assert!(add_download_bytes(u64::MAX, usize::MAX).is_none());
++    }
++
+     #[test]
+     fn startup_recovers_each_interrupted_replacement_step() {
+         let root = std::env::temp_dir().join(format!("af-recover-{}", unique()));
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index f6ead3d..2bbda0d 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -461,13 +461,16 @@ async fn icon_cached(
+     v
+ }
+ 
+-fn entry_hint(cat: &Catalog, pkg: &Package) -> (Option<String>, Option<bool>) {
++fn entry_hint(cat: &Catalog, pkg: &Package)
++    -> (Option<String>, Option<String>, Option<String>, Option<bool>) {
+     let entry = pkg
+         .catalog_id
+         .as_ref()
+         .and_then(|id| cat.addons.iter().find(|e| &e.id == id));
+     (
+         entry.and_then(|e| e.asset_hint.clone()),
++        entry.and_then(|e| e.release_tag_prefix.clone()),
++        entry.and_then(|e| e.asset_name_pattern.clone()),
+         entry.and_then(|e| e.forever),
+     )
+ }
+@@ -480,13 +483,15 @@ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
+     if matches!(src, Source::Wago(_)) && !st.has_wago_key() {
+         return;
+     }
+-    let (hint, _) = entry_hint(cat, pkg);
++    let (hint, tag_prefix, asset_pattern, _) = entry_hint(cat, pkg);
+     let flavor = match current_flavor(app).await {
+         Ok(flavor) => flavor,
+         Err(error) => { pkg.status = "error".into(); pkg.note = error; return; }
+     };
+     let opts = ResolveOpts {
+         asset_hint: hint.as_deref(),
++        release_tag_prefix: tag_prefix.as_deref(),
++        asset_name_pattern: asset_pattern.as_deref(),
+         wago_key: st.wago_key.as_deref(),
+         prerelease: st.allow_prerelease,
+         flavor,
+@@ -845,6 +850,8 @@ async fn install_from(
+     key: &str,
+     src: &Source,
+     asset_hint: Option<&str>,
++    release_tag_prefix: Option<&str>,
++    asset_name_pattern: Option<&str>,
+     _allow_non_forever: bool,
+ ) -> Result<Installed, String> {
+     let install = current_install(app).await?;
+@@ -853,6 +860,8 @@ async fn install_from(
+     let st = app.state.lock().await.clone();
+     let opts = ResolveOpts {
+         asset_hint,
++        release_tag_prefix,
++        asset_name_pattern,
+         wago_key: st.wago_key.as_deref(),
+         prerelease: st.allow_prerelease,
+         flavor,
+@@ -925,12 +934,14 @@ async fn update_package_impl(
+         .clone()
+         .ok_or_else(|| "This addon has no update source".to_string())?;
+     let cat = catalog_cached(app).await;
+-    let (hint, _) = entry_hint(&cat, &pkg);
++    let (hint, tag_prefix, asset_pattern, _) = entry_hint(&cat, &pkg);
+     install_from(
+         app,
+         &key,
+         &src,
+         hint.as_deref(),
++        tag_prefix.as_deref(),
++        asset_pattern.as_deref(),
+         allow_non_forever.unwrap_or(false),
+     )
+     .await?;
+@@ -1184,6 +1195,8 @@ async fn install_catalog_impl(
+         &key,
+         &src,
+         e.asset_hint.as_deref(),
++        e.release_tag_prefix.as_deref(),
++        e.asset_name_pattern.as_deref(),
+         allow_non_forever.unwrap_or(false),
+     )
+     .await?;
+@@ -1215,6 +1228,8 @@ async fn install_source(
+         &key,
+         &source,
+         None,
++        None,
++        None,
+         allow_non_forever.unwrap_or(false),
+     )
+     .await?;
+@@ -1244,7 +1259,8 @@ async fn install_github(
+         .map(|e| format!("cat:{}", e.id))
+         .unwrap_or_else(|| format!("github:{repo}"));
+     let src = Source::Github(repo);
+-    install_from(&app, &key, &src, None, allow_non_forever.unwrap_or(false)).await?;
++    install_from(&app, &key, &src, None, None, None,
++        allow_non_forever.unwrap_or(false)).await?;
+     refreshed(&app, &key).await
+ }
+ 
+@@ -1722,7 +1738,8 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
+                 .map(|entry| format!("cat:{}", entry.id))
+                 .unwrap_or_else(|| format!("github:{repo}"));
+             let source = Source::Github(repo);
+-            install_from(&app, &key, &source, None, allow.unwrap_or(false)).await?;
++            install_from(&app, &key, &source, None, None, None,
++                allow.unwrap_or(false)).await?;
+             serde_json::to_value(refreshed(&app, &key).await?).map_err(err)
+         }
+         "install_bundle" => {
+@@ -2184,6 +2201,8 @@ pub fn cli(args: &[String]) -> i32 {
+                                 s,
+                                 ResolveOpts {
+                                     asset_hint: e.asset_hint.as_deref(),
++                                    release_tag_prefix: e.release_tag_prefix.as_deref(),
++                                    asset_name_pattern: e.asset_name_pattern.as_deref(),
+                                     wago_key: st.wago_key.as_deref(),
+                                     prerelease: st.allow_prerelease,
+                                     flavor,
+@@ -2218,9 +2237,10 @@ pub fn cli(args: &[String]) -> i32 {
+                 let pkg = pkgs.into_iter().find(|p| &p.key == key).ok_or("no such package")?;
+                 let src = pkg.source.clone().ok_or("package has no source")?;
+                 let cat = catalog_cached(&app).await;
+-                let (hint, _) = entry_hint(&cat, &pkg);
++                let (hint, tag_prefix, asset_pattern, _) = entry_hint(&cat, &pkg);
+                 let force = args.iter().any(|a| a == "--force");
+-                let rec = install_from(&app, key, &src, hint.as_deref(), force).await?;
++                let rec = install_from(&app, key, &src, hint.as_deref(),
++                    tag_prefix.as_deref(), asset_pattern.as_deref(), force).await?;
+                 Ok(serde_json::to_value(rec).unwrap())
+             }
+             "install" => {
+@@ -2230,14 +2250,17 @@ pub fn cli(args: &[String]) -> i32 {
+                 let has_wago = app.state.lock().await.has_wago_key();
+                 let src = pick_source(Some(&e), &AddonFolder::default(), has_wago, None).ok_or("no source")?;
+                 let force = args.iter().any(|a| a == "--force");
+-                let rec = install_from(&app, &format!("cat:{}", e.id), &src, e.asset_hint.as_deref(), force).await?;
++                let rec = install_from(&app, &format!("cat:{}", e.id), &src,
++                    e.asset_hint.as_deref(), e.release_tag_prefix.as_deref(),
++                    e.asset_name_pattern.as_deref(), force).await?;
+                 Ok(serde_json::to_value(rec).unwrap())
+             }
+             "github" => {
+                 let repo = args.get(1).and_then(|r| sources::parse_github_repo(r)).ok_or("usage: github <owner/repo>")?;
+                 let force = args.iter().any(|a| a == "--force");
+                 let key = format!("github:{repo}");
+-                let rec = install_from(&app, &key, &Source::Github(repo), None, force).await?;
++                let rec = install_from(&app, &key, &Source::Github(repo),
++                    None, None, None, force).await?;
+                 Ok(serde_json::to_value(rec).unwrap())
+             }
+             "remove" => {
+@@ -2533,7 +2556,8 @@ mod tests {
+         assert_eq!(set_install_path_impl(&app, unknown.to_string_lossy().into()).await.unwrap_err(), flavor::UNSUPPORTED);
+         // Even a persisted unsupported selection cannot reach source resolution.
+         app.state.lock().await.select_install(unknown.to_string_lossy().into());
+-        assert_eq!(install_from(&app, "github:x/y", &Source::Github("x/y".into()), None, true).await.unwrap_err(), flavor::UNSUPPORTED);
++        assert_eq!(install_from(&app, "github:x/y", &Source::Github("x/y".into()),
++            None, None, None, true).await.unwrap_err(), flavor::UNSUPPORTED);
+         assert!(!unknown.join("Interface").exists());
+         std::fs::remove_dir_all(root).unwrap();
+         std::env::remove_var("ADDONFORGE_STATE_DIR");
+@@ -2687,6 +2711,29 @@ mod tests {
+         assert!(pkgs[0].managed);
+     }
+ 
++    #[test]
++    fn hand_installed_folders_select_distinct_rows_from_the_same_repository() {
++        let st = AppState::default();
++        let cat: Catalog = serde_json::from_str(r#"{"addons":[
++            {"id":"spoken","name":"Spoken","github":"rusty-key/spoken-wow","folders":["Spoken"]},
++            {"id":"spoken-all","name":"Spoken Quests Audio (All)",
++             "github":"rusty-key/spoken-wow","folders":["SpokenQuestsAudioAlliance"]},
++            {"id":"spoken-pt","name":"Spoken Quests Audio (Portuguese)",
++             "github":"rusty-key/spoken-wow","folders":["SpokenQuestsAudio_ptBR"]},
++            {"id":"polestar","name":"Polestar","github":"fitzforge/polestar","folders":["Polestar"]}
++        ]}"#).unwrap();
++        let packages = build_packages(&st, &cat, &[
++            folder("Spoken", &[], None),
++            folder("SpokenQuestsAudioAlliance", &[], None),
++            folder("SpokenQuestsAudio_ptBR", &[], None),
++            folder("Polestar", &[], None),
++        ]);
++        let ids: std::collections::BTreeSet<_> = packages.iter()
++            .filter_map(|package| package.catalog_id.as_deref()).collect();
++        assert_eq!(ids, ["polestar", "spoken", "spoken-all", "spoken-pt"].into_iter().collect());
++        assert!(packages.iter().all(|package| package.status != "no-source"));
++    }
++
+     #[test]
+     fn missing_dependencies_are_reported_and_matched_to_catalogue() {
+         let st = AppState::default();
+diff --git a/src-tauri/src/sources/github.rs b/src-tauri/src/sources/github.rs
+index da12c12..c3c33d8 100644
+--- a/src-tauri/src/sources/github.rs
++++ b/src-tauri/src/sources/github.rs
+@@ -37,7 +37,7 @@ struct Meta {
+     interface: u32,
+ }
+ 
+-#[derive(Deserialize, Debug)]
++#[derive(Deserialize, Debug, Clone)]
+ struct ApiRelease {
+     #[serde(default)]
+     tag_name: String,
+@@ -49,7 +49,7 @@ struct ApiRelease {
+     assets: Vec<ApiAsset>,
+ }
+ 
+-#[derive(Deserialize, Debug)]
++#[derive(Deserialize, Debug, Clone)]
+ struct ApiAsset {
+     name: String,
+     browser_download_url: String,
+@@ -100,13 +100,48 @@ fn pick_asset<'a>(zips: &'a [&'a ApiAsset], asset_hint: Option<&str>,
+         } else { None })
+ }
+ 
++fn asset_pattern_matches(pattern: &str, name: &str) -> bool {
++    let pattern = pattern.to_ascii_lowercase();
++    let name = name.to_ascii_lowercase();
++    let mut parts = pattern.split('*');
++    let first = parts.next().unwrap_or("");
++    let second = parts.next();
++    if parts.next().is_some() {
++        return false;
++    }
++    match second {
++        None => name == first,
++        Some(suffix) => name.len() >= first.len() + suffix.len()
++            && name.starts_with(first) && name.ends_with(suffix),
++    }
++}
++
++fn pick_pattern_asset<'a>(
++    zips: &[&'a ApiAsset], pattern: &str,
++) -> anyhow::Result<&'a ApiAsset> {
++    let matches: Vec<_> = zips.iter().copied()
++        .filter(|asset| asset_pattern_matches(pattern, &asset.name)).collect();
++    anyhow::ensure!(matches.len() == 1,
++        "asset pattern {pattern:?} matched {} zip assets", matches.len());
++    Ok(matches[0])
++}
++
++fn pick_release<'a>(
++    releases: &'a [ApiRelease], tag_prefix: Option<&str>, prerelease: bool,
++) -> Option<&'a ApiRelease> {
++    releases.iter().find(|release| !release.draft && !release.assets.is_empty()
++        && (prerelease || !release.prerelease)
++        && tag_prefix.is_none_or(|prefix| release.tag_name.starts_with(prefix)))
++}
++
+ async fn from_api_release(
+     client: &reqwest::Client,
+     rel: ApiRelease,
+     asset_hint: Option<&str>,
++    asset_name_pattern: Option<&str>,
+     flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+-    // Prefer the packager's release.json if this release has one.
++    if asset_name_pattern.is_none() {
+     if let Some(rj_asset) = rel.assets.iter().find(|a| a.name == "release.json") {
+         if let Ok(resp) = client.get(&rj_asset.browser_download_url).send().await {
+             if resp.status().is_success() {
+@@ -127,6 +162,7 @@ async fn from_api_release(
+             }
+         }
+     }
++    }
+     let zips: Vec<&ApiAsset> = rel
+         .assets
+         .iter()
+@@ -135,8 +171,12 @@ async fn from_api_release(
+     if zips.is_empty() {
+         anyhow::bail!("release {} has no zip asset", rel.tag_name);
+     }
+-    let pick = pick_asset(&zips, asset_hint, flavor)
+-        .ok_or_else(|| anyhow::anyhow!("No {} release asset", flavor.id()))?;
++    let pick = if let Some(pattern) = asset_name_pattern {
++        pick_pattern_asset(&zips, pattern)?
++    } else {
++        pick_asset(&zips, asset_hint, flavor)
++            .ok_or_else(|| anyhow::anyhow!("No {} release asset", flavor.id()))?
++    };
+     Ok(Remote {
+         version: rel.tag_name.clone(),
+         download_url: pick.browser_download_url.clone(),
+@@ -158,14 +198,15 @@ pub async fn resolve(
+     client: &reqwest::Client,
+     repo: &str,
+     asset_hint: Option<&str>,
++    release_tag_prefix: Option<&str>,
++    asset_name_pattern: Option<&str>,
+     prerelease: bool,
+     flavor: crate::flavor::Flavor,
+ ) -> anyhow::Result<Remote> {
+     let repo = repo.trim().trim_matches('/');
+ 
+-    if prerelease {
+-        // Newest release including pre-releases (one API call).
+-        let api = format!("https://api.github.com/repos/{repo}/releases?per_page=5");
++    if prerelease || release_tag_prefix.is_some() {
++        let api = format!("https://api.github.com/repos/{repo}/releases?per_page=100");
+         let resp = client
+             .get(&api)
+             .header("Accept", "application/vnd.github+json")
+@@ -175,18 +216,20 @@ pub async fn resolve(
+             return Err(e);
+         }
+         let list: Vec<ApiRelease> = resp.error_for_status()?.json().await?;
+-        let rel = list
+-            .into_iter()
+-            .find(|r| !r.draft && !r.assets.is_empty())
+-            .ok_or_else(|| anyhow::anyhow!("no GitHub release with files for {repo}"))?;
+-        return from_api_release(client, rel, asset_hint, flavor).await;
++        let rel = pick_release(&list, release_tag_prefix, prerelease)
++            .ok_or_else(|| anyhow::anyhow!(
++                "no GitHub release in tag stream {}", release_tag_prefix.unwrap_or("latest")))?
++            .to_owned();
++        return from_api_release(client, rel, asset_hint, asset_name_pattern, flavor).await;
+     }
+ 
+-    let base = format!("https://github.com/{repo}/releases/latest/download/");
+-    let resp = client.get(format!("{base}release.json")).send().await?;
+-    if resp.status().is_success() {
+-        let rj: ReleaseJson = resp.json().await?;
+-        return pick_from_release_json(rj, |name| format!("{base}{name}"), false, flavor);
++    if asset_name_pattern.is_none() {
++        let base = format!("https://github.com/{repo}/releases/latest/download/");
++        let resp = client.get(format!("{base}release.json")).send().await?;
++        if resp.status().is_success() {
++            let rj: ReleaseJson = resp.json().await?;
++            return pick_from_release_json(rj, |name| format!("{base}{name}"), false, flavor);
++        }
+     }
+ 
+     // No release.json: ask the API for the latest release's assets.
+@@ -200,7 +243,7 @@ pub async fn resolve(
+         return Err(e);
+     }
+     let rel: ApiRelease = resp.error_for_status()?.json().await?;
+-    from_api_release(client, rel, asset_hint, flavor).await
++    from_api_release(client, rel, asset_hint, asset_name_pattern, flavor).await
+ }
+ 
+ #[cfg(test)]
+@@ -242,4 +285,34 @@ mod tests {
+         ]})).unwrap();
+         assert!(pick_from_release_json(only_wrong, str::to_string, false, Flavor::Retail).is_err());
+     }
++    #[test]
++    fn exact_or_single_wildcard_asset_patterns_are_anchored_and_unambiguous() {
++        assert!(asset_pattern_matches("LoreForever.zip", "LoreForever.zip"));
++        assert!(!asset_pattern_matches("LoreForever.zip", "LoreForever_Voice.zip"));
++        assert!(asset_pattern_matches("Spoken-*.zip", "Spoken-3.5.1.zip"));
++        assert!(!asset_pattern_matches("Spoken-*.zip", "xSpoken-3.5.1.zip"));
++        assert!(!asset_pattern_matches("a*b*c.zip", "abc.zip"));
++        let one = ApiAsset { name: "Spoken-3.zip".into(), browser_download_url: "one".into() };
++        let other = ApiAsset { name: "Spoken-4.zip".into(), browser_download_url: "other".into() };
++        assert_eq!(pick_pattern_asset(&[&one], "Spoken-*.zip").unwrap().name, one.name);
++        assert!(pick_pattern_asset(&[&one, &other], "Spoken-*.zip").is_err());
++    }
++
++    #[test]
++    fn release_prefix_never_crosses_tag_streams() {
++        let asset = || ApiAsset { name: "Addon.zip".into(), browser_download_url: "url".into() };
++        let releases = vec![
++            ApiRelease { tag_name: "manager/v9".into(), prerelease: false, draft: false,
++                assets: vec![asset()] },
++            ApiRelease { tag_name: "quests-audio/v2".into(), prerelease: true, draft: false,
++                assets: vec![asset()] },
++            ApiRelease { tag_name: "quests-audio/v1".into(), prerelease: false, draft: false,
++                assets: vec![asset()] },
++        ];
++        assert_eq!(pick_release(&releases, Some("quests-audio/"), false).unwrap().tag_name,
++            "quests-audio/v1");
++        assert_eq!(pick_release(&releases, Some("quests-audio/"), true).unwrap().tag_name,
++            "quests-audio/v2");
++        assert!(pick_release(&releases, Some("spoken/"), true).is_none());
++    }
+ }
+diff --git a/src-tauri/src/sources/mod.rs b/src-tauri/src/sources/mod.rs
+index 40bed0c..911560d 100644
+--- a/src-tauri/src/sources/mod.rs
++++ b/src-tauri/src/sources/mod.rs
+@@ -80,6 +80,8 @@ pub struct Remote {
+ #[derive(Default, Clone, Debug)]
+ pub struct ResolveOpts<'a> {
+     pub asset_hint: Option<&'a str>,
++    pub release_tag_prefix: Option<&'a str>,
++    pub asset_name_pattern: Option<&'a str>,
+     pub wago_key: Option<&'a str>,
+     pub prerelease: bool,
+     pub flavor: crate::flavor::Flavor,
+@@ -91,7 +93,8 @@ pub async fn resolve(
+     opts: ResolveOpts<'_>,
+ ) -> anyhow::Result<Remote> {
+     match src {
+-        Source::Github(repo) => github::resolve(client, repo, opts.asset_hint, opts.prerelease, opts.flavor).await,
++        Source::Github(repo) => github::resolve(client, repo, opts.asset_hint,
++            opts.release_tag_prefix, opts.asset_name_pattern, opts.prerelease, opts.flavor).await,
+         Source::Wago(id) => wago::resolve(client, id, opts.wago_key, opts.prerelease, opts.flavor).await,
+         Source::Wowi(id) => wowi::resolve(client, *id, opts.flavor).await,
+         Source::Tukui(slug) => tukui::resolve(client, slug, opts.flavor).await,

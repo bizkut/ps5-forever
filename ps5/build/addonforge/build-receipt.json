@@ -1,0 +1,39 @@
+{
+  "addonforge_core": {
+    "sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
+    "size": 3430400
+  },
+  "cargo_lock_sha256": "8d98ec6289137d1fc9414ffe42b26057164e87761e237d70b3e27f0ace64862d",
+  "cold_build_a_sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
+  "cold_build_b_sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
+  "format": 1,
+  "github_catalogue": {
+    "etag": null,
+    "license": "GPL-3.0",
+    "rows": 2674,
+    "sha256": "e41a07c1a9af69ddd3378feafc9c2e21adb28fbe52633ea3ff5bfd5bcac21763",
+    "size": 742020,
+    "url": "https://raw.githubusercontent.com/bizkut/github-wow-addon-catalogue/main/addons.csv"
+  },
+  "maintenance_launcher": {
+    "sha256": "01d9b6060d8abb8e44bd488ad3e0f23b0bcea790b45c383a475ce206697faa88",
+    "size": 14848
+  },
+  "offline_empty_cargo_home": true,
+  "patches": {
+    "0001-headless-build-feature.patch": "3bc31f683f054144a5a11fa9744d4385359fb690544e66dcf486f5a48a0801ef",
+    "0002-headless-core-entry.patch": "faeb0c68edf678b77b479bcce44b8a49f439f1fd8e44df53ff0ce99b13bc6103",
+    "0003-loopback-json-core.patch": "5b338927c236a598e751c38fc093158afba31ee2c52edb1d81ddfc315bd43001",
+    "0004-forever-final-channel.patch": "452d4caa95b73a16cdce1de9eb2330a1663feeeabc5cf1c884d7f70ffac5e55d",
+    "0005-install-safety-and-timing.patch": "6536085f69492f4a7c5920f743e4e0126da4a076a818d692461e37a00c828c71",
+    "0006-wago-key-control.patch": "639ac5ee4888592fbd9392fb519ee0e294206b7d66e390a53b52d3fca5a5c25a",
+    "0007-all-wow-channels.patch": "df3b8cd59716033a55df359b85806d088b37f5f7b949fd86258ed9a616f609fe",
+    "0008-all-flavour-catalogues.patch": "2e47655f98d1cd7702ffd9b372711d5c7ed340bdbe290ac315be5881a8539a2b",
+    "0009-own-catalogue-release-streams.patch": "8282c3d53d47a279bae4679d45e0b58db087e44ede95c08b56b50f03021a0a78"
+  },
+  "reproducible": true,
+  "rust_toolchain": "1.99.1",
+  "target": "x86_64-pc-windows-gnullvm",
+  "third_party_notices_sha256": "eb960162a1f7230e5106bec1be6cdb369bb559d4cff1c8d859f87a17d4a6a358",
+  "upstream_commit": "0dc9ab28f207f86e33770e359f2345043ef19585"
+}

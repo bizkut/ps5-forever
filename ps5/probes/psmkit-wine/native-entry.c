@@ -2425,11 +2425,13 @@ static int forever_addons_mutate(
     struct addonforge_client *client, const struct forever_addons_request *request,
     char *plain, size_t plain_size)
 {
+    enum { ADDON_MUTATION_TIMEOUT_MS = 30 * 60 * 1000 };
     char arguments[FOREVER_ADDON_KEY_BYTES + 64];
     const char *command, *key = request->key;
     int length;
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL)
-        return forever_addons_command(client, "update_all", "{}", 600000, plain, plain_size);
+        return forever_addons_command(client, "update_all", "{}",
+                                      ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
     if (request->command == FOREVER_MENU_COMMAND_WAGO_SET ||
         request->command == FOREVER_MENU_COMMAND_WAGO_FILE ||
         request->command == FOREVER_MENU_COMMAND_WAGO_REMOVE)
@@ -2459,7 +2461,7 @@ static int forever_addons_mutate(
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB)
     {
         int error;
-        client->timeout_ms = 600000;
+        client->timeout_ms = ADDON_MUTATION_TIMEOUT_MS;
         error = addonforge_install_github(client, key, forever_addons.response,
                                           sizeof(forever_addons.response));
         if (error) return error;
@@ -2489,7 +2491,8 @@ static int forever_addons_mutate(
         return 0;
     }
     if (length < 0 || (size_t)length >= sizeof(arguments)) return -EFBIG;
-    return forever_addons_command(client, command, arguments, 600000, plain, plain_size);
+    return forever_addons_command(client, command, arguments,
+                                  ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
 }
 
 static int forever_addons_channel_visit(const struct wow_channel *channel, void *unused)

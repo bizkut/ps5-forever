@@ -33,7 +33,7 @@ static struct
 };
 static struct forever_menu_state menu;
 static struct forever_addon_snapshot published;
-static unsigned publications, mutations;
+static unsigned publications, mutations, mutation_timeout;
 static int mutation_error;
 static const char *fixture_channel;
 static int forever_addons_current(unsigned generation) { return generation == forever_addons.generation; }
@@ -48,7 +48,8 @@ static void title_desktop_addons_snapshot(const struct forever_addon_snapshot *s
 static int forever_addons_command(struct addonforge_client *client, const char *command,
     const char *arguments, unsigned timeout_ms, char *plain, size_t plain_size)
 {
-    (void)client; (void)timeout_ms;
+    (void)client;
+    (void)timeout_ms;
     if (!strcmp(command, "set_install_path"))
     {
         assert(strstr(arguments, fixture_channel));
@@ -87,6 +88,7 @@ static int fixture_install_github(const struct addonforge_client *client, const 
                                    char *response, size_t size)
 {
     assert(client && !strcmp(repo, "owner/repo"));
+    mutation_timeout = client->timeout_ms;
     ++mutations;
     snprintf(response, size, "%s", mutation_error ?
         "{\"ok\":false,\"error\":\"Fixture mutation failed.\"}" :
@@ -113,7 +115,7 @@ static void run_worker(const char *channel, enum forever_menu_command command,
                        enum forever_addon_tab tab, int fail)
 {
     fixture_channel = channel;
-    publications = mutations = 0;
+    publications = mutations = mutation_timeout = 0;
     mutation_error = fail;
     forever_addons.generation++;
     forever_addons.busy = 1;
@@ -142,7 +144,7 @@ int main(void)
     {
         const char *channel = i ? "_classic_era_" : "_retail_";
         run_worker(channel, FOREVER_MENU_COMMAND_ADDONS_INSTALL_GITHUB, FOREVER_ADDON_FIND, 0);
-        assert(mutations == 1 && !published.message[0]);
+        assert(mutations == 1 && mutation_timeout == 1800000 && !published.message[0]);
         assert(!strcmp(menu.status, "Installed from GitHub."));
         run_worker(channel, FOREVER_MENU_COMMAND_WAGO_SET, FOREVER_ADDON_FIND, 0);
         assert(mutations == 1 && published.wago_saved && published.wago_status == FOREVER_WAGO_SET);
