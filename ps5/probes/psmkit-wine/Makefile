@@ -122,7 +122,7 @@ $(HOST_OUT)/test-staged-runtime: test-staged-runtime.c elf-runtime.c elf-runtime
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror -pthread test-staged-runtime.c elf-runtime.c -o $@
 
 test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT)/test-elf-runtime $(HOST_OUT)/test-wine-title \
-		$(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
+		$(HOST_OUT)/test-wine-title-exit $(HOST_OUT)/test-write-buffer $(HOST_OUT)/test-request-profile $(HOST_OUT)/test-runtime-profile-callbacks $(HOST_OUT)/test-loader-path $(HOST_OUT)/test-runtime-imports \
 		$(HOST_OUT)/test-direct-commit $(HOST_OUT)/test-direct-cache $(HOST_OUT)/test-direct-fail-fast $(HOST_OUT)/test-vm-cpu \
 		$(HOST_OUT)/test-runtime-input $(HOST_OUT)/test-title-input \
 		$(HOST_OUT)/test-title-ime $(HOST_OUT)/test-title-voice \
@@ -143,6 +143,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 	$(HOST_OUT)/test-supervisor-admission
 	$(HOST_OUT)/test-elf-runtime
 	$(HOST_OUT)/test-wine-title
+	$(HOST_OUT)/test-wine-title-exit
 	$(HOST_OUT)/test-write-buffer
 	$(HOST_OUT)/test-request-profile
 	$(HOST_OUT)/test-runtime-profile-callbacks
@@ -383,6 +384,10 @@ $(HOST_OUT)/test-elf-runtime: test-elf-runtime.c elf-runtime.c elf-runtime.h sha
 $(HOST_OUT)/test-wine-title: $(WINE_SRC)/loader/tests/ps5_title.c $(WINE_SRC)/include/wine/ps5_title.h $(WINE_SRC)/include/wine/ps5_title_private.h $(WINE_SRC)/include/wine/ps5_suspend.h $(WINE_SRC)/include/wine/ps5_desktop.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=c11 -O2 -g -pthread -I "$(WINE_SRC)/include" $< -o $@
+$(HOST_OUT)/test-wine-title-exit: build-title-exit-test.py build-desktop-surface-test.py \
+		$(WINE_SRC)/loader/tests/ps5_title_exit.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
+		$(WINE_SRC)/include/wine/ps5_title_private.h
+	python3 build-title-exit-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 $(HOST_OUT)/test-write-buffer: test-write-buffer.c build-write-buffer-test.py \
 		$(WINE_SRC)/dlls/ntdll/unix/file.c $(WINE_SRC)/dlls/ntdll/unix/server.c \
 		$(WINE_SRC)/include/wine/ps5_title_private.h

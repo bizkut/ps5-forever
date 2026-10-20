@@ -598,6 +598,7 @@ static void test_scoped_visibility(void)
     static const char *paths[] =
     {
         "Games/World of Warcraft/Data/data/data.000",
+        "Games/StarCraft II/SC2Data/data/data.000",
         "Program Files (x86)/Battle.net/Battle.net.123/client.dll",
         "ProgramData/Battle.net/Agent/Agent.123/Agent.exe"
     };
@@ -677,7 +678,7 @@ static void test_scoped_visibility(void)
     }
     test_drive_root = "/tmp";
     assert(!rmdir(root));
-    puts("write-buffer production: CASC/Battle.net 7 KiB coalescing, same/other-handle "
+    puts("write-buffer production: WoW/SC2 CASC and Battle.net 7 KiB coalescing, same/other-handle "
          "read/query, close/reopen, flush and duplicate visibility PASS");
 }
 
