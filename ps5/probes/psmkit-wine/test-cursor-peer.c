@@ -41,6 +41,10 @@ static int ps5_hub_queue(struct ps5_hub_peer *peer, const void *message, size_t 
 static int pw_desktop_surface(const char *name, uint64_t size, int op)
 { (void)name; (void)size; assert(op == PS5_TITLE_SURFACE_UNLINK); return 0; }
 static int shm_unlink(const char *name) { (void)name; return 0; }
+static void title_desktop_installer_foreground(uint32_t pid, uint64_t window, int ready)
+{ (void)pid; (void)window; (void)ready; }
+static void title_desktop_installer_destroyed(uint32_t pid, uint64_t window)
+{ (void)pid; (void)window; }
 #include "cursor-native-functions.inc"
 #include "cursor-payload-functions.inc"
 

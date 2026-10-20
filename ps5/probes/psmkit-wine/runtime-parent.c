@@ -3,6 +3,7 @@
 #include "protocol.h"
 #include "runtime-relaunch.h"
 #include "../localproc/probe.h"
+#include "../../title/installer-continue.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -32,6 +33,10 @@ void title_desktop_message(const char *);
 void forever_title_menu_wait_lifetime(void);
 void forever_title_addons_yield(void);
 static uint64_t addonforge_nonce;
+void title_desktop_installer_process(uint32_t);
+void title_desktop_installer_agent(uint32_t);
+void title_desktop_installer_foreground(uint32_t, uint64_t, int);
+void title_desktop_installer_destroyed(uint32_t, uint64_t);
 #endif
 
 int32_t sceSystemServiceAddLocalProcessForPsmKit(
@@ -305,6 +310,20 @@ static struct pw_hub_window *hub_find_window(struct pw_desktop_hub *hub, uint64_
         if (window->state.id == id) return window;
     return NULL;
 }
+#if !PW_RUNTIME_GPU
+static void hub_notify_installer_foreground(struct pw_desktop_hub *hub)
+{
+    struct pw_hub_window *window;
+    for (window = hub->top; window; window = window->below)
+        if (window->state.flags & PS5_DESKTOP_VISIBLE) break;
+    if (!window)
+        title_desktop_installer_foreground(0, 0, 0);
+    else
+        title_desktop_installer_foreground(
+            window->owner->pid, window->state.id,
+            window->state.width && window->state.height && window->state.shm[0]);
+}
+#endif
 
 static void hub_unlink_window(struct pw_desktop_hub *hub, struct pw_hub_window *window)
 {
@@ -499,6 +518,9 @@ static int hub_driver_message(struct pw_desktop_hub *hub, struct pw_hub_peer *pe
         window->state = *state;
         window->owner = peer;
         if (restack) hub_restack(hub, window, state->insert_after);
+#if !PW_RUNTIME_GPU
+        hub_notify_installer_foreground(hub);
+#endif
         hub_queue_title(header, header->size);
         return 1;
     case PS5_DESKTOP_DESTROY:
@@ -506,8 +528,14 @@ static int hub_driver_message(struct pw_desktop_hub *hub, struct pw_hub_peer *pe
         if ((window = hub_find_window(hub, peer->input.id.id)) && window->owner == peer)
         {
             hub_queue_title(header, header->size);
+#if !PW_RUNTIME_GPU
+            title_desktop_installer_destroyed(peer->pid, window->state.id);
+#endif
             hub_remove_window(hub, window);
         }
+#if !PW_RUNTIME_GPU
+        hub_notify_installer_foreground(hub);
+#endif
         return 1;
     case PS5_DESKTOP_DAMAGE:
         if (header->size != sizeof(struct ps5_desktop_damage)) return 0;
@@ -641,8 +669,14 @@ static void hub_cleanup_peers(struct pw_desktop_hub *hub)
             if (window->owner != peer) continue;
             destroy.id = window->state.id;
             hub_queue_title(&destroy, sizeof(destroy));
+#if !PW_RUNTIME_GPU
+            title_desktop_installer_destroyed(peer->pid, window->state.id);
+#endif
             hub_remove_window(hub, window);
         }
+#if !PW_RUNTIME_GPU
+        hub_notify_installer_foreground(hub);
+#endif
         *ptr = peer->next;
         free(peer->output);
         free(peer);
@@ -1866,6 +1900,20 @@ int pw_supervisor_spawn(const struct wine_ps5_title_spawn *spawn)
         io_log("p1c supervisor admit slot=%d occupied=%u flexible_free=unavailable status=%#x errno=%d",
                index, occupied_slots(), (unsigned int)flexible_status, flexible_error);
     log_file_breakdown("at-admit");
+#if defined(PW_RUNTIME_B1) && !PW_RUNTIME_HEADLESS && !PW_RUNTIME_GPU
+    if (forever_installer_setup_program(spawn->argv))
+    {
+        io_log("forever: installer continue supervisor process unix_pid=%d windows_pid=%u",
+               slots[index].unix_pid, spawn->windows_pid);
+        title_desktop_installer_process((uint32_t)slots[index].unix_pid);
+    }
+    else if (forever_installer_agent_program(spawn->argv))
+    {
+        io_log("forever: installer continue supervisor agent unix_pid=%d windows_pid=%u",
+               slots[index].unix_pid, spawn->windows_pid);
+        title_desktop_installer_agent((uint32_t)slots[index].unix_pid);
+    }
+#endif
     char command[160];
     io_log("p1c supervisor spawn slot=%d generation=%llx pid=%d windows_pid=%u handle=%#x command=%s",
            index, (unsigned long long)generation, slots[index].unix_pid, spawn->windows_pid,

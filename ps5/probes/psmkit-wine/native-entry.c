@@ -1574,6 +1574,7 @@ void __attribute__((noreturn)) pw_native_exit(int status)
 #include "forever-download.h"
 #if !PW_RUNTIME_HEADLESS
 void title_desktop_message(const char *);
+void title_desktop_installer_mode(int);
 #endif
 
 #if !PW_RUNTIME_GPU
@@ -3514,6 +3515,9 @@ int main(int argc, char **argv)
     installer = !forever_prefix_init && stat(PW_RUNTIME_LAUNCHER_UNIX, &startup_file) != 0;
     if (installer && stat(PW_RUNTIME_INSTALLER_UNIX, &startup_file) && b1_download_installer())
         b1_wait();
+#if !PW_RUNTIME_HEADLESS
+    title_desktop_installer_mode(installer);
+#endif
 #if !PW_RUNTIME_HEADLESS
     if (!forever_prefix_init && !installer)
     {

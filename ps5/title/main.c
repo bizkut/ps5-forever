@@ -26,6 +26,7 @@
 #include "ime.h"
 #include "input.h"
 #include "pointer.h"
+#include "installer-continue.h"
 #ifdef FOREVER_MENU_DIAG
 #include "menu-diag.h"
 #endif
@@ -55,6 +56,7 @@ static uint8_t physical_keys[256], forwarded_keys[256];
 static uint32_t physical_pad, menu_pad, physical_mouse, forwarded_mouse;
 static enum forever_menu_command menu_ime_command;
 static int menu_hint_started;
+static struct forever_installer_continue installer_continue;
 
 int forever_title_menu_load(struct forever_menu_values *);
 int forever_title_addons_action(enum forever_menu_command, unsigned,
@@ -70,10 +72,10 @@ static struct
     int active, dump_pending;
 } menu_diag;
 void pw_elf_sha256(const void *, size_t, uint8_t[32]);
-void io_log(const char *, ...) __attribute__((format(printf, 1, 2)));
 #endif
 int forever_title_menu_action(enum forever_menu_command, int);
 void forever_title_voice_cancel(void);
+void io_log(const char *, ...) __attribute__((format(printf, 1, 2)));
 #endif
 
 /* Producers never touch compositor state; the desktop consumes the copy. */
@@ -152,6 +154,131 @@ static uint64_t now_us(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
+
+#ifdef PS5_TITLE_EMBEDDED
+static int installer_continue_armed(enum forever_installer_continue_stage stage)
+{
+    return stage == FOREVER_INSTALLER_CONTINUE_PROCESS ||
+           stage == FOREVER_INSTALLER_CONTINUE_WINDOW ||
+           stage == FOREVER_INSTALLER_CONTINUE_SETTLE;
+}
+
+static void installer_continue_log(enum forever_installer_continue_result result)
+{
+    const char *reason;
+
+    switch (result)
+    {
+    case FOREVER_INSTALLER_CONTINUE_SKIP_USER_INPUT:  reason = "user-input"; break;
+    case FOREVER_INSTALLER_CONTINUE_SKIP_FOCUS_LOST:  reason = "focus-lost"; break;
+    case FOREVER_INSTALLER_CONTINUE_SKIP_WINDOW_GONE: reason = "window-gone"; break;
+    default: return;
+    }
+    io_log("forever: installer continue skipped reason=%s", reason);
+}
+
+void title_desktop_installer_mode(int enabled)
+{
+    enum forever_installer_continue_stage stage;
+    pthread_mutex_lock(&message_mutex);
+    forever_installer_continue_mode(&installer_continue, enabled);
+    stage = installer_continue.stage;
+    pthread_mutex_unlock(&message_mutex);
+    io_log("forever: installer continue mode enabled=%d stage=%u",
+           !!enabled, (unsigned)stage);
+}
+
+void title_desktop_installer_process(uint32_t pid)
+{
+    enum forever_installer_continue_stage before, after;
+    uint32_t expected;
+    pthread_mutex_lock(&message_mutex);
+    before = installer_continue.stage;
+    forever_installer_continue_process(&installer_continue, pid);
+    after = installer_continue.stage;
+    expected = installer_continue.pid;
+    pthread_mutex_unlock(&message_mutex);
+    io_log("forever: installer continue process pid=%u stage=%u->%u expected_pid=%u",
+           pid, (unsigned)before, (unsigned)after, expected);
+}
+void title_desktop_installer_agent(uint32_t pid)
+{
+    enum forever_installer_continue_stage stage;
+    uint64_t now, window_deadline, agent_deadline, deadline;
+    int recorded;
+    now = now_us();
+    pthread_mutex_lock(&message_mutex);
+    recorded = forever_installer_continue_agent(&installer_continue, now);
+    stage = installer_continue.stage;
+    window_deadline = installer_continue.window_deadline_us;
+    agent_deadline = installer_continue.agent_deadline_us;
+    deadline = installer_continue.deadline_us;
+    pthread_mutex_unlock(&message_mutex);
+    io_log("forever: installer continue agent pid=%u now_us=%llu recorded=%d "
+           "window_deadline_us=%llu agent_deadline_us=%llu deadline_us=%llu stage=%u",
+           pid, (unsigned long long)now, recorded,
+           (unsigned long long)window_deadline, (unsigned long long)agent_deadline,
+           (unsigned long long)deadline, (unsigned)stage);
+}
+
+
+
+void title_desktop_installer_foreground(uint32_t pid, uint64_t window, int ready)
+{
+    enum forever_installer_continue_result result;
+    enum forever_installer_continue_stage before, after;
+    uint32_t expected_pid;
+    uint64_t expected_window, window_deadline, deadline;
+    int agent_ready;
+    pthread_mutex_lock(&message_mutex);
+    before = installer_continue.stage;
+    expected_pid = installer_continue.pid;
+    expected_window = installer_continue.window;
+    result = forever_installer_continue_foreground(&installer_continue, pid, window, ready, now_us());
+    after = installer_continue.stage;
+    deadline = installer_continue.deadline_us;
+    window_deadline = installer_continue.window_deadline_us;
+    agent_ready = installer_continue.agent_ready;
+    pthread_mutex_unlock(&message_mutex);
+    if (installer_continue_armed(before))
+        io_log("forever: installer continue foreground pid=%u window=%llx ready=%d "
+               "expected_pid=%u expected_window=%llx stage=%u->%u",
+               pid, (unsigned long long)window, !!ready, expected_pid,
+               (unsigned long long)expected_window, (unsigned)before, (unsigned)after);
+    if (before == FOREVER_INSTALLER_CONTINUE_WINDOW &&
+        after == FOREVER_INSTALLER_CONTINUE_SETTLE)
+        io_log("forever: installer continue settle pid=%u window=%llx "
+               "window_deadline_us=%llu agent_ready=%d deadline_us=%llu",
+               pid, (unsigned long long)window,
+               (unsigned long long)window_deadline,
+               agent_ready, (unsigned long long)deadline);
+    installer_continue_log(result);
+}
+
+void title_desktop_installer_destroyed(uint32_t pid, uint64_t window)
+{
+    enum forever_installer_continue_result result;
+    enum forever_installer_continue_stage before, after;
+    pthread_mutex_lock(&message_mutex);
+    before = installer_continue.stage;
+    result = forever_installer_continue_destroyed(&installer_continue, pid, window);
+    after = installer_continue.stage;
+    pthread_mutex_unlock(&message_mutex);
+    if (installer_continue_armed(before))
+        io_log("forever: installer continue destroy pid=%u window=%llx stage=%u->%u",
+               pid, (unsigned long long)window, (unsigned)before, (unsigned)after);
+    installer_continue_log(result);
+}
+
+static void title_desktop_installer_user_input(void)
+{
+    enum forever_installer_continue_result result;
+    pthread_mutex_lock(&message_mutex);
+    result = forever_installer_continue_input(&installer_continue);
+    pthread_mutex_unlock(&message_mutex);
+    installer_continue_log(result);
+}
+#endif
 
 #ifndef PS5_TITLE_EMBEDDED
 struct wine_log
@@ -563,6 +690,10 @@ static void on_input(const struct input_event *event, void *context)
     }
     else if (event->kind == INPUT_PAD)
         physical_pad = event->connected ? event->code & ~PAD_INTERCEPTED : 0;
+    if ((event->kind == INPUT_KEY && event->down) ||
+        (event->kind == INPUT_MOUSE_BUTTON && event->down) ||
+        (event->kind == INPUT_PAD && (physical_pad & ~previous_pad)))
+        title_desktop_installer_user_input();
     if (input_draining)
     {
         if (physical_input_neutral())
@@ -1152,13 +1283,15 @@ static void send_text(const uint16_t *text, size_t length)
     }
 }
 
-static void send_key(uint32_t usage)
+static int send_key(uint32_t usage)
 {
     struct ps5_desktop_key key = {.header = {PS5_DESKTOP_KEY, sizeof(key)}, .usage = usage};
+    int down, up;
     key.down = 1;
-    hub_send(&key, sizeof(key));
+    down = hub_send(&key, sizeof(key));
     key.down = 0;
-    hub_send(&key, sizeof(key));
+    up = hub_send(&key, sizeof(key));
+    return down && up;
 }
 
 #ifndef PS5_TITLE_EMBEDDED
@@ -1179,6 +1312,25 @@ static void *agc_yield(void *unused)
         if (now_us() - start < 2000) usleep(16000);
     }
     return NULL;
+}
+#endif
+
+#ifdef PS5_TITLE_EMBEDDED
+static void title_desktop_installer_tick(uint64_t now)
+{
+    enum forever_installer_continue_result result;
+    uint32_t pid;
+    uint64_t window;
+    pthread_mutex_lock(&message_mutex);
+    result = forever_installer_continue_tick(&installer_continue, now);
+    pid = installer_continue.pid;
+    window = installer_continue.window;
+    pthread_mutex_unlock(&message_mutex);
+    if (result != FOREVER_INSTALLER_CONTINUE_SEND) return;
+    io_log("forever: installer continue tick send pid=%u window=%llx usage=%u",
+           pid, (unsigned long long)window, KEY_ENTER);
+    if (send_key(KEY_ENTER)) io_log("forever: installer continue sent");
+    else io_log("forever: installer continue skipped reason=input-unavailable");
 }
 #endif
 
@@ -1206,6 +1358,7 @@ static int desktop_open(void)
     input_draining = pending_menu_status_kind = pending_addon_kind = 0;
     menu_ime_command = FOREVER_MENU_COMMAND_NONE;
     menu_hint_started = 0;
+    title_desktop_installer_mode(0);
 #ifdef FOREVER_MENU_DIAG
     memset(&menu_diag, 0, sizeof(menu_diag));
 #endif
@@ -1301,6 +1454,9 @@ static void desktop_frame(void)
         }
     }
     hub_poll(now);
+#ifdef PS5_TITLE_EMBEDDED
+    title_desktop_installer_tick(now);
+#endif
     pointer_position(&x, &y);
     compositor_cursor(x, y);
     compositor_cursor_tick(now);

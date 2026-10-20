@@ -23,8 +23,9 @@ definition = helper.definition
 args.output.parent.mkdir(parents=True, exist_ok=True)
 for source, prefix, types, functions in (
     (here / 'runtime-parent.c', 'native', ('pw_hub_peer', 'pw_hub_window', 'pw_desktop_hub'),
-     ('hub_find_window', 'hub_unlink_window', 'hub_remove_window', 'hub_restack',
-      'hub_replay_cursors', 'hub_replay', 'hub_previous_sink', 'hub_set_sink', 'hub_driver_message')),
+     ('hub_find_window', 'hub_notify_installer_foreground', 'hub_unlink_window',
+      'hub_remove_window', 'hub_restack', 'hub_replay_cursors', 'hub_replay',
+      'hub_previous_sink', 'hub_set_sink', 'hub_driver_message')),
     (args.wine / 'loader/main.c', 'payload', ('ps5_hub_peer', 'ps5_hub_window', 'ps5_desktop_hub'),
      ('ps5_hub_find_window', 'ps5_hub_unlink_window', 'ps5_hub_remove_window', 'ps5_hub_restack',
       'ps5_hub_replay_cursors', 'ps5_hub_replay', 'ps5_hub_previous_sink', 'ps5_hub_set_sink', 'ps5_hub_driver_message')),

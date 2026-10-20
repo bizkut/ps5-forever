@@ -33,6 +33,8 @@ or work online.
   instead of 12 on a test console.
 - **Faster Blizzard game downloads:** downloads of every Blizzard game now
   combine small disk writes, not only WoW's.
+- **Automatic Battle.net setup:** Forever Launcher accepts Blizzard's fixed
+  Battle.net install location when the installer is ready.
 - **Exit Battle.net** at the bottom of the Forever menu closes Battle.net and
   returns to the PS5 home screen, after a confirmation.
 - **Invert mouse scroll** (on by default) reverses the USB mouse wheel.
@@ -74,8 +76,8 @@ Older release notes are on the [releases page](https://github.com/bizkut/ps5-for
 
 1. The first start sets up the Windows files. This takes a few minutes. The app
    restarts by itself when it is done.
-2. Forever Launcher downloads Blizzard's Battle.net installer. Follow its
-   on-screen prompts to install Battle.net.
+2. Forever Launcher downloads Blizzard's Battle.net installer and automatically
+   continues past its fixed install-location page. Wait while Battle.net installs.
 3. Sign in to Battle.net (see below).
 4. In Battle.net, choose the World of Warcraft version you want, press
    **Install** and wait for the download, then press **Play**.
