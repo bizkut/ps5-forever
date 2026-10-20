@@ -35,6 +35,16 @@ end = source.index(end_marker, begin)
 args.output.parent.mkdir(parents=True, exist_ok=True)
 include = args.output.parent / 'wine-write-buffer.inc'
 include.write_text(source[begin:end])
+write_start = source.index('#ifdef __PROSPERO__\nstatic NTSTATUS title_write_file(')
+write_end = source.index('\n#ifdef __PROSPERO__\nNTSTATUS WINAPI NtWriteFile(', write_start)
+write = source[write_start:write_end]
+regular_end = write.index('\n    else if (type == FD_TYPE_SERIAL || type == FD_TYPE_DEVICE)\n')
+completion = write.index('\ndone:\n', regular_end)
+if write.count('\ndone:\n') != 1 or write.count('add_completion( handle, cvalue, status, total,') != 1:
+    raise SystemExit('NtWriteFile completion extraction missing or ambiguous')
+(args.output.parent / 'wine-write-file.inc').write_text(
+    write[:regular_end] + '\n    abort(); /* Unsupported nonregular/fallback test route. */\n' +
+    write[completion:])
 command = shlex.split(args.cc) + [
     '-std=gnu11', '-O2', '-g', '-Wall', '-Wextra', '-Wno-unused-function', '-pthread',
     '-DWINE_PS5_WRITE_BUFFER_TEST=1', '-DWINE_PS5_WRITE_BUFFER_DIAG=1',
@@ -43,3 +53,4 @@ command = shlex.split(args.cc) + [
 ]
 subprocess.run(command, check=True)
 print('WRITE_BUFFER_ISOLATION implementation=PRODUCTION_EXTRACTED')
+print('WRITE_BUFFER_DISPATCH_ISOLATION implementation=PRODUCTION_REGULAR_FILE_AND_COMPLETION_EXTRACTED')

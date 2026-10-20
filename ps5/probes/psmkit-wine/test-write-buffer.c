@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -22,6 +23,27 @@ typedef int32_t LONG;
 typedef int64_t LONG64;
 typedef union { struct { uint32_t LowPart; int32_t HighPart; } u; int64_t QuadPart; } LARGE_INTEGER;
 typedef uint32_t ULONG;
+typedef unsigned int UINT;
+typedef int BOOL;
+typedef uintptr_t ULONG_PTR, client_ptr_t;
+typedef void (*PIO_APC_ROUTINE)(void *, void *, ULONG);
+typedef void (*PNTAPCFUNC)(ULONG_PTR, ULONG_PTR, ULONG_PTR);
+typedef struct { NTSTATUS Status; ULONG_PTR Information; } IO_STATUS_BLOCK;
+enum server_fd_type { FD_TYPE_FILE, FD_TYPE_SERIAL, FD_TYPE_DEVICE, FD_TYPE_SOCKET };
+struct io_timeouts { int unused; };
+#define STATUS_PENDING ((NTSTATUS)0x103)
+#define STATUS_ACCESS_VIOLATION ((NTSTATUS)0xc0000005u)
+#define STATUS_ACCESS_DENIED ((NTSTATUS)0xc0000022u)
+#define STATUS_INVALID_PARAMETER ((NTSTATUS)0xc000000du)
+#define TRUE 1
+#define FILE_WRITE_DATA 0x0002
+#define FILE_APPEND_DATA 0x0004
+#define FILE_WRITE_THROUGH 0x0002
+#define FILE_NO_INTERMEDIATE_BUFFERING 0x0008
+#define FILE_SYNCHRONOUS_IO_ALERT 0x0010
+#define FILE_SYNCHRONOUS_IO_NONALERT 0x0020
+#define FILE_WRITE_TO_END_OF_FILE ((int64_t)-1)
+#define TRACE(...) do {} while (0)
 #define STATUS_SUCCESS ((NTSTATUS)0)
 #define STATUS_UNSUCCESSFUL ((NTSTATUS)0xc0000001u)
 #define STATUS_INVALID_USER_BUFFER ((NTSTATUS)0xc00000e8u)
@@ -43,8 +65,15 @@ static LONG64 title_io_coalesced;
 
 sigset_t ps5_title_block_set;
 static const char *test_path;
+static const char *test_drive_root = "/tmp";
 static HANDLE identity_handle;
 static int identity_fd = -1;
+static unsigned int identity_options;
+static int identity_append_only;
+static unsigned int event_sets, event_resets, apc_queued, completions;
+static ULONG_PTR completion_bytes, completion_context, apc_iosb, apc_context;
+static NTSTATUS completion_status;
+static BOOL completion_pending;
 static int copy_fails, writes_fail, fail_once, zero_once, write_errno;
 static int partial_once, writer_block, writer_entered, writer_done, admission_waiting_mutation;
 static int close_hook_enabled, close_barrier_done, allow_close_retire, close_done;
@@ -73,7 +102,7 @@ static LONG64 title_io_now_us(void)
 static const char *ps5_title_drive(char drive)
 {
     (void)drive;
-    return "/tmp";
+    return test_drive_root;
 }
 
 static int server_get_unix_name(HANDLE handle, char **path)
@@ -86,12 +115,12 @@ static int server_get_unix_name(HANDLE handle, char **path)
 static NTSTATUS server_get_unix_fd(HANDLE handle, unsigned int access, int *fd,
                                     int *needs_close, void *type, unsigned int *options)
 {
-    (void)access;
-    (void)type;
+    if (identity_append_only && access == FILE_WRITE_DATA) return STATUS_ACCESS_DENIED;
     if (handle != identity_handle || identity_fd == -1) return STATUS_BAD_DEVICE_TYPE;
     *fd = identity_fd;
     *needs_close = 0;
-    if (options) *options = 0;
+    if (type) *(enum server_fd_type *)type = FD_TYPE_FILE;
+    if (options) *options = identity_options;
     return STATUS_SUCCESS;
 }
 
@@ -207,6 +236,58 @@ static void title_buffer_test_close_hook(HANDLE handle)
 
 #include "wine-write-buffer.inc"
 
+static int ps5_direct_enabled(void) { return 1; }
+static int virtual_check_buffer_for_read(const void *bytes, size_t size) { return !size || bytes != NULL; }
+static client_ptr_t iosb_client_ptr(IO_STATUS_BLOCK *io) { return (client_ptr_t)io; }
+static NTSTATUS server_write_file(HANDLE handle, ...) { (void)handle; abort(); }
+static ssize_t title_file_pwrite(HANDLE handle, int fd, const void *bytes, size_t size, off_t offset)
+{
+    (void)handle;
+    return test_pwrite(fd, bytes, size, offset);
+}
+static void set_sync_iosb(IO_STATUS_BLOCK *io, NTSTATUS status, ULONG_PTR bytes, unsigned int options)
+{
+    (void)options;
+    io->Status = status;
+    io->Information = bytes;
+}
+static NTSTATUS NtSetEvent(HANDLE event, void *previous)
+{
+    (void)event; (void)previous;
+    event_sets++;
+    return STATUS_SUCCESS;
+}
+static NTSTATUS NtResetEvent(HANDLE event, void *previous)
+{
+    (void)event; (void)previous;
+    event_resets++;
+    return STATUS_SUCCESS;
+}
+#define GetCurrentThread() ((HANDLE)(uintptr_t)0x44)
+static NTSTATUS NtQueueApcThread(HANDLE thread, PNTAPCFUNC apc, ULONG_PTR context,
+                                ULONG_PTR io, ULONG_PTR unused)
+{
+    (void)thread; (void)apc; (void)unused;
+    apc_queued++;
+    apc_context = context;
+    apc_iosb = io;
+    return STATUS_SUCCESS;
+}
+static void add_completion(HANDLE handle, ULONG_PTR context, NTSTATUS status, ULONG_PTR bytes, BOOL pending)
+{
+    (void)handle;
+    completions++;
+    completion_context = context;
+    completion_status = status;
+    completion_bytes = bytes;
+    completion_pending = pending;
+}
+static void set_pending_write(HANDLE handle) { (void)handle; abort(); }
+
+#define __PROSPERO__ 1
+#include "wine-write-file.inc"
+#undef __PROSPERO__
+
 static void reset_buffer(void)
 {
     struct wine_ps5_title_lock lock;
@@ -224,6 +305,7 @@ static void reset_buffer(void)
         title_buffer_clear_run_locked(&title_buffer.runs[i]);
     }
     title_buffer.next_sequence = 1;
+    title_buffer.excluded_count = 0;
     title_buffer.barrier_count = title_buffer.barrier_active = 0;
     memset(&title_buffer_diag, 0, sizeof(title_buffer_diag));
     title_buffer_unlock(&lock);
@@ -252,6 +334,10 @@ static void reset_buffer(void)
     extents_lines = 0;
     identity_handle = 0;
     identity_fd = -1;
+    identity_options = 0;
+    identity_append_only = 0;
+    event_sets = event_resets = apc_queued = completions = 0;
+    completion_bytes = completion_context = apc_iosb = apc_context = 0;
 }
 
 static int fd_count(void)
@@ -309,6 +395,292 @@ static void start_run(HANDLE handle, int fd, const char *path, const char *bytes
     assert(handled && pos == (off_t)size);
     assert(diagnostic_lines == 1 && strstr(diagnostic_line, "state=enabled reason=eligible"));
 }
+
+static void test_mapping_identity_isolation(void)
+{
+    char path[64], other[64], bytes[3];
+    HANDLE mapped = (HANDLE)(uintptr_t)0x160, unrelated = (HANDLE)(uintptr_t)0x164;
+    HANDLE alias = (HANDLE)(uintptr_t)0x168;
+    char *view;
+    struct stat st;
+    int handled;
+    off_t pos;
+    int fd = make_file(path), other_fd = make_file(other);
+
+    reset_buffer();
+    test_path = "/tmp/ProgramData/Battle.net/Agent/data/archive.bin";
+    start_run(mapped, fd, path, "old", 3);
+    start_run(unrelated, other_fd, other, "new", 3);
+    assert(!ps5_title_prepare_buffered_section(mapped, 0));
+    assert(!title_buffer_disabled);
+    assert(title_buffer_test_pending_count() == 1 && backing_calls == 1);
+    view = mmap(NULL, 3, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    assert(view != MAP_FAILED && !memcmp(view, "old", 3));
+    memcpy(view, "map", 3);
+    identity_handle = alias;
+    identity_fd = fd;
+    assert(!ps5_title_prepare_buffered_section(alias, 0));
+    assert(title_buffer.excluded_count == 1 && !title_buffer_disabled);
+    assert(!ps5_title_close_coalesced_write(mapped));
+    assert(!fstat(fd, &st));
+    assert(!title_buffer_write(alias, fd, "bad", 3, 0, path, st.st_dev, st.st_ino,
+                               title_buffer_mutation_generation, 1, &handled, &pos));
+    assert(!handled && title_buffer_test_pending_count() == 1);
+    assert(!title_buffer_flush(0, 0, 0));
+    assert(pread(fd, bytes, sizeof(bytes), 0) == sizeof(bytes));
+    assert(!memcmp(bytes, "map", sizeof(bytes)));
+    start_run(unrelated, other_fd, other, "yes", 3);
+    assert(!title_buffer_disabled && title_buffer_test_pending_count() == 1);
+    assert(!title_buffer_flush(0, 0, 0));
+    assert(!memcmp(view, "map", 3) && !munmap(view, 3));
+    close(fd); close(other_fd);
+    unlink(path); unlink(other);
+    puts("write-buffer production: mapping drains/excludes one identity and unrelated files keep buffering PASS");
+}
+
+
+static void test_apc(void *context, void *io, ULONG reserved)
+{
+    (void)context; (void)io; (void)reserved;
+    assert(!"APC must be queued, not invoked inline");
+}
+
+static void test_overlapped_write_dispatch(void)
+{
+    static const unsigned int barriers[] =
+    {
+        WINE_PS5_TITLE_BUFFER_BARRIER_READ, WINE_PS5_TITLE_BUFFER_BARRIER_READ,
+        WINE_PS5_TITLE_BUFFER_BARRIER_QUERY, WINE_PS5_TITLE_BUFFER_BARRIER_QUERY,
+        WINE_PS5_TITLE_BUFFER_BARRIER_CLOSE, WINE_PS5_TITLE_BUFFER_BARRIER_LOCK_FLUSH
+    };
+    char root[] = "/tmp/wine-ps5-overlapped-XXXXXX", path[256];
+    char bytes[7168], actual[14336], *part;
+    HANDLE owner = (HANDLE)(uintptr_t)0x150, reader = (HANDLE)(uintptr_t)0x154;
+    HANDLE event = (HANDLE)(uintptr_t)0x158;
+    void *context = (void *)(uintptr_t)0xcafe;
+    IO_STATUS_BLOCK io;
+    LARGE_INTEGER offset;
+    BOOL synchronous;
+    struct stat st;
+    int fd;
+    unsigned int mode, j;
+
+    assert(mkdtemp(root));
+    test_drive_root = root;
+    snprintf(path, sizeof(path), "%s/Program Files (x86)/Battle.net/.battle.net/.extract/client.dll", root);
+    for (part = path + strlen(root) + 1; *part; part++)
+        if (*part == '/')
+        {
+            *part = 0;
+            assert(!mkdir(path, 0700));
+            *part = '/';
+        }
+    fd = open(path, O_CREAT | O_EXCL | O_RDWR, 0600);
+    assert(fd >= 0);
+    for (mode = 0; mode < 2; mode++)
+        for (j = 0; j < sizeof(barriers) / sizeof(barriers[0]); j++)
+        {
+            reset_buffer();
+            assert(!ftruncate(fd, 0) && lseek(fd, 17, SEEK_SET) == 17);
+            test_path = path;
+            identity_handle = owner;
+            identity_fd = fd;
+            identity_options = mode ? FILE_NO_INTERMEDIATE_BUFFERING : 0;
+            memset(bytes, 'a', sizeof(bytes));
+            offset.QuadPart = 0;
+            synchronous = TRUE;
+            io.Status = STATUS_UNSUCCESSFUL;
+            io.Information = 0;
+            assert(title_write_file(owner, event, NULL, context, &io, bytes, sizeof(bytes),
+                                    &offset, NULL, &synchronous) == STATUS_PENDING);
+            assert(!synchronous && io.Status == STATUS_SUCCESS && io.Information == sizeof(bytes));
+            assert(event_sets == 1 && !event_resets && completions == 1 && !apc_queued);
+            assert(completion_context == (ULONG_PTR)context && completion_bytes == sizeof(bytes));
+            assert(completion_status == STATUS_SUCCESS && completion_pending);
+            memset(bytes, 'b', sizeof(bytes));
+            offset.QuadPart = sizeof(bytes);
+            assert(title_write_file(owner, event, NULL, context, &io, bytes, sizeof(bytes),
+                                    &offset, NULL, NULL) == STATUS_PENDING);
+            assert(io.Status == STATUS_SUCCESS && io.Information == sizeof(bytes));
+            assert(event_sets == 2 && completions == 2);
+            assert(title_buffer_test_pending_count() == 1 && backing_calls == 0);
+            assert(!fstat(fd, &st) && st.st_size == 0 && lseek(fd, 0, SEEK_CUR) == 17);
+            memset(bytes, 'c', sizeof(bytes));
+            if (barriers[j] == WINE_PS5_TITLE_BUFFER_BARRIER_CLOSE)
+                assert(!ps5_title_close_coalesced_write(owner));
+            else
+            {
+                identity_handle = j == 1 || j == 3 ? reader : owner;
+                assert(!ps5_title_flush_coalesced_write_reason(identity_handle, barriers[j]));
+            }
+            assert(!title_buffer_test_pending_count() && backing_calls == 1);
+            assert(!fstat(fd, &st) && st.st_size == sizeof(actual));
+            assert(pread(fd, actual, sizeof(actual), 0) == sizeof(actual));
+            for (unsigned int i = 0; i < sizeof(actual); i++)
+                assert(actual[i] == (i < sizeof(bytes) ? 'a' : 'b'));
+        }
+
+    reset_buffer();
+    assert(!ftruncate(fd, 0));
+    test_path = path;
+    identity_handle = owner;
+    identity_fd = fd;
+    identity_options = FILE_NO_INTERMEDIATE_BUFFERING;
+    offset.QuadPart = 0;
+    assert(title_write_file(owner, event, test_apc, context, &io, "apc", 3,
+                            &offset, NULL, NULL) == STATUS_PENDING);
+    assert(io.Status == STATUS_SUCCESS && io.Information == 3);
+    assert(event_sets == 1 && apc_queued == 1 && !completions);
+    assert(apc_context == (ULONG_PTR)context && apc_iosb == (ULONG_PTR)&io);
+    assert(!ps5_title_close_coalesced_write(owner));
+
+    for (j = 0; j < 2; j++)
+    {
+        reset_buffer();
+        assert(!ftruncate(fd, 0));
+        test_path = path;
+        identity_handle = owner;
+        identity_fd = fd;
+        identity_options = FILE_NO_INTERMEDIATE_BUFFERING;
+        offset.QuadPart = 0;
+        assert(title_write_file(owner, event, NULL, context, &io, "head", 4,
+                                &offset, NULL, NULL) == STATUS_PENDING);
+        assert(title_buffer_test_pending_count() == 1 && backing_calls == 0);
+        identity_append_only = j;
+        offset.QuadPart = j ? 0 : FILE_WRITE_TO_END_OF_FILE;
+        assert(title_write_file(owner, event, NULL, context, &io, "tail", 4,
+                                &offset, NULL, NULL) == STATUS_PENDING);
+        assert(!title_buffer_test_pending_count() && backing_calls == 2);
+        assert(!fstat(fd, &st) && st.st_size == 8);
+        assert(pread(fd, actual, 8, 0) == 8 && !memcmp(actual, "headtail", 8));
+    }
+
+    reset_buffer();
+    assert(!ftruncate(fd, 0));
+    test_path = path;
+    identity_handle = owner;
+    identity_fd = fd;
+    offset.QuadPart = 0;
+    assert(title_write_file(owner, event, NULL, context, &io, "head", 4,
+                            &offset, NULL, NULL) == STATUS_PENDING);
+    identity_options = FILE_NO_INTERMEDIATE_BUFFERING | FILE_WRITE_THROUGH;
+    offset.QuadPart = 4;
+    assert(title_write_file(owner, event, NULL, context, &io, "tail", 4,
+                            &offset, NULL, NULL) == STATUS_PENDING);
+    assert(!title_buffer_test_pending_count() && backing_calls == 2);
+    assert(pread(fd, actual, 8, 0) == 8 && !memcmp(actual, "headtail", 8));
+
+    reset_buffer();
+    identity_handle = owner;
+    identity_fd = fd;
+    offset.QuadPart = FILE_USE_FILE_POINTER_POSITION;
+    assert(title_write_file(owner, event, NULL, context, &io, "bad", 3,
+                            &offset, NULL, NULL) == STATUS_INVALID_PARAMETER);
+    assert(title_write_file(owner, event, NULL, context, &io, "bad", 3,
+                            NULL, NULL, NULL) == STATUS_INVALID_PARAMETER);
+    assert(!title_buffer_test_pending_count() && !backing_calls && !event_sets && event_resets == 2);
+    close(fd);
+    assert(!unlink(path));
+    while ((part = strrchr(path, '/')) && part > path + strlen(root))
+    {
+        *part = 0;
+        assert(!rmdir(path));
+    }
+    test_drive_root = "/tmp";
+    assert(!rmdir(root));
+    puts("write-buffer production dispatch: overlapped explicit-offset/NO_BUFFERING, IOSB/event/"
+         "completion-port/APC queue, copied bytes/pointer, read/query/close/flush, "
+         "append and WRITE_THROUGH boundaries PASS");
+}
+
+static void test_scoped_visibility(void)
+{
+    static const char *paths[] =
+    {
+        "Games/World of Warcraft/Data/data/data.000",
+        "Program Files (x86)/Battle.net/Battle.net.123/client.dll",
+        "ProgramData/Battle.net/Agent/Agent.123/Agent.exe"
+    };
+    static const unsigned int reasons[] =
+    {
+        WINE_PS5_TITLE_BUFFER_BARRIER_READ, WINE_PS5_TITLE_BUFFER_BARRIER_QUERY,
+        WINE_PS5_TITLE_BUFFER_BARRIER_READ, WINE_PS5_TITLE_BUFFER_BARRIER_QUERY,
+        WINE_PS5_TITLE_BUFFER_BARRIER_CLOSE, WINE_PS5_TITLE_BUFFER_BARRIER_LOCK_FLUSH,
+        WINE_PS5_TITLE_BUFFER_BARRIER_DUPLICATE
+    };
+    HANDLE owner = (HANDLE)(uintptr_t)0x130, reader = (HANDLE)(uintptr_t)0x134;
+    char root[] = "/tmp/wine-ps5-visible-XXXXXX", path[256], bytes[7168], actual[14336];
+    struct stat st;
+    unsigned int i, j;
+
+    assert(mkdtemp(root));
+    test_drive_root = root;
+    memset(bytes, 'b', sizeof(bytes));
+    for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++)
+    {
+        char *part;
+        snprintf(path, sizeof(path), "%s/%s", root, paths[i]);
+        for (part = path + strlen(root) + 1; *part; part++)
+            if (*part == '/')
+            {
+                *part = 0;
+                assert(!mkdir(path, 0700));
+                *part = '/';
+            }
+        for (j = 0; j < sizeof(reasons) / sizeof(reasons[0]); j++)
+        {
+            char *resolved = NULL;
+            uint64_t dev, ino;
+            LONG64 generation;
+            off_t pos;
+            int handled, eligible, need_path;
+            int fd = open(path, O_CREAT | O_TRUNC | O_RDWR, 0600);
+
+            assert(fd >= 0);
+            reset_buffer();
+            test_path = path;
+            need_path = title_buffer_needs_path(owner, &generation);
+            eligible = title_buffer_resolve_start(owner, fd, need_path, &resolved, &dev, &ino);
+            assert(eligible);
+            assert(!title_buffer_write(owner, fd, bytes, sizeof(bytes), 0, resolved,
+                                       dev, ino, generation, eligible, &handled, &pos));
+            free(resolved);
+            assert(handled && pos == sizeof(bytes));
+            assert(!title_buffer_write(owner, fd, bytes, sizeof(bytes), pos, NULL,
+                                       0, 0, generation, eligible, &handled, &pos));
+            assert(handled && pos == sizeof(actual));
+            assert(!fstat(fd, &st) && st.st_size == 0 && backing_calls == 0);
+            if (reasons[j] == WINE_PS5_TITLE_BUFFER_BARRIER_CLOSE)
+                assert(!ps5_title_close_coalesced_write(owner));
+            else
+            {
+                identity_handle = j == 2 || j == 3 ? reader : owner;
+                identity_fd = fd;
+                assert(!ps5_title_flush_coalesced_write_reason(identity_handle, reasons[j]));
+            }
+            assert(!title_buffer_test_pending_count() && backing_calls == 1);
+            close(fd);
+            fd = open(path, O_RDONLY);
+            assert(fd >= 0);
+            assert(!fstat(fd, &st) && st.st_size == sizeof(actual));
+            assert(pread(fd, actual, sizeof(actual), 0) == sizeof(actual));
+            assert(!memcmp(actual, bytes, sizeof(bytes)));
+            assert(!memcmp(actual + sizeof(bytes), bytes, sizeof(bytes)));
+            close(fd);
+        }
+        assert(!unlink(path));
+        while ((part = strrchr(path, '/')) && part > path + strlen(root))
+        {
+            *part = 0;
+            assert(!rmdir(path));
+        }
+    }
+    test_drive_root = "/tmp";
+    assert(!rmdir(root));
+    puts("write-buffer production: CASC/Battle.net 7 KiB coalescing, same/other-handle "
+         "read/query, close/reopen, flush and duplicate visibility PASS");
+}
+
 
 static void test_sequential_and_barrier(void)
 {
@@ -1003,13 +1375,17 @@ static void test_mapping_and_shutdown_admission(void)
     strcpy(other, "/tmp/wine-ps5-outside-XXXXXX");
     int other_fd = mkstemp(other);
     assert(other_fd >= 0);
+    identity_handle = handle;
+    identity_fd = other_fd;
     test_path = other;
     assert(!ps5_title_prepare_buffered_section(handle, 0));
     assert(!title_buffer_disabled);
 
     test_path = "/tmp/Games/World of Warcraft/Data/data/data.000";
     assert(!ps5_title_prepare_buffered_section(handle, 0));
-    assert(title_buffer_disabled);
+    assert(!title_buffer_disabled && title_buffer.excluded_count == 1);
+    assert(!ps5_title_prepare_buffered_section((HANDLE)(uintptr_t)0xdead, 0));
+    assert(title_buffer_disabled && !title_buffer_test_pending_count());
     assert(!fstat(fd, &st));
     title_buffer_shutdown = 1;
     assert(!title_buffer_write(handle, fd, "z", 1, 3, path, st.st_dev, st.st_ino,
@@ -1019,8 +1395,90 @@ static void test_mapping_and_shutdown_admission(void)
     close(fd);
     unlink(other);
     unlink(path);
-    puts("write-buffer production: SEC_IMAGE/out-of-scope mapping, scoped disable-before-drain and late writer PASS");
+    puts("write-buffer production: SEC_IMAGE, remembered data mappings, unresolved fallback and late writer PASS");
 }
+
+static void test_rename_identity_and_exclusion_capacity(void)
+{
+    char root[64], scoped[256], path[64], other[64], bytes[3];
+    char data_dir[256], staging_dir[256], staging_path[256];
+    HANDLE owner = (HANDLE)(uintptr_t)0x420, unrelated = (HANDLE)(uintptr_t)0x424;
+    struct stat st, replaced;
+    int handled;
+    off_t pos;
+    int fd = make_file(path), other_fd = make_file(other);
+    int target_fd = make_scoped_file(root, scoped);
+
+    assert(target_fd >= 0 && !fstat(target_fd, &replaced));
+    assert(pwrite(fd, "old", 3, 0) == 3);
+    reset_buffer();
+    identity_handle = owner;
+    identity_fd = fd;
+    start_run(unrelated, other_fd, other, "new", 3);
+    assert(!ps5_title_note_buffered_rename(owner, scoped, 0));
+    assert(!title_buffer_disabled && title_buffer.excluded_count == 1);
+    assert(title_buffer_test_pending_count() == 1 && backing_calls == 0);
+    assert(!title_buffer_identity_excluded_locked(replaced.st_dev, replaced.st_ino));
+    assert(!rename(path, scoped));
+    assert(!fstat(fd, &st) && title_buffer_identity_excluded_locked(st.st_dev, st.st_ino));
+    assert(!title_buffer_write(owner, fd, "bad", 3, 0, scoped, st.st_dev, st.st_ino,
+                               title_buffer_mutation_generation, 1, &handled, &pos));
+    assert(!handled && title_buffer_test_pending_count() == 1);
+    assert(pwrite(fd, "map", 3, 0) == 3);
+    assert(!title_buffer_flush(0, 0, 0));
+    assert(pread(fd, bytes, 3, 0) == 3 && !memcmp(bytes, "map", 3));
+    start_run(unrelated, other_fd, other, "yes", 3);
+    assert(!title_buffer_disabled && title_buffer_test_pending_count() == 1);
+    assert(!title_buffer_flush(0, 0, 0));
+    close(target_fd);
+    close(fd);
+    assert(!unlink(scoped));
+
+    strcpy(data_dir, scoped);
+    *strrchr(data_dir, '/') = 0;
+    assert(!rmdir(data_dir));
+    snprintf(staging_dir, sizeof(staging_dir), "%s/staging", root);
+    snprintf(staging_path, sizeof(staging_path), "%s/data.000", staging_dir);
+    assert(!mkdir(staging_dir, 0700));
+    fd = open(staging_path, O_CREAT | O_EXCL | O_RDWR, 0600);
+    assert(fd >= 0 && pwrite(fd, "dir", 3, 0) == 3);
+    reset_buffer();
+    test_path = staging_path;
+    identity_handle = owner;
+    identity_fd = fd;
+    assert(!ps5_title_prepare_buffered_section(owner, 0));
+    assert(!title_buffer_disabled && title_buffer.excluded_count == 1);
+    assert(!ps5_title_note_buffered_rename(owner, data_dir, 1));
+    assert(!title_buffer_disabled && !rename(staging_dir, data_dir));
+    assert(!fstat(fd, &st));
+    assert(!title_buffer_write(owner, fd, "bad", 3, 0, scoped, st.st_dev, st.st_ino,
+                               title_buffer_mutation_generation, 1, &handled, &pos));
+    assert(!handled);
+    start_run(unrelated, other_fd, other, "yes", 3);
+    assert(!title_buffer_flush(0, 0, 0));
+    assert(pread(fd, bytes, 3, 0) == 3 && !memcmp(bytes, "dir", 3));
+
+    reset_buffer();
+    for (unsigned int i = 0; i < TITLE_BUFFER_EXCLUDED_IDENTITIES; i++)
+    {
+        title_buffer.excluded[i].dev = st.st_dev + 1;
+        title_buffer.excluded[i].ino = i + 1;
+    }
+    title_buffer.excluded_count = TITLE_BUFFER_EXCLUDED_IDENTITIES;
+    identity_handle = owner;
+    identity_fd = fd;
+    start_run(unrelated, other_fd, other, "cap", 3);
+    assert(!ps5_title_prepare_buffered_section(owner, 0));
+    assert(title_buffer_disabled && !title_buffer_test_pending_count());
+    assert(strstr(diagnostic_line, "reason=exclusion-capacity"));
+    close(fd);
+    close(other_fd);
+    unlink(other);
+    remove_scoped_file(root, scoped);
+    puts("write-buffer production: file/directory rename identity coherence, unrelated buffering "
+         "and table-full global fallback PASS");
+}
+
 
 static void *mapping_thread(void *arg)
 {
@@ -1169,7 +1627,7 @@ static void test_mapping_race_and_sigquit_cleanup(void)
     writer_block = 1;
     assert(!pthread_create(&thread, NULL, mapping_thread, handle));
     while (!__atomic_load_n(&writer_entered, __ATOMIC_ACQUIRE)) usleep(1000);
-    assert(title_buffer_disabled);
+    assert(!title_buffer_disabled && title_buffer.excluded_count == 1);
     __atomic_store_n(&writer_block, 0, __ATOMIC_RELEASE);
     assert(!pthread_join(thread, NULL));
     assert(pwrite(fd, "new", 3, 0) == 3);
@@ -1222,12 +1680,14 @@ static void test_ordering_rename_and_kill_switch(void)
     assert(!handled && pread(fd, bytes, sizeof(bytes), 0) == sizeof(bytes));
     assert(!memcmp(bytes, "dat", sizeof(bytes)));
 
+    identity_handle = handle;
+    identity_fd = fd;
     assert(!ps5_title_note_buffered_rename(
-        "/tmp/Games/World of Warcraft/Data/data/data.002", 0));
-    assert(title_buffer_disabled);
+        handle, "/tmp/Games/World of Warcraft/Data/data/data.002", 0));
+    assert(!title_buffer_disabled && title_buffer.excluded_count == 1);
     reset_buffer();
-    assert(!ps5_title_note_buffered_rename("/tmp/Games/Staging", 1));
-    assert(title_buffer_disabled);
+    assert(!ps5_title_note_buffered_rename(handle, "/tmp/Games/Staging", 1));
+    assert(!title_buffer_disabled);
     reset_buffer();
     test_path = path;
     assert(!ftruncate(fd, 0));
@@ -1245,14 +1705,17 @@ static void test_ordering_rename_and_kill_switch(void)
     assert(diagnostic_lines == 1 && strstr(diagnostic_line, "state=disabled reason=env-off"));
     close(fd);
     unlink(path);
-    puts("write-buffer production: data-before-idx, rename/link disable and kill-switch direct path PASS");
+    puts("write-buffer production: data-before-idx, rename exclusion, link disable and kill-switch direct path PASS");
 }
 
 int main(void)
 {
     sigemptyset(&ps5_title_block_set);
     sigaddset(&ps5_title_block_set, SIGQUIT);
+    test_mapping_identity_isolation();
+    test_overlapped_write_dispatch();
     test_sequential_and_barrier();
+    test_scoped_visibility();
     test_measurement_window();
     test_extent_diagnostics();
     test_measurement_off_on_parity();
@@ -1271,6 +1734,7 @@ int main(void)
     test_failed_close_orphan_identity();
     test_close_waits_for_idle_retry();
     test_mapping_and_shutdown_admission();
+    test_rename_identity_and_exclusion_capacity();
     test_mapping_race_and_sigquit_cleanup();
     test_combined_admission_wait();
     test_ordering_rename_and_kill_switch();
