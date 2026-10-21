@@ -1,11 +1,11 @@
 {
   "addonforge_core": {
-    "sha256": "e51da5bf861d92a37806c2d6c4c13d0e1cb5f8999b392042dc97f63019aaa2bb",
-    "size": 3438592
+    "sha256": "4ece1d1ec0f85858e59389e24a08a3a3ca095e1c0e2f14d8e09349e12803f9de",
+    "size": 3441664
   },
   "cargo_lock_sha256": "8d98ec6289137d1fc9414ffe42b26057164e87761e237d70b3e27f0ace64862d",
-  "cold_build_a_sha256": "e51da5bf861d92a37806c2d6c4c13d0e1cb5f8999b392042dc97f63019aaa2bb",
-  "cold_build_b_sha256": "e51da5bf861d92a37806c2d6c4c13d0e1cb5f8999b392042dc97f63019aaa2bb",
+  "cold_build_a_sha256": "4ece1d1ec0f85858e59389e24a08a3a3ca095e1c0e2f14d8e09349e12803f9de",
+  "cold_build_b_sha256": "4ece1d1ec0f85858e59389e24a08a3a3ca095e1c0e2f14d8e09349e12803f9de",
   "format": 1,
   "github_catalogue": {
     "etag": null,
@@ -29,7 +29,7 @@
     "0006-wago-key-control.patch": "639ac5ee4888592fbd9392fb519ee0e294206b7d66e390a53b52d3fca5a5c25a",
     "0007-all-wow-channels.patch": "df3b8cd59716033a55df359b85806d088b37f5f7b949fd86258ed9a616f609fe",
     "0008-all-flavour-catalogues.patch": "2e47655f98d1cd7702ffd9b372711d5c7ed340bdbe290ac315be5881a8539a2b",
-    "0009-own-catalogue-release-streams.patch": "6a71ea53913e666a741cdbfb801d087649cfaca37b401ff9e1fb655d0268d19e"
+    "0009-own-catalogue-release-streams.patch": "e4e295be548e00277736aa3e8cf51f368746eef8c70c07fd27334f94bbe787ac"
   },
   "reproducible": true,
   "rust_toolchain": "1.99.1",

@@ -18,6 +18,9 @@
 #include "../../title/addonforge-security.h"
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
+#include "addon-trash-native.h"
+static void forever_addon_trash_start(void);
+static void forever_addon_trash_shutdown(void);
 #if !PW_RUNTIME_HEADLESS
 static void forever_title_voice_shutdown(void);
 #endif
@@ -1445,6 +1448,9 @@ static void pw_title_log_begin(void)
 void __attribute__((noreturn)) pw_native_exit(int status)
 {
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE)
+#if !PW_RUNTIME_GPU
+    forever_addon_trash_shutdown();
+#endif
 #if PW_RUNTIME_GPU
     pw_voice_shutdown();
 #elif !PW_RUNTIME_HEADLESS
@@ -2209,7 +2215,47 @@ static int forever_title_voice_enable(void)
         if (result) result = -result;
     }
     pthread_mutex_unlock(&forever_voice_download.lifecycle);
+
     return result ? result : 1; /* asynchronous; commit only after verification */
+}
+static struct
+{
+    pthread_t thread;
+    atomic_int stop;
+    int started;
+} forever_addon_trash;
+
+static void *forever_addon_trash_worker(void *unused)
+{
+    (void)unused;
+    for (unsigned i = 0; i < 100 && !atomic_load(&forever_addon_trash.stop); i++) usleep(100000);
+    while (!atomic_load(&forever_addon_trash.stop))
+    {
+        struct addon_trash_result result;
+        int64_t started = io_now_ms();
+        int error = addon_trash_scan(PW_RUNTIME_PREFIX, &forever_addon_trash.stop, &result);
+        if (result.entries || error)
+            io_log("forever: addon trash deleted entries=%llu ms=%lld result=%d",
+                   (unsigned long long)result.entries,
+                   (long long)(io_now_ms() - started), error);
+        for (unsigned i = 0; i < 20 && !atomic_load(&forever_addon_trash.stop); i++) usleep(100000);
+    }
+    return NULL;
+}
+
+static void forever_addon_trash_start(void)
+{
+    atomic_store(&forever_addon_trash.stop, 0);
+    if (!pthread_create(&forever_addon_trash.thread, NULL, forever_addon_trash_worker, NULL))
+        forever_addon_trash.started = 1;
+}
+
+static void forever_addon_trash_shutdown(void)
+{
+    if (!forever_addon_trash.started) return;
+    atomic_store(&forever_addon_trash.stop, 1);
+    pthread_join(forever_addon_trash.thread, NULL);
+    forever_addon_trash.started = 0;
 }
 
 void title_desktop_addons_snapshot(const struct forever_addon_snapshot *);
@@ -3731,6 +3777,7 @@ int main(int argc, char **argv)
     char *wineboot_args[]={(char *)PW_RUNTIME_LOADER, "C:\\windows\\system32\\wineboot.exe", "-i", NULL};
     const char *cwd = forever_prefix_init ? FOREVER_PREFIX : installer ? PW_RUNTIME_INSTALLER_CWD : PW_RUNTIME_CWD;
     if (setenv("WINEPS5_TITLE_PARENT_CWD", cwd, 1)) return 1;
+    forever_addon_trash_start();
     if (forever_prefix_init)
     {
         pthread_t watch;

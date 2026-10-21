@@ -134,7 +134,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 		$(HOST_OUT)/test-audio-selection $(HOST_OUT)/test-fd-parking \
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-forever-menu $(HOST_OUT)/test-forever-exit \
-		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-worker $(HOST_OUT)/test-addonforge-security \
+		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-worker $(HOST_OUT)/test-addonforge-security $(HOST_OUT)/test-addon-trash-native \
 		$(HOST_OUT)/test-forever-menu-diag \
 		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
 		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
@@ -177,6 +177,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 	$(HOST_OUT)/test-addonforge-client
 	$(HOST_OUT)/test-addonforge-worker
 	$(HOST_OUT)/test-addonforge-security
+	$(HOST_OUT)/test-addon-trash-native
 	$(HOST_OUT)/test-forever-menu-diag
 	$(HOST_OUT)/test-title-icon
 	$(HOST_OUT)/test-desktop-surface
@@ -310,6 +311,10 @@ $(HOST_OUT)/test-addonforge-worker: test-addonforge-worker.c build-addonforge-wo
 		native-entry.c wow-channels.h ../../title/addonforge-client.c ../../title/addonforge-client.h \
 		../../title/forever-menu.c ../../title/forever-menu.h
 	python3 build-addonforge-worker-test.py --output "$@" --cc "$(HOST_CC)"
+
+$(HOST_OUT)/test-addon-trash-native: test-addon-trash-native.c addon-trash-native.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-addon-trash-native.c -o $@
 
 $(HOST_OUT)/test-forever-menu-diag: test-forever-menu-diag.c ../../title/menu-diag.h \
 		../../title/input.h

@@ -241,21 +241,49 @@ index 4d97061..7732a53 100644
                  assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
                  let zip = crate::install::download(&client, &remote.download_url,
 diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
-index ef847c1..6347961 100644
+index ef847c1..f39ae4a 100644
 --- a/src-tauri/src/install.rs
 +++ b/src-tauri/src/install.rs
-@@ -89,6 +89,10 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
+@@ -89,6 +89,38 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
      }
      for entry in fs::read_dir(&temp)?.flatten() {
          let work = entry.path();
 +        if work.file_name().and_then(|name| name.to_str())
 +            .is_some_and(|name| name.starts_with("trash-")) {
++            if work.join(".complete").is_file() {
++                continue;
++            }
++            let mut collision = false;
++            for entry in fs::read_dir(&work)?.flatten() {
++                let staged = entry.path();
++                let metadata = fs::symlink_metadata(&staged)?;
++                let name = staged.file_name().and_then(|name| name.to_str())
++                    .ok_or_else(|| anyhow!("invalid interrupted trash name"))?;
++                if name.is_empty() || name.starts_with('.') || name.contains("..") ||
++                    name.contains(['/', '\\']) || link_or_reparse(&metadata) ||
++                    !metadata.is_dir() {
++                    collision = true;
++                    continue;
++                }
++                let target = addons_dir.join(name);
++                if fs::symlink_metadata(&target).is_ok() {
++                    collision = true;
++                } else {
++                    fs::rename(&staged, &target)
++                        .with_context(|| format!("restore interrupted removal {name}"))?;
++                }
++            }
++            if collision {
++                fs::write(work.join(".complete"), b"complete\n")?;
++            } else {
++                remove_no_follow(&work)?;
++            }
 +            continue;
 +        }
          let metadata = fs::symlink_metadata(&work)?;
          if link_or_reparse(&metadata) || !metadata.is_dir() {
              remove_no_follow(&work)?;
-@@ -125,7 +129,10 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
+@@ -125,7 +157,10 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
          }
          remove_no_follow(&work)?;
      }
@@ -267,7 +295,7 @@ index ef847c1..6347961 100644
  }
  
  fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
-@@ -137,11 +144,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
+@@ -137,11 +172,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
      let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
  }
  
@@ -288,7 +316,7 @@ index ef847c1..6347961 100644
  ) -> anyhow::Result<PathBuf> {
      fs::create_dir_all(dest_dir)?;
      let safe: String = filename
-@@ -168,16 +183,17 @@ pub async fn download(
+@@ -168,16 +211,17 @@ pub async fn download(
              .with_context(|| format!("download failed: {url}"))?
              .error_for_status()
              .with_context(|| format!("download refused: {url}"))?;
@@ -311,7 +339,7 @@ index ef847c1..6347961 100644
          }
          file.flush()?;
          Ok::<(), anyhow::Error>(())
-@@ -191,6 +207,16 @@ pub async fn download(
+@@ -191,6 +235,16 @@ pub async fn download(
      Ok(path)
  }
  
@@ -328,7 +356,7 @@ index ef847c1..6347961 100644
  fn has_toc(dir: &Path) -> bool {
      fs::read_dir(dir)
          .map(|rd| {
-@@ -303,6 +329,65 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+@@ -303,6 +357,65 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
      Ok(count)
  }
  
@@ -394,7 +422,7 @@ index ef847c1..6347961 100644
  #[derive(Clone, Debug)]
  pub struct PlaceResult {
      pub folders: Vec<String>,
-@@ -312,7 +397,12 @@ pub struct PlaceResult {
+@@ -312,7 +425,12 @@ pub struct PlaceResult {
  
  /// Extract `zip_path` and move its addon folders into `addons_dir`,
  /// replacing same-named folders and recording the two local phases.
@@ -408,7 +436,7 @@ index ef847c1..6347961 100644
      fs::create_dir_all(addons_dir)?;
      let work = addons_dir.join(TMP_DIR).join(unique());
      let extract_dir = work.join("x");
-@@ -324,7 +414,7 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+@@ -324,7 +442,7 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
          let zip_started = std::time::Instant::now();
          let file = fs::File::open(zip_path)?;
          let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
@@ -417,7 +445,7 @@ index ef847c1..6347961 100644
          let files = safety_scan(&extract_dir)?;
          crate::logi!("zip ok: {} files, no executables", files);
          let sources = addon_dirs(&extract_dir)?;
-@@ -385,28 +475,115 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+@@ -385,28 +503,124 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
      result
  }
  
@@ -531,9 +559,18 @@ index ef847c1..6347961 100644
 +            }
 +            let _ = remove_no_follow(&trash);
 +            return Err(error).with_context(|| format!("stage removal of {folder}"));
-         }
++        }
 +        moved.push((source, staged));
 +        gone.push(folder.clone());
++    }
++    if !gone.is_empty() {
++        if let Err(error) = fs::write(trash.join(".complete"), b"complete\n") {
++            for (source, staged) in moved.iter().rev() {
++                let _ = fs::rename(staged, source);
++            }
++            let _ = remove_no_follow(&trash);
++            return Err(error).context("complete staged removal");
+         }
      }
 -    Ok(gone)
 +    Ok((gone, trash, moved.len()))
@@ -543,7 +580,7 @@ index ef847c1..6347961 100644
  #[cfg(test)]
  mod tests {
      #[test]
-@@ -511,6 +688,176 @@ mod tests {
+@@ -511,6 +725,176 @@ mod tests {
          let _ = fs::remove_dir_all(root);
      }
  
@@ -720,6 +757,23 @@ index ef847c1..6347961 100644
      #[test]
      fn startup_recovers_each_interrupted_replacement_step() {
          let root = std::env::temp_dir().join(format!("af-recover-{}", unique()));
+@@ -534,11 +918,16 @@ mod tests {
+         fs::create_dir_all(temp.join("three/old/KeepNew")).unwrap();
+         fs::write(temp.join("three/old/KeepNew/old"), b"old").unwrap();
+ 
++        // A crash midway through Remove has no completion marker and rolls back.
++        fs::create_dir_all(temp.join("trash-half/HalfRemoved")).unwrap();
++        fs::write(temp.join("trash-half/HalfRemoved/original"), b"half").unwrap();
++
+         recover_tmp(&addons).unwrap();
+         assert!(addons.join("BeforeBackup/original").is_file());
+         assert!(addons.join("RestoreMe/original").is_file());
+         assert!(addons.join("KeepNew/new").is_file());
+         assert!(!addons.join("KeepNew/old").exists());
++        assert!(addons.join("HalfRemoved/original").is_file());
+         assert!(!temp.exists());
+         let _ = fs::remove_dir_all(root);
+     }
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
 index f6ead3d..4557c55 100644
 --- a/src-tauri/src/lib.rs
