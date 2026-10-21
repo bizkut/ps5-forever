@@ -490,6 +490,14 @@ void forever_menu_addon_error(struct forever_menu_state *menu, const char *text)
     menu->addon_pending_github = 0;
 }
 
+void forever_menu_addon_progress(struct forever_menu_state *menu, const char *text)
+{
+    if (!menu->addon_loading ||
+        (menu->page != FOREVER_MENU_ADDON_PAGE &&
+         menu->page != FOREVER_MENU_ADDON_CONFIRM)) return;
+    copy_status(menu, text);
+}
+
 int forever_menu_addon_pause(struct forever_menu_state *menu, const char *text)
 {
     if (menu->page != FOREVER_MENU_ADDON_PAGE &&

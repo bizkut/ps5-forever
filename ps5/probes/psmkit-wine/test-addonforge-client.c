@@ -164,8 +164,8 @@ static void test_installed_statuses_and_plain_errors(void)
         "\"status\":\"ok\",\"notes\":\"Résumé 🚀\"}]}";
     assert(!addonforge_parse_snapshot(FOREVER_ADDON_INSTALLED, untrusted, &snapshot,
                                      error, sizeof(error)));
-    assert(!strcmp(snapshot.rows[0].name, "Emoji ? ??"));
-    assert(!strcmp(snapshot.rows[0].description, "R?sum? ?"));
+    assert(!strcmp(snapshot.rows[0].name, "Emoji     "));
+    assert(!strcmp(snapshot.rows[0].description, "R sum   "));
     static const char cafe_find[] =
         "{\"ok\":true,\"result\":{\"notice\":\"\",\"rows\":[{\"id\":\"cafe\",\"key\":\"cat:cafe\","
         "\"name\":\"Caf\xc3\xa9\",\"desc\":\"Recipes and bags\",\"github\":\"owner/cafe\"}]}}";
@@ -173,7 +173,7 @@ static void test_installed_statuses_and_plain_errors(void)
         static struct forever_menu_state menu;
         assert(!addonforge_parse_snapshot(FOREVER_ADDON_FIND, cafe_find, &snapshot,
                                          error, sizeof(error)));
-        assert(!strcmp(snapshot.rows[0].name, "Caf?"));
+        assert(!strcmp(snapshot.rows[0].name, "Caf "));
         forever_menu_init(&menu);
         menu.page = FOREVER_MENU_ADDON_PAGE;
         menu.addon_tab = FOREVER_ADDON_FIND;
@@ -410,7 +410,11 @@ static void test_live_sized_catalogue_is_fully_searchable(void)
 
 int main(void)
 {
-    char arguments[2300];
+    char arguments[2300], progress[FOREVER_MENU_STATUS_BYTES];
+    assert(!addonforge_parse_progress(
+        "{\"ok\":true,\"result\":{\"message\":\"Downloading add-on... 37%\"}}",
+        progress, sizeof(progress)));
+    assert(!strcmp(progress, "Downloading add-on... 37%"));
     assert(!addonforge_install_arguments("W:\\Games\\World of Warcraft\\_retail_", arguments, sizeof(arguments)));
     assert(!strcmp(arguments, "{\"path\":\"W:\\\\Games\\\\World of Warcraft\\\\_retail_\"}"));
     assert(!addonforge_install_arguments("C:\\Games\\World of Warcraft\\_classic_era_", arguments, sizeof(arguments)));

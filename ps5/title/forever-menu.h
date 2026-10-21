@@ -231,6 +231,7 @@ int forever_menu_github_repo(const char *input, char *repo, size_t repo_size,
 struct forever_menu_result forever_menu_github_ime(
     struct forever_menu_state *menu, const char *text, int accepted);
 void forever_menu_progress(struct forever_menu_state *menu, const char *text);
+void forever_menu_addon_progress(struct forever_menu_state *menu, const char *text);
 void forever_menu_notice(struct forever_menu_state *menu, const char *text);
 void forever_menu_close(struct forever_menu_state *menu);
 void forever_menu_render(const struct forever_menu_state *menu, char *text, size_t size);

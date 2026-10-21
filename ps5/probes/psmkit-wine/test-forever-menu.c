@@ -1151,6 +1151,13 @@ static void test_state_machine(void)
     forever_menu_addon_snapshot(&menu, &snapshot);
     forever_menu_render(&menu, text, sizeof(text));
     assert(!strstr(text, " Source\t") && !strstr(text, " Last update\t"));
+    menu.addon_loading = 1;
+    forever_menu_addon_progress(&menu, "Downloading add-on... 37%");
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Downloading add-on... 37%"));
+    forever_menu_addon_progress(&menu, "Unpacking add-on... 2000/5960 files");
+    forever_menu_render(&menu, text, sizeof(text));
+    assert(strstr(text, "Unpacking add-on... 2000/5960 files"));
 
     snapshot.tab = FOREVER_ADDON_FIND;
     snapshot.count = 2;

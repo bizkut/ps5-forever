@@ -47,7 +47,8 @@ def definition(path, name):
 
 
 here = Path(__file__).resolve().parent
-names = ('forever_addons_publish_error', 'forever_addons_select_channel',
+names = ('forever_addons_publish_error', 'forever_addons_progress_worker',
+         'forever_addons_mutation_command', 'forever_addons_select_channel',
          'forever_addons_refresh', 'forever_addons_safe_key', 'forever_addons_mutate',
          'forever_addons_channel_visit', 'forever_addons_worker')
 args.output.parent.mkdir(parents=True, exist_ok=True)

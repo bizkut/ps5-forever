@@ -26,6 +26,7 @@ int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,
                               struct forever_addon_snapshot *snapshot,
                               char *error, size_t error_size);
 int addonforge_response_error(const char *response, char *error, size_t error_size);
+int addonforge_parse_progress(const char *response, char *message, size_t size);
 int addonforge_install_arguments(const char *path, char *arguments, size_t size);
 void addonforge_plain_error(const char *technical, char *plain, size_t size);
 int addonforge_parse_wago_status(const char *response, enum forever_wago_key_status *status);

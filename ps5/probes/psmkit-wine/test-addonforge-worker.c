@@ -4,6 +4,8 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdatomic.h>
+#include <time.h>
 #include <string.h>
 #include <unistd.h>
 #include "wow-channels.h"
@@ -16,6 +18,11 @@ struct forever_addons_request
     unsigned channel;
     enum forever_addon_tab tab;
     char key[ADDONFORGE_WAGO_KEY_BYTES];
+};
+struct forever_addons_progress_poll
+{
+    struct addonforge_client client;
+    atomic_int done;
 };
 static struct
 {
@@ -45,6 +52,7 @@ static void title_desktop_addons_snapshot(const struct forever_addon_snapshot *s
     published = *snapshot;
     forever_menu_addon_snapshot(&menu, snapshot);
 }
+static void title_desktop_addons_progress(const char *text) { assert(text); }
 static int forever_addons_command(struct addonforge_client *client, const char *command,
     const char *arguments, unsigned timeout_ms, char *plain, size_t plain_size)
 {

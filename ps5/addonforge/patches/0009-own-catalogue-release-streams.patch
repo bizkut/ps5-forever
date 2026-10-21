@@ -1,8 +1,8 @@
 diff --git a/src-tauri/src/catalog.rs b/src-tauri/src/catalog.rs
-index 4d97061..ef1cc13 100644
+index 4d97061..7732a53 100644
 --- a/src-tauri/src/catalog.rs
 +++ b/src-tauri/src/catalog.rs
-@@ -9,15 +9,16 @@ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
+@@ -9,30 +9,38 @@ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
  pub const REMOTE_URL: &str =
      "https://raw.githubusercontent.com/Topher121/AddonForge/main/catalog/forever.json";
  pub const GITHUB_URL: &str =
@@ -21,7 +21,9 @@ index 4d97061..ef1cc13 100644
      name: String,
      full_name: String,
      url: String,
-@@ -26,13 +27,19 @@ struct GithubRow {
+     description: String,
++    last_updated: String,
+     flavors: String,
      curse_id: String,
      wago_id: String,
      wowi_id: String,
@@ -42,12 +44,13 @@ index 4d97061..ef1cc13 100644
              && r.url.strip_prefix("https://github.com/") == Some(r.full_name.as_str())
              && crate::sources::parse_github_repo(&r.full_name).as_deref() == Some(&r.full_name)),
          "Invalid GitHub add-on catalogue");
-@@ -50,12 +57,17 @@ fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<Cata
+@@ -50,12 +58,18 @@ fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<Cata
          github: Some(r.full_name.clone()), url: Some(r.url.clone()),
          wowi: r.wowi_id.parse().ok(), curse: r.curse_id.parse().ok(),
          wago: if r.wago_id.is_empty() { None } else { Some(r.wago_id.clone()) },
 +        release_tag_prefix: (!r.release_tag_prefix.is_empty()).then(|| r.release_tag_prefix.clone()),
 +        asset_name_pattern: (!r.asset_name_pattern.is_empty()).then(|| r.asset_name_pattern.clone()),
++        catalog_updated_at: (!r.last_updated.is_empty()).then(|| r.last_updated.clone()),
 +        folders: r.folders.split(',').filter(|f| !f.is_empty()).map(str::to_string).collect(),
          forever: Some(true), ..Default::default()
      }).collect()
@@ -60,7 +63,7 @@ index 4d97061..ef1cc13 100644
      fetched_at: u64,
      etag: Option<String>,
      text: String,
-@@ -134,7 +146,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
+@@ -134,7 +148,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
                        path: &std::path::Path, refresh: bool) -> Vec<GithubRow> {
      let cached = read_cache(path).ok()
          .and_then(|bytes| serde_json::from_slice::<CachedGithub>(&bytes).ok())
@@ -70,7 +73,7 @@ index 4d97061..ef1cc13 100644
      if !refresh && cached.as_ref().is_some_and(|c|
          c.fetched_at <= now() && now() - c.fetched_at < GITHUB_TTL.as_secs()) {
          return parse_github(&cached.unwrap().text).unwrap();
-@@ -147,6 +160,7 @@ async fn github_index(client: &reqwest::Client, url: &str,
+@@ -147,6 +162,7 @@ async fn github_index(client: &reqwest::Client, url: &str,
          let response = request.send().await.ok()?;
          if response.status() == reqwest::StatusCode::NOT_MODIFIED {
              return cached.as_ref().map(|c| CachedGithub {
@@ -78,7 +81,7 @@ index 4d97061..ef1cc13 100644
                  fetched_at: now(), etag: c.etag.clone(), text: c.text.clone() });
          }
          let response = response.error_for_status().ok()?;
-@@ -154,7 +168,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
+@@ -154,7 +170,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
              .and_then(|h| h.to_str().ok()).map(str::to_owned);
          let text = String::from_utf8(read_index(response).await?).ok()?;
          parse_github(&text).ok()?;
@@ -88,7 +91,7 @@ index 4d97061..ef1cc13 100644
      }.await;
      if let Some(record) = fetched {
          if let Ok(bytes) = encode_cache(&record) {
-@@ -195,6 +210,12 @@ pub struct CatalogEntry {
+@@ -195,6 +212,15 @@ pub struct CatalogEntry {
      /// and no release.json.
      #[serde(default)]
      pub asset_hint: Option<String>,
@@ -98,10 +101,13 @@ index 4d97061..ef1cc13 100644
 +    /// Exact or one-wildcard GitHub release asset filename.
 +    #[serde(default)]
 +    pub asset_name_pattern: Option<String>,
++    /// Catalogue source's latest release timestamp.
++    #[serde(default, skip_serializing)]
++    pub catalog_updated_at: Option<String>,
      /// Top-level AddOns folders the release installs (used to match what's
      /// already on disk to this entry).
      #[serde(default)]
-@@ -499,6 +520,8 @@ mod live_tests {
+@@ -499,6 +525,8 @@ mod live_tests {
      const CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen\n\
          42,Quoted,Owner/Repo,https://github.com/Owner/Repo,\"Comma, \"\"quote\"\"\nand newline\",2026-10-18,\"mainline,mists,bcc,classic,forever\",123,key,7,True,2026-10-18\n\
          43,Other,Owner/Other,https://github.com/Owner/Other,Other,2026-10-18,wrath,,,,False,2026-10-18\n";
@@ -110,7 +116,7 @@ index 4d97061..ef1cc13 100644
  
      fn oversized_chunked_server(prefix: String, fill: u8, suffix: &'static str, lying_length: bool)
          -> (String, std::thread::JoinHandle<()>) {
-@@ -535,6 +558,7 @@ mod live_tests {
+@@ -535,6 +563,7 @@ mod live_tests {
          let github_path = dir.join("github.json");
          let json_path = dir.join("public.json");
          let github = serde_json::to_vec(&CachedGithub {
@@ -118,7 +124,7 @@ index 4d97061..ef1cc13 100644
              fetched_at: now(), etag: None, text: CSV_FIXTURE.into(),
          }).unwrap();
          let public = serde_json::to_vec(&CachedJson {
-@@ -546,10 +570,14 @@ mod live_tests {
+@@ -546,10 +575,14 @@ mod live_tests {
          for lying_length in [false, true] {
              let (url, server) = oversized_chunked_server(
                  CSV_FIXTURE.replace("42,Quoted", "99,Quoted"), b'\n', "", lying_length);
@@ -135,7 +141,7 @@ index 4d97061..ef1cc13 100644
  
              let (url, server) = oversized_chunked_server("[{\"id\":99,\"padding\":\"".into(), b'x', "\"}]", lying_length);
              let data = cached_json(&client, &url, &json_path, true, |v| v.is_array()).await.unwrap();
-@@ -597,6 +625,25 @@ mod live_tests {
+@@ -597,6 +630,26 @@ mod live_tests {
          assert!(parse_github(&CSV_FIXTURE.replace("Owner/Repo", "../escape")).is_err());
      }
  
@@ -156,12 +162,13 @@ index 4d97061..ef1cc13 100644
 +            Some("SpokenQuestsAudioAll-2.4.0.zip"));
 +        assert_eq!(extended[0].folders,
 +            ["SpokenQuestsAudioAlliance", "SpokenQuestsAudioHorde"]);
++        assert_eq!(extended[0].catalog_updated_at.as_deref(), Some("2026-10-18"));
 +    }
 +
      #[test]
      fn cache_replacement_preserves_last_good_until_success_and_on_failure() {
          let dir = std::env::temp_dir().join(format!("af-cache-replace-{}", std::process::id()));
-@@ -626,6 +673,43 @@ mod live_tests {
+@@ -626,6 +679,43 @@ mod live_tests {
          std::fs::remove_dir_all(dir).unwrap();
      }
  
@@ -205,7 +212,7 @@ index 4d97061..ef1cc13 100644
      #[tokio::test]
      async fn github_cache_uses_ttl_etag_304_stale_and_bundled_fallback() {
          use std::io::{Read, Write};
-@@ -648,13 +732,13 @@ mod live_tests {
+@@ -648,13 +738,13 @@ mod live_tests {
          });
          let client = reqwest::Client::new();
          assert_eq!(github_index(&client, &url, &path, false).await.len(), 2);
@@ -221,7 +228,7 @@ index 4d97061..ef1cc13 100644
          std::fs::remove_file(&path).unwrap();
          assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(),
              parse_github(BUNDLED_GITHUB).unwrap().len());
-@@ -753,7 +837,10 @@ mod live_tests {
+@@ -753,7 +843,10 @@ mod live_tests {
                  let source = entry.github.as_ref().map(|r| Source::Github(r.clone()))
                      .or_else(|| entry.tukui.as_ref().map(|s| Source::Tukui(s.clone()))).unwrap();
                  let remote = crate::sources::resolve(&client, &source,
@@ -234,23 +241,39 @@ index 4d97061..ef1cc13 100644
                  assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
                  let zip = crate::install::download(&client, &remote.download_url,
 diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
-index ef847c1..19198e7 100644
+index ef847c1..eea5642 100644
 --- a/src-tauri/src/install.rs
 +++ b/src-tauri/src/install.rs
-@@ -137,6 +137,12 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
+@@ -137,11 +137,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
      let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
  }
  
+-pub async fn download(
 +const MAX_DOWNLOAD_BYTES: u64 = 4 * 1024 * 1024 * 1024;
++const DOWNLOAD_WRITE_BUFFER: usize = 8 * 1024 * 1024;
 +
 +fn add_download_bytes(total: u64, chunk: usize) -> Option<u64> {
 +    total.checked_add(chunk as u64).filter(|next| *next <= MAX_DOWNLOAD_BYTES)
 +}
 +
- pub async fn download(
++pub async fn download_with_progress(
      client: &reqwest::Client,
      url: &str,
-@@ -173,10 +179,8 @@ pub async fn download(
+     dest_dir: &Path,
+     filename: &str,
++    mut progress: impl FnMut(u64, Option<u64>),
+ ) -> anyhow::Result<PathBuf> {
+     fs::create_dir_all(dest_dir)?;
+     let safe: String = filename
+@@ -168,16 +176,17 @@ pub async fn download(
+             .with_context(|| format!("download failed: {url}"))?
+             .error_for_status()
+             .with_context(|| format!("download refused: {url}"))?;
+-        let mut file = fs::File::create(&path)?;
++        let length = resp.content_length();
++        let file = fs::File::create(&path)?;
++        let mut file = std::io::BufWriter::with_capacity(DOWNLOAD_WRITE_BUFFER, file);
+         let mut stream = resp.bytes_stream();
          let mut total: u64 = 0;
          while let Some(chunk) = stream.next().await {
              let chunk = chunk?;
@@ -261,9 +284,136 @@ index ef847c1..19198e7 100644
 +            total = add_download_bytes(total, chunk.len())
 +                .ok_or_else(|| anyhow::anyhow!("download exceeded 4 GiB; refusing"))?;
              file.write_all(&chunk)?;
++            progress(total, length);
          }
          file.flush()?;
-@@ -511,6 +515,15 @@ mod tests {
+         Ok::<(), anyhow::Error>(())
+@@ -191,6 +200,16 @@ pub async fn download(
+     Ok(path)
+ }
+ 
++#[cfg(test)]
++pub async fn download(
++    client: &reqwest::Client,
++    url: &str,
++    dest_dir: &Path,
++    filename: &str,
++) -> anyhow::Result<PathBuf> {
++    download_with_progress(client, url, dest_dir, filename, |_, _| {}).await
++}
++
+ fn has_toc(dir: &Path) -> bool {
+     fs::read_dir(dir)
+         .map(|rd| {
+@@ -312,7 +331,12 @@ pub struct PlaceResult {
+ 
+ /// Extract `zip_path` and move its addon folders into `addons_dir`,
+ /// replacing same-named folders and recording the two local phases.
+-pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Flavor) -> anyhow::Result<PlaceResult> {
++pub fn place_timed_with_progress(
++    zip_path: &Path,
++    addons_dir: &Path,
++    flavor: crate::flavor::Flavor,
++    mut progress: impl FnMut(usize, usize),
++) -> anyhow::Result<PlaceResult> {
+     fs::create_dir_all(addons_dir)?;
+     let work = addons_dir.join(TMP_DIR).join(unique());
+     let extract_dir = work.join("x");
+@@ -323,8 +347,14 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+         fs::create_dir_all(&backup_dir)?;
+         let zip_started = std::time::Instant::now();
+         let file = fs::File::open(zip_path)?;
+-        let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
++        let reader = std::io::BufReader::with_capacity(DOWNLOAD_WRITE_BUFFER, file);
++        let mut archive = zip::ZipArchive::new(reader).context("not a valid zip")?;
++        let files = (0..archive.len())
++            .filter(|index| archive.by_index(*index).is_ok_and(|entry| !entry.is_dir()))
++            .count();
++        progress(0, files);
+         archive.extract(&extract_dir).context("extract failed")?;
++        progress(files, files);
+         let files = safety_scan(&extract_dir)?;
+         crate::logi!("zip ok: {} files, no executables", files);
+         let sources = addon_dirs(&extract_dir)?;
+@@ -385,24 +415,68 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+     result
+ }
+ 
++#[cfg(test)]
++pub fn place_timed(
++    zip_path: &Path,
++    addons_dir: &Path,
++    flavor: crate::flavor::Flavor,
++) -> anyhow::Result<PlaceResult> {
++    place_timed_with_progress(zip_path, addons_dir, flavor, |_, _| {})
++}
++
+ #[cfg(test)]
+ /// Extract and install an addon archive.
+ pub fn place(zip_path: &Path, addons_dir: &Path) -> anyhow::Result<Vec<String>> {
+     place_timed(zip_path, addons_dir, crate::flavor::Flavor::Forever).map(|placed| placed.folders)
+ }
+ 
+-/// Delete the given addon folders (used by "Remove").
+-pub fn remove_folders(addons_dir: &Path, folders: &[String]) -> anyhow::Result<Vec<String>> {
++fn stage_remove_folders(
++    addons_dir: &Path,
++    folders: &[String],
++) -> anyhow::Result<(Vec<String>, PathBuf, usize)> {
++    for folder in folders {
++        if folder.is_empty() || folder.starts_with('.') || folder.contains("..") ||
++            folder.contains(['/', '\\']) {
++            anyhow::bail!("refusing to remove suspicious folder {folder}");
++        }
++    }
++    let trash = addons_dir.join(TMP_DIR).join(format!("trash-{}", unique()));
++    fs::create_dir_all(&trash)?;
++    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+     let mut gone = Vec::new();
+-    for f in folders {
+-        if f.is_empty() || f.starts_with('.') || f.contains("..") || f.contains(['/', '\\']) {
+-            anyhow::bail!("refusing to remove suspicious folder name {f}");
++    for folder in folders {
++        debug_assert!(!folder.is_empty() && !folder.starts_with('.'));
++        let source = addons_dir.join(folder);
++        if !source.is_dir() {
++            continue;
+         }
+-        let p = addons_dir.join(f);
+-        if p.is_dir() {
+-            fs::remove_dir_all(&p).with_context(|| format!("remove {f}"))?;
+-            gone.push(f.clone());
++        let staged = trash.join(folder);
++        if let Err(error) = fs::rename(&source, &staged) {
++            for (source, staged) in moved.iter().rev() {
++                let _ = fs::rename(staged, source);
++            }
++            let _ = remove_no_follow(&trash);
++            return Err(error).with_context(|| format!("stage removal of {folder}"));
+         }
++        moved.push((source, staged));
++        gone.push(folder.clone());
++    }
++    Ok((gone, trash, moved.len()))
++}
++
++/// Atomically hide add-on folders, then reclaim their files without keeping
++/// the user-facing operation blocked on thousands of Wine delete round trips.
++pub fn remove_folders(addons_dir: &Path, folders: &[String]) -> anyhow::Result<Vec<String>> {
++    let (gone, trash, _) = stage_remove_folders(addons_dir, folders)?;
++    if gone.is_empty() {
++        remove_no_follow(&trash)?;
++    } else {
++        std::thread::spawn(move || {
++            let _ = remove_no_follow(&trash);
++            if let Some(parent) = trash.parent() {
++                let _ = fs::remove_dir(parent);
++            }
++        });
+     }
+     Ok(gone)
+ }
+@@ -511,6 +585,75 @@ mod tests {
          let _ = fs::remove_dir_all(root);
      }
  
@@ -276,14 +426,95 @@ index ef847c1..19198e7 100644
 +        assert!(add_download_bytes(u64::MAX, usize::MAX).is_none());
 +    }
 +
++    #[test]
++    fn lore_sized_stream_is_coalesced_into_large_disk_writes() {
++        #[derive(Default)]
++        struct Writes { calls: usize, bytes: u64 }
++        impl std::io::Write for Writes {
++            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
++                self.calls += 1;
++                self.bytes += bytes.len() as u64;
++                Ok(bytes.len())
++            }
++            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
++        }
++        let total = 358_u64 * 1024 * 1024;
++        let chunk = vec![0; 7 * 1024];
++        let raw_calls = total.div_ceil(chunk.len() as u64);
++        let mut remaining = total;
++        let mut writer = std::io::BufWriter::with_capacity(
++            DOWNLOAD_WRITE_BUFFER, Writes::default());
++        while remaining > 0 {
++            let count = chunk.len().min(remaining as usize);
++            writer.write_all(&chunk[..count]).unwrap();
++            remaining -= count as u64;
++        }
++        writer.flush().unwrap();
++        assert_eq!(writer.get_ref().bytes, total);
++        assert!(raw_calls > 50_000);
++        assert!(writer.get_ref().calls <= 46, "writes={}", writer.get_ref().calls);
++        println!("LORE_DOWNLOAD_WRITES before={raw_calls} after={}",
++            writer.get_ref().calls);
++    }
++
++    #[test]
++    fn lore_removal_stages_by_folder_and_crash_cleanup_preserves_reinstall() {
++        let root = std::env::temp_dir().join(format!("af-remove-trash-{}", unique()));
++        let addons = root.join("AddOns");
++        let lore = addons.join("LoreForever");
++        let voice = addons.join("LoreForever_Voice");
++        fs::create_dir_all(&lore).unwrap();
++        fs::create_dir_all(&voice).unwrap();
++        fs::write(lore.join("LoreForever.toc"), b"## Interface: 16001\n").unwrap();
++        for index in 0..5959 {
++            fs::write(lore.join(format!("voice-{index}.ogg")), b"").unwrap();
++        }
++        fs::write(voice.join("voice.ogg"), b"").unwrap();
++        let (gone, trash, renames) = stage_remove_folders(
++            &addons, &["LoreForever".into(), "LoreForever_Voice".into()]).unwrap();
++        assert_eq!(gone.len(), 2);
++        assert_eq!(renames, 2, "removal must scale with folders, not 5961 files");
++        assert!(!lore.exists() && !voice.exists());
++        assert!(trash.starts_with(addons.join(TMP_DIR)));
++        assert!(TMP_DIR.starts_with('.') && !has_toc(&addons.join(TMP_DIR)));
++
++        fs::create_dir_all(&lore).unwrap();
++        fs::write(lore.join("LoreForever.toc"), b"new install").unwrap();
++        recover_tmp(&addons).unwrap();
++        assert_eq!(fs::read(lore.join("LoreForever.toc")).unwrap(), b"new install");
++        assert!(!addons.join(TMP_DIR).exists());
++        let _ = fs::remove_dir_all(root);
++    }
++
      #[test]
      fn startup_recovers_each_interrupted_replacement_step() {
          let root = std::env::temp_dir().join(format!("af-recover-{}", unique()));
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
-index f6ead3d..2bbda0d 100644
+index f6ead3d..d22bf8b 100644
 --- a/src-tauri/src/lib.rs
 +++ b/src-tauri/src/lib.rs
-@@ -461,13 +461,16 @@ async fn icon_cached(
+@@ -41,6 +41,7 @@ struct App {
+     catalog_time: Mutex<Option<std::time::Instant>>,
+     stats: Mutex<Option<Stats>>,
+     last_install_timing: Mutex<Option<InstallTiming>>,
++    progress: Arc<std::sync::Mutex<String>>,
+     mutation: Mutex<()>,
+     shutdown: Notify,
+     shutting_down: AtomicBool,
+@@ -59,6 +60,12 @@ struct InstallTiming {
+     broker_write_ms: u128,
+ }
+ 
++fn set_progress(progress: &std::sync::Mutex<String>, message: String) {
++    if let Ok(mut current) = progress.lock() {
++        *current = message;
++    }
++}
++
+ fn err(e: impl std::fmt::Display) -> String {
+     e.to_string()
+ }
+@@ -461,13 +468,16 @@ async fn icon_cached(
      v
  }
  
@@ -301,7 +532,7 @@ index f6ead3d..2bbda0d 100644
          entry.and_then(|e| e.forever),
      )
  }
-@@ -480,13 +483,15 @@ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
+@@ -480,13 +490,15 @@ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
      if matches!(src, Source::Wago(_)) && !st.has_wago_key() {
          return;
      }
@@ -318,7 +549,7 @@ index f6ead3d..2bbda0d 100644
          wago_key: st.wago_key.as_deref(),
          prerelease: st.allow_prerelease,
          flavor,
-@@ -845,6 +850,8 @@ async fn install_from(
+@@ -845,14 +857,19 @@ async fn install_from(
      key: &str,
      src: &Source,
      asset_hint: Option<&str>,
@@ -326,8 +557,10 @@ index f6ead3d..2bbda0d 100644
 +    asset_name_pattern: Option<&str>,
      _allow_non_forever: bool,
  ) -> Result<Installed, String> {
++    set_progress(&app.progress, "Resolving add-on...".into());
      let install = current_install(app).await?;
-@@ -853,6 +860,8 @@ async fn install_from(
+     let flavor = current_flavor(app).await?;
+     let addons = addons_dir(&install);
      let st = app.state.lock().await.clone();
      let opts = ResolveOpts {
          asset_hint,
@@ -336,7 +569,39 @@ index f6ead3d..2bbda0d 100644
          wago_key: st.wago_key.as_deref(),
          prerelease: st.allow_prerelease,
          flavor,
-@@ -925,12 +934,14 @@ async fn update_package_impl(
+@@ -873,7 +890,17 @@ async fn install_from(
+     );
+     let tmp = addons.join(install::TMP_DIR).join("dl");
+     let download_started = std::time::Instant::now();
+-    let zip = install::download(&app.client, &remote.download_url, &tmp, &remote.filename)
++    let progress = app.progress.clone();
++    let zip = install::download_with_progress(
++        &app.client, &remote.download_url, &tmp, &remote.filename,
++        move |total, length| {
++            let message = if let Some(length) = length.filter(|length| *length > 0) {
++                format!("Downloading add-on... {}%", total.saturating_mul(100) / length)
++            } else {
++                format!("Downloading add-on... {} MiB", total / (1024 * 1024))
++            };
++            set_progress(&progress, message);
++        })
+         .await
+         .map_err(|e| {
+             loge!("download {key}: {e}");
+@@ -881,7 +908,11 @@ async fn install_from(
+         })?;
+     let download_ms = download_started.elapsed().as_millis();
+     let addons2 = addons.clone();
+-    let placed = tokio::task::spawn_blocking(move || install::place_timed(&zip, &addons2, flavor))
++    let progress = app.progress.clone();
++    let placed = tokio::task::spawn_blocking(move ||
++        install::place_timed_with_progress(&zip, &addons2, flavor, move |done, total| {
++            set_progress(&progress, format!("Unpacking add-on... {done}/{total} files"));
++        }))
+         .await
+         .map_err(err)?
+         .map_err(|e| {
+@@ -925,12 +956,14 @@ async fn update_package_impl(
          .clone()
          .ok_or_else(|| "This addon has no update source".to_string())?;
      let cat = catalog_cached(app).await;
@@ -352,7 +617,17 @@ index f6ead3d..2bbda0d 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -1184,6 +1195,8 @@ async fn install_catalog_impl(
+@@ -983,7 +1016,8 @@ async fn catalog_list_impl(app: &App, refresh: Option<bool>) -> Result<Vec<Catal
+                 installed: installed_keys.contains(&key),
+                 key,
+                 downloads: st.and_then(|s| s.downloads),
+-                updated_at: st.and_then(|s| s.updated_at.clone()),
++                updated_at: st.and_then(|s| s.updated_at.clone())
++                    .or_else(|| e.catalog_updated_at.clone()),
+                 stat_source: st.map(|s| s.source.clone()).filter(|s| !s.is_empty()),
+                 entry: e,
+             }
+@@ -1184,6 +1218,8 @@ async fn install_catalog_impl(
          &key,
          &src,
          e.asset_hint.as_deref(),
@@ -361,7 +636,7 @@ index f6ead3d..2bbda0d 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -1215,6 +1228,8 @@ async fn install_source(
+@@ -1215,6 +1251,8 @@ async fn install_source(
          &key,
          &source,
          None,
@@ -370,7 +645,7 @@ index f6ead3d..2bbda0d 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -1244,7 +1259,8 @@ async fn install_github(
+@@ -1244,7 +1282,8 @@ async fn install_github(
          .map(|e| format!("cat:{}", e.id))
          .unwrap_or_else(|| format!("github:{repo}"));
      let src = Source::Github(repo);
@@ -380,7 +655,26 @@ index f6ead3d..2bbda0d 100644
      refreshed(&app, &key).await
  }
  
-@@ -1722,7 +1738,8 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
+@@ -1595,6 +1634,7 @@ fn make_app() -> Shared {
+         catalog: Mutex::new(None),
+         catalog_time: Mutex::new(None),
+         stats: Mutex::new(None),
++        progress: Arc::new(std::sync::Mutex::new(String::new())),
+         last_install_timing: Mutex::new(None),
+         mutation: Mutex::new(()),
+         shutdown: Notify::new(),
+@@ -1667,6 +1707,10 @@ async fn catalog_view(app: &App, rows: Value, unavailable_notice: &str) -> Resul
+ }
+ 
+ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Value, String> {
++    if request.command == "operation_progress" {
++        let message = app.progress.lock().map(|value| value.clone()).unwrap_or_default();
++        return Ok(serde_json::json!({"message": message}));
++    }
+     let _operation = app.mutation.lock().await;
+     if app.shutting_down.load(Ordering::Acquire) {
+         return Err("add-on service is shutting down".into());
+@@ -1722,7 +1766,8 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
                  .map(|entry| format!("cat:{}", entry.id))
                  .unwrap_or_else(|| format!("github:{repo}"));
              let source = Source::Github(repo);
@@ -390,7 +684,7 @@ index f6ead3d..2bbda0d 100644
              serde_json::to_value(refreshed(&app, &key).await?).map_err(err)
          }
          "install_bundle" => {
-@@ -2184,6 +2201,8 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2184,6 +2229,8 @@ pub fn cli(args: &[String]) -> i32 {
                                  s,
                                  ResolveOpts {
                                      asset_hint: e.asset_hint.as_deref(),
@@ -399,7 +693,7 @@ index f6ead3d..2bbda0d 100644
                                      wago_key: st.wago_key.as_deref(),
                                      prerelease: st.allow_prerelease,
                                      flavor,
-@@ -2218,9 +2237,10 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2218,9 +2265,10 @@ pub fn cli(args: &[String]) -> i32 {
                  let pkg = pkgs.into_iter().find(|p| &p.key == key).ok_or("no such package")?;
                  let src = pkg.source.clone().ok_or("package has no source")?;
                  let cat = catalog_cached(&app).await;
@@ -412,7 +706,7 @@ index f6ead3d..2bbda0d 100644
                  Ok(serde_json::to_value(rec).unwrap())
              }
              "install" => {
-@@ -2230,14 +2250,17 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2230,14 +2278,17 @@ pub fn cli(args: &[String]) -> i32 {
                  let has_wago = app.state.lock().await.has_wago_key();
                  let src = pick_source(Some(&e), &AddonFolder::default(), has_wago, None).ok_or("no source")?;
                  let force = args.iter().any(|a| a == "--force");
@@ -432,7 +726,7 @@ index f6ead3d..2bbda0d 100644
                  Ok(serde_json::to_value(rec).unwrap())
              }
              "remove" => {
-@@ -2533,7 +2556,8 @@ mod tests {
+@@ -2533,7 +2584,8 @@ mod tests {
          assert_eq!(set_install_path_impl(&app, unknown.to_string_lossy().into()).await.unwrap_err(), flavor::UNSUPPORTED);
          // Even a persisted unsupported selection cannot reach source resolution.
          app.state.lock().await.select_install(unknown.to_string_lossy().into());
@@ -442,7 +736,7 @@ index f6ead3d..2bbda0d 100644
          assert!(!unknown.join("Interface").exists());
          std::fs::remove_dir_all(root).unwrap();
          std::env::remove_var("ADDONFORGE_STATE_DIR");
-@@ -2687,6 +2711,29 @@ mod tests {
+@@ -2687,6 +2739,29 @@ mod tests {
          assert!(pkgs[0].managed);
      }
  
@@ -472,6 +766,28 @@ index f6ead3d..2bbda0d 100644
      #[test]
      fn missing_dependencies_are_reported_and_matched_to_catalogue() {
          let st = AppState::default();
+@@ -2842,6 +2917,21 @@ mod tests {
+         assert!(checked_request_total(usize::MAX, 0).is_err());
+     }
+ 
++    #[test]
++    fn progress_can_be_polled_while_the_mutation_lock_is_held() {
++        let runtime = tokio::runtime::Runtime::new().unwrap();
++        runtime.block_on(async {
++            let _environment = STATE_ENV.lock().await;
++            let app = make_app();
++            set_progress(&app.progress, "Downloading add-on... 37%".into());
++            let _mutation = app.mutation.lock().await;
++            let result = dispatch_headless(app.clone(), HeadlessRequest {
++                command: "operation_progress".into(), args: Value::Null,
++            }).await.unwrap();
++            assert_eq!(result["message"], "Downloading add-on... 37%");
++        });
++    }
++
+     #[test]
+     fn shutdown_waits_for_the_active_mutation_boundary() {
+         let runtime = tokio::runtime::Runtime::new().unwrap();
 diff --git a/src-tauri/src/sources/github.rs b/src-tauri/src/sources/github.rs
 index da12c12..c3c33d8 100644
 --- a/src-tauri/src/sources/github.rs

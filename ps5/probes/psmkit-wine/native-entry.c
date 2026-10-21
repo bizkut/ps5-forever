@@ -2215,6 +2215,7 @@ static int forever_title_voice_enable(void)
 void title_desktop_addons_snapshot(const struct forever_addon_snapshot *);
 void title_desktop_addons_error(const char *);
 void title_desktop_addons_pause(const char *);
+void title_desktop_addons_progress(const char *);
 static int pw_writebroker_connect_port(unsigned int, int64_t);
 
 struct forever_addons_request
@@ -2243,6 +2244,12 @@ static struct
 } forever_addons = {
     .lock = PTHREAD_MUTEX_INITIALIZER,
     .lifecycle_lock = PTHREAD_MUTEX_INITIALIZER,
+};
+
+struct forever_addons_progress_poll
+{
+    struct addonforge_client client;
+    atomic_int done;
 };
 
 static int forever_addons_urandom(uint8_t *buffer, size_t bytes)
@@ -2370,6 +2377,36 @@ static int forever_addons_command(
     return addonforge_response_error(forever_addons.response, plain, plain_size);
 }
 
+static void *forever_addons_progress_worker(void *argument)
+{
+    struct forever_addons_progress_poll *poll = argument;
+    const struct timespec interval = {.tv_sec = 0, .tv_nsec = 500000000};
+    char response[1024], message[FOREVER_MENU_STATUS_BYTES];
+    poll->client.timeout_ms = 1500;
+    while (!atomic_load_explicit(&poll->done, memory_order_acquire))
+    {
+        if (!addonforge_http_command(&poll->client, "operation_progress", "{}",
+                                     response, sizeof(response)) &&
+            !addonforge_parse_progress(response, message, sizeof(message)) && message[0])
+            title_desktop_addons_progress(message);
+        nanosleep(&interval, NULL);
+    }
+    return NULL;
+}
+
+static int forever_addons_mutation_command(
+    struct addonforge_client *client, const char *command, const char *arguments,
+    unsigned timeout_ms, char *plain, size_t plain_size)
+{
+    struct forever_addons_progress_poll poll = {.client = *client};
+    pthread_t thread;
+    int started = !pthread_create(&thread, NULL, forever_addons_progress_worker, &poll);
+    int result = forever_addons_command(client, command, arguments, timeout_ms, plain, plain_size);
+    atomic_store_explicit(&poll.done, 1, memory_order_release);
+    if (started) pthread_join(thread, NULL);
+    return result;
+}
+
 static int forever_addons_select_channel(
     struct addonforge_client *client, unsigned channel,
     char *plain, size_t plain_size)
@@ -2430,8 +2467,8 @@ static int forever_addons_mutate(
     const char *command, *key = request->key;
     int length;
     if (request->command == FOREVER_MENU_COMMAND_ADDONS_UPDATE_ALL)
-        return forever_addons_command(client, "update_all", "{}",
-                                      ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
+        return forever_addons_mutation_command(client, "update_all", "{}",
+                                               ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
     if (request->command == FOREVER_MENU_COMMAND_WAGO_SET ||
         request->command == FOREVER_MENU_COMMAND_WAGO_FILE ||
         request->command == FOREVER_MENU_COMMAND_WAGO_REMOVE)
@@ -2491,8 +2528,8 @@ static int forever_addons_mutate(
         return 0;
     }
     if (length < 0 || (size_t)length >= sizeof(arguments)) return -EFBIG;
-    return forever_addons_command(client, command, arguments,
-                                  ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
+    return forever_addons_mutation_command(client, command, arguments,
+                                           ADDON_MUTATION_TIMEOUT_MS, plain, plain_size);
 }
 
 static int forever_addons_channel_visit(const struct wow_channel *channel, void *unused)

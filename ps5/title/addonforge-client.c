@@ -408,7 +408,7 @@ static void sanitize_menu_text(char *text)
         }
         else { codepoint = 0; source++; bytes = 1; }
         if (!menu_codepoint_supported(codepoint))
-            *target++ = '?';
+            *target++ = ' ';
         else
         {
             memmove(target, start, bytes);
@@ -690,6 +690,19 @@ int addonforge_response_error(const char *response, char *error, size_t error_si
         return -EIO;
     }
     return -EPROTO;
+}
+
+int addonforge_parse_progress(const char *response, char *message, size_t size)
+{
+    const char *end, *result, *after;
+    char error[FOREVER_MENU_STATUS_BYTES];
+    if (!response || !message || !size) return -EINVAL;
+    message[0] = 0;
+    end = response + strlen(response);
+    if (addonforge_response_error(response, error, sizeof(error)) ||
+        !(result = json_value(response, end, "result")) ||
+        !object_end(result, end, &after)) return -EPROTO;
+    return json_string(result, after, "message", message, size) ? 0 : -EPROTO;
 }
 
 int addonforge_parse_snapshot(enum forever_addon_tab tab, const char *response,

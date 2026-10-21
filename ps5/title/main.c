@@ -131,6 +131,17 @@ void title_desktop_addons_error(const char *text)
     pthread_mutex_unlock(&message_mutex);
 }
 
+void title_desktop_addons_progress(const char *text)
+{
+    pthread_mutex_lock(&message_mutex);
+    if (pending_addon_kind != 3)
+    {
+        snprintf(pending_addon_error, sizeof(pending_addon_error), "%s", text ? text : "");
+        pending_addon_kind = 4;
+    }
+    pthread_mutex_unlock(&message_mutex);
+}
+
 void title_desktop_addons_pause(const char *text)
 {
     pthread_mutex_lock(&message_mutex);
@@ -1414,6 +1425,8 @@ static void desktop_frame(void)
                 ime_clear_text();
             }
         }
+        else if (pending_addon_kind == 4)
+            forever_menu_addon_progress(&menu, pending_addon_error);
         else
             forever_menu_addon_error(&menu, pending_addon_error);
         pending_addon_kind = 0;
