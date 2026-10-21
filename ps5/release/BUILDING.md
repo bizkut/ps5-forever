@@ -584,10 +584,12 @@ Classic Era failure is not established.
   once up to 64 MiB, then in 4 MiB chunks. A pollable operation status reports
   download percentage and unpacked file counts to the title; its 15-second poll
   deadline avoids abandoning delayed loopback responses during heavy I/O.
-  Removing an add-on atomically renames its
-  folders into hidden `.addonforge-tmp/trash-*`, returns immediately, and
-  deletes in the background; startup removes crash-left trash without touching
-  a replacement install. The title allows 30 minutes for mutations.
+  Removing an add-on atomically renames its folders into hidden
+  `.addonforge-tmp/trash-*` and returns immediately. Reclamation checks an
+  active-or-pending operation counter between every file, runs in bounded
+  20-ms slices, and resumes crash-left trash through the same idle-only worker
+  on the next start. A replacement install is never removed or blocked. The
+  title allows 30 minutes for mutations.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
   cached for six hours with last-good fallback. WoWInterface downloads use
@@ -642,10 +644,10 @@ Classic Era failure is not established.
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
   The 0009 receipt pins patch SHA-256
-  `d6cc25953f8bc2054fd2f923ff14320d191b901e72cef1b81f96a501890d79b0`.
+  `6a71ea53913e666a741cdbfb801d087649cfaca37b401ff9e1fb655d0268d19e`.
   Both cold Windows builds produced
-  `148284d658d23e80a5da4db49ed312baa7778f036ff8df4ef911cd4366c38056`
-  (3,432,960 bytes). Forever's customized snapshot contains 2,674 rows,
+  `e51da5bf861d92a37806c2d6c4c13d0e1cb5f8999b392042dc97f63019aaa2bb`
+  (3,438,592 bytes). Forever's customized snapshot contains 2,674 rows,
   is 741,153 bytes, and has SHA-256
   `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
   All 48 enabled offline headless Rust tests passed; the live endpoint/archive
