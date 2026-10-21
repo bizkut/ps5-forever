@@ -576,9 +576,15 @@ Classic Era failure is not established.
   or records from another catalogue endpoint are never treated as fresh or as
   stale fallback data: the core refreshes immediately and uses the bundled
   snapshot if that first refresh is unavailable.
-  Add-on downloads stream to disk with a 4 GiB safety cap; the title allows
-  30 minutes for install/update/remove operations so the largest catalogue
-  audio packs can download and extract without the loopback request expiring.
+  Catalogue release timestamps feed Find's Last update field directly. Generated
+  descriptions use ASCII separators, while unsupported third-party glyphs are
+  rendered as spaces instead of question marks. Add-on downloads retain the
+  4 GiB safety cap but buffer 8 MiB before writing through Wine; ZIP reads use
+  the same buffer. A pollable operation status reports download percentage and
+  unpacked file counts to the title. Removing an add-on atomically renames its
+  folders into hidden `.addonforge-tmp/trash-*`, returns immediately, and
+  deletes in the background; startup removes crash-left trash without touching
+  a replacement install. The title allows 30 minutes for mutations.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
   cached for six hours with last-good fallback. WoWInterface downloads use
@@ -633,13 +639,13 @@ Classic Era failure is not established.
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
   The 0009 receipt pins patch SHA-256
-  `0340c3821fe11273e342173cc8d9729bac2d37f022c4359ad4047f5e62973784`.
+  `039436834a3276ef76fb37c64fb1f76c005f94f7da3775bfae23655cf5a2aeaf`.
   Both cold Windows builds produced
-  `adf42c3f6e789b9951aa7777b07ed2ef3de2ccbd69e31a3fc7d76fb9a3c8cc2b`
-  (3,431,936 bytes). Forever's customized snapshot contains 2,674 rows,
-  is 741,858 bytes, and has SHA-256
-  `538c62389b307b1f3dedc28a6ab72cff9191b7d0ac365ef6536810bcd6fdc6fa`.
-  All 43 enabled offline headless Rust tests passed; the live endpoint/archive
+  `3029c248148d5bcffe6c327dfcc50abf995677fe8e2c1e85d679086dd461bb07`
+  (3,445,248 bytes). Forever's customized snapshot contains 2,674 rows,
+  is 741,153 bytes, and has SHA-256
+  `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
+  All 46 enabled offline headless Rust tests passed; the live endpoint/archive
   qualification remains separately opt-in.
   The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows
   129 and 2,999, and explicit overflow rejection. Menu and desktop-surface

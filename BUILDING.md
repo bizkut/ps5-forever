@@ -301,8 +301,8 @@ remain in force.
   token, final-channel mapping and behavioural tests; the upstream checkout is
   copied before patching and is never modified.
 - CI uses the committed `ps5/addonforge/github-catalogue.csv` snapshot, not a
-  live fetch: 741,858 bytes, 2,674 rows, SHA-256
-  `538c62389b307b1f3dedc28a6ab72cff9191b7d0ac365ef6536810bcd6fdc6fa`.
+  live fetch: 741,153 bytes, 2,674 rows, SHA-256
+  `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
   It is compiled into the core and packaged as
   `wine-title/addonforge/github-catalogue.csv`; runtime refreshes remain separate.
 - `0009-own-catalogue-release-streams.patch` uses Forever's daily-refreshed
@@ -312,8 +312,10 @@ remain in force.
   release stream; old layday-format rows remain valid. Cache records bind their
   format and source URL, so upgrades reject fresh legacy/foreign cache data and
   fall back to this bundled snapshot if immediate refresh fails. Downloads
-  stream to disk under a 4 GiB cap and title mutations allow 30 minutes for
-  large audio packs.
+  buffer 8 MiB per Wine write, publish percentage/unpack progress to the menu,
+  and retain a 4 GiB cap. Removal hides folders through same-parent renames and
+  reclaims hidden trash in the background or on the next start. Title mutations
+  allow 30 minutes for large audio packs.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
