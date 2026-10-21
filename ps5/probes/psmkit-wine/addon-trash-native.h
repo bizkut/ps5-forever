@@ -15,6 +15,7 @@
 struct addon_trash_result
 {
     uint64_t entries;
+    uint64_t completed;
     int result;
 };
 
@@ -25,6 +26,7 @@ static inline int addon_trash_path(char *out, size_t size, const char *left, con
 }
 
 static inline int addon_trash_remove_tree(const char *path, const atomic_int *stop,
+                                          const atomic_int *pause,
                                           struct addon_trash_result *result)
 {
     struct stat st;
@@ -32,6 +34,7 @@ static inline int addon_trash_remove_tree(const char *path, const atomic_int *st
     struct dirent *entry;
     char child[2048];
     if (atomic_load(stop)) return -ECANCELED;
+    if (atomic_load(pause)) return -EAGAIN;
     if (lstat(path, &st)) return errno == ENOENT ? 0 : -errno;
     if (S_ISLNK(st.st_mode)) return 0; /* never follow or remove authored links */
     if (!S_ISDIR(st.st_mode))
@@ -47,11 +50,12 @@ static inline int addon_trash_remove_tree(const char *path, const atomic_int *st
         int error;
         if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
         if ((error = addon_trash_path(child, sizeof(child), path, entry->d_name)) ||
-            (error = addon_trash_remove_tree(child, stop, result)))
+            (error = addon_trash_remove_tree(child, stop, pause, result)))
         { closedir(directory); return error; }
     }
     closedir(directory);
     if (atomic_load(stop)) return -ECANCELED;
+    if (atomic_load(pause)) return -EAGAIN;
     if (rmdir(path)) return -errno;
     result->entries++;
     usleep(5000);
@@ -59,6 +63,7 @@ static inline int addon_trash_remove_tree(const char *path, const atomic_int *st
 }
 
 static inline int addon_trash_scan(const char *prefix, const atomic_int *stop,
+                                   const atomic_int *pause,
                                    struct addon_trash_result *result)
 {
     char world[2048], addons[2048], temp[2048], trash[2048], complete[2048];
@@ -70,6 +75,7 @@ static inline int addon_trash_scan(const char *prefix, const atomic_int *stop,
     if (snprintf(world, sizeof(world), "%s/drive_c/Program Files (x86)/World of Warcraft", prefix) >= (int)sizeof(world))
         return result->result = -ENAMETOOLONG;
     if (!(channels = opendir(world))) return errno == ENOENT ? 0 : (result->result = -errno);
+    if (atomic_load(pause)) { closedir(channels); return 0; }
     while (!atomic_load(stop) && (channel = readdir(channels)))
     {
         if (channel->d_name[0] != '_' || strchr(channel->d_name, '/')) continue;
@@ -84,7 +90,9 @@ static inline int addon_trash_scan(const char *prefix, const atomic_int *stop,
                 addon_trash_path(complete, sizeof(complete), trash, ".complete") ||
                 lstat(trash, &st) || !S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode) ||
                 lstat(complete, &st) || !S_ISREG(st.st_mode) || now - st.st_mtime < 5) continue;
-            error = addon_trash_remove_tree(trash, stop, result);
+            error = addon_trash_remove_tree(trash, stop, pause, result);
+            if (error == -EAGAIN) { closedir(items); closedir(channels); return 0; }
+            if (!error) result->completed++;
             if (error && error != -ECANCELED && !result->result) result->result = error;
         }
         closedir(items);

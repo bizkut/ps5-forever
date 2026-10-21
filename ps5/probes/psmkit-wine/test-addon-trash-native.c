@@ -29,7 +29,7 @@ static void old_marker(const char *path)
 int main(void)
 {
     char root[] = "/tmp/addon-trash-native-XXXXXX", path[PATH_MAX], outside[PATH_MAX];
-    atomic_int stop = 0; struct addon_trash_result result;
+    atomic_int stop = 0, pause = 1; struct addon_trash_result result;
     assert(mkdtemp(root));
     snprintf(path, sizeof(path), "%s/drive_c/Program Files (x86)/World of Warcraft/_retail_/Interface/AddOns", root);
     mkdirs(path);
@@ -45,8 +45,11 @@ int main(void)
     char linkpath[PATH_MAX]; snprintf(linkpath, sizeof(linkpath), "%s/.addonforge-tmp/trash-link/link", addons);
     assert(!symlink(outside, linkpath));
 
-    assert(addon_trash_scan(root, &stop, &result) < 0); /* skipped link keeps its directory non-empty */
-    assert(result.entries == 7); /* old tree (6) plus link-tree marker; symlink survives */
+    assert(addon_trash_scan(root, &stop, &pause, &result) == 0 && !result.entries);
+    snprintf(path, sizeof(path), "%s/.addonforge-tmp/trash-old", addons); assert(exists(path));
+    atomic_store(&pause, 0);
+    assert(addon_trash_scan(root, &stop, &pause, &result) < 0); /* skipped link keeps its directory non-empty */
+    assert(result.entries == 7 && result.completed == 1);
     snprintf(path, sizeof(path), "%s/.addonforge-tmp/trash-old", addons); assert(!exists(path));
     snprintf(path, sizeof(path), "%s/Keep/Keep.toc", addons); assert(exists(path));
     snprintf(path, sizeof(path), "%s/.addonforge-tmp/not-trash/file", addons); assert(exists(path));
@@ -54,7 +57,8 @@ int main(void)
     snprintf(path, sizeof(path), "%s/.addonforge-tmp/trash-fresh/.complete", addons); assert(exists(path));
     assert(exists(outside));
 
-    atomic_store(&stop, 1); assert(addon_trash_scan(root, &stop, &result) == 0 && result.entries == 0);
+    atomic_store(&stop, 1);
+    assert(addon_trash_scan(root, &stop, &pause, &result) == 0 && result.entries == 0);
     char command[PATH_MAX + 16]; snprintf(command, sizeof(command), "rm -rf '%s'", root); system(command);
     puts("native addon trash: exact roots, age/complete gates, nested delete, symlink skip PASS");
     return 0;

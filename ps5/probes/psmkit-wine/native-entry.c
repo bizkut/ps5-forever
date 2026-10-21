@@ -2224,6 +2224,7 @@ static struct
     atomic_int stop;
     int started;
 } forever_addon_trash;
+static atomic_int forever_addon_core_active;
 
 static void *forever_addon_trash_worker(void *unused)
 {
@@ -2233,8 +2234,14 @@ static void *forever_addon_trash_worker(void *unused)
     {
         struct addon_trash_result result;
         int64_t started = io_now_ms();
-        int error = addon_trash_scan(PW_RUNTIME_PREFIX, &forever_addon_trash.stop, &result);
-        if (result.entries || error)
+        int error = addon_trash_scan(PW_RUNTIME_PREFIX, &forever_addon_trash.stop,
+                                     &forever_addon_core_active, &result);
+        if (result.completed)
+            for (uint64_t i = 0; i < result.completed; i++)
+                io_log("forever: addon trash deleted entries=%llu ms=%lld result=%d",
+                       (unsigned long long)(i ? 0 : result.entries),
+                       (long long)(io_now_ms() - started), error);
+        else if (result.entries || error)
             io_log("forever: addon trash deleted entries=%llu ms=%lld result=%d",
                    (unsigned long long)result.entries,
                    (long long)(io_now_ms() - started), error);
@@ -2693,6 +2700,7 @@ static void *forever_addons_stop_worker(void *unused)
     pthread_mutex_lock(&forever_addons.lock);
     memset(forever_addons.token, 0, sizeof(forever_addons.token));
     forever_addons.stopping = 0;
+    if (!error) atomic_store(&forever_addon_core_active, 0);
     pthread_mutex_unlock(&forever_addons.lock);
     return NULL;
 }
@@ -2750,6 +2758,7 @@ int forever_title_addons_action(
             return result;
         }
         forever_addons.open = 1;
+        atomic_store(&forever_addon_core_active, 1);
         forever_addons.generation++;
     }
     else if (!forever_addons.open)
@@ -2767,6 +2776,8 @@ int forever_title_addons_action(
     {
         forever_addons.busy = 0;
         if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN) forever_addons.open = 0;
+        if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
+            atomic_store(&forever_addon_core_active, 0);
     }
     pthread_mutex_unlock(&forever_addons.lock);
     if (result) return -result;
