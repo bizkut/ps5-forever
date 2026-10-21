@@ -241,10 +241,33 @@ index 4d97061..7732a53 100644
                  assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
                  let zip = crate::install::download(&client, &remote.download_url,
 diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
-index ef847c1..70bf5df 100644
+index ef847c1..6347961 100644
 --- a/src-tauri/src/install.rs
 +++ b/src-tauri/src/install.rs
-@@ -137,11 +137,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
+@@ -89,6 +89,10 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
+     }
+     for entry in fs::read_dir(&temp)?.flatten() {
+         let work = entry.path();
++        if work.file_name().and_then(|name| name.to_str())
++            .is_some_and(|name| name.starts_with("trash-")) {
++            continue;
++        }
+         let metadata = fs::symlink_metadata(&work)?;
+         if link_or_reparse(&metadata) || !metadata.is_dir() {
+             remove_no_follow(&work)?;
+@@ -125,7 +129,10 @@ pub fn recover_tmp(addons_dir: &Path) -> anyhow::Result<()> {
+         }
+         remove_no_follow(&work)?;
+     }
+-    remove_no_follow(&temp)
++    if fs::read_dir(&temp)?.next().is_none() {
++        fs::remove_dir(&temp)?;
++    }
++    Ok(())
+ }
+ 
+ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
+@@ -137,11 +144,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
      let _ = fs::remove_dir(addons_dir.join(TMP_DIR));
  }
  
@@ -265,7 +288,7 @@ index ef847c1..70bf5df 100644
  ) -> anyhow::Result<PathBuf> {
      fs::create_dir_all(dest_dir)?;
      let safe: String = filename
-@@ -168,16 +176,17 @@ pub async fn download(
+@@ -168,16 +183,17 @@ pub async fn download(
              .with_context(|| format!("download failed: {url}"))?
              .error_for_status()
              .with_context(|| format!("download refused: {url}"))?;
@@ -288,7 +311,7 @@ index ef847c1..70bf5df 100644
          }
          file.flush()?;
          Ok::<(), anyhow::Error>(())
-@@ -191,6 +200,16 @@ pub async fn download(
+@@ -191,6 +207,16 @@ pub async fn download(
      Ok(path)
  }
  
@@ -305,7 +328,7 @@ index ef847c1..70bf5df 100644
  fn has_toc(dir: &Path) -> bool {
      fs::read_dir(dir)
          .map(|rd| {
-@@ -303,6 +322,65 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+@@ -303,6 +329,65 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
      Ok(count)
  }
  
@@ -371,7 +394,7 @@ index ef847c1..70bf5df 100644
  #[derive(Clone, Debug)]
  pub struct PlaceResult {
      pub folders: Vec<String>,
-@@ -312,7 +390,12 @@ pub struct PlaceResult {
+@@ -312,7 +397,12 @@ pub struct PlaceResult {
  
  /// Extract `zip_path` and move its addon folders into `addons_dir`,
  /// replacing same-named folders and recording the two local phases.
@@ -385,7 +408,7 @@ index ef847c1..70bf5df 100644
      fs::create_dir_all(addons_dir)?;
      let work = addons_dir.join(TMP_DIR).join(unique());
      let extract_dir = work.join("x");
-@@ -324,7 +407,7 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+@@ -324,7 +414,7 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
          let zip_started = std::time::Instant::now();
          let file = fs::File::open(zip_path)?;
          let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
@@ -394,7 +417,7 @@ index ef847c1..70bf5df 100644
          let files = safety_scan(&extract_dir)?;
          crate::logi!("zip ok: {} files, no executables", files);
          let sources = addon_dirs(&extract_dir)?;
-@@ -385,24 +468,68 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+@@ -385,28 +475,115 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
      result
  }
  
@@ -415,7 +438,66 @@ index ef847c1..70bf5df 100644
  
 -/// Delete the given addon folders (used by "Remove").
 -pub fn remove_folders(addons_dir: &Path, folders: &[String]) -> anyhow::Result<Vec<String>> {
-+fn stage_remove_folders(
++pub fn pending_trash(addons_dir: &Path) -> Vec<PathBuf> {
++    fs::read_dir(addons_dir.join(TMP_DIR)).into_iter().flatten().flatten()
++        .map(|entry| entry.path())
++        .filter(|path| path.file_name().and_then(|name| name.to_str())
++            .is_some_and(|name| name.starts_with("trash-")))
++        .collect()
++}
++
++fn wait_for_idle(operations: &std::sync::atomic::AtomicUsize) {
++    while operations.load(std::sync::atomic::Ordering::Acquire) != 0 {
++        std::thread::sleep(std::time::Duration::from_millis(25));
++    }
++}
++
++fn remove_idle_no_follow(
++    path: &Path,
++    operations: &std::sync::atomic::AtomicUsize,
++    slice: &mut std::time::Instant,
++) -> anyhow::Result<()> {
++    wait_for_idle(operations);
++    let metadata = match fs::symlink_metadata(path) {
++        Ok(metadata) => metadata,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(error) => return Err(error.into()),
++    };
++    if link_or_reparse(&metadata) {
++        unlink_link_or_reparse(path, &metadata)?;
++    } else if metadata.is_dir() {
++        for entry in fs::read_dir(path)?.flatten() {
++            remove_idle_no_follow(&entry.path(), operations, slice)?;
++        }
++        wait_for_idle(operations);
++        fs::remove_dir(path)?;
++    } else {
++        fs::remove_file(path)?;
++    }
++    if slice.elapsed() >= std::time::Duration::from_millis(20) {
++        std::thread::sleep(std::time::Duration::from_millis(20));
++        *slice = std::time::Instant::now();
++    }
++    Ok(())
++}
++
++pub fn start_trash_cleanup(
++    trash: Vec<PathBuf>,
++    operations: std::sync::Arc<std::sync::atomic::AtomicUsize>,
++) -> std::thread::JoinHandle<()> {
++    std::thread::spawn(move || {
++        let mut slice = std::time::Instant::now();
++        for path in trash {
++            let parent = path.parent().map(Path::to_path_buf);
++            let _ = remove_idle_no_follow(&path, &operations, &mut slice);
++            if let Some(parent) = parent {
++                let _ = fs::remove_dir(parent);
++            }
++        }
++    })
++}
++
++pub fn stage_remove_folders(
 +    addons_dir: &Path,
 +    folders: &[String],
 +) -> anyhow::Result<(Vec<String>, PathBuf, usize)> {
@@ -452,27 +534,16 @@ index ef847c1..70bf5df 100644
          }
 +        moved.push((source, staged));
 +        gone.push(folder.clone());
-+    }
-+    Ok((gone, trash, moved.len()))
-+}
-+
-+/// Atomically hide add-on folders, then reclaim their files without keeping
-+/// the user-facing operation blocked on thousands of Wine delete round trips.
-+pub fn remove_folders(addons_dir: &Path, folders: &[String]) -> anyhow::Result<Vec<String>> {
-+    let (gone, trash, _) = stage_remove_folders(addons_dir, folders)?;
-+    if gone.is_empty() {
-+        remove_no_follow(&trash)?;
-+    } else {
-+        std::thread::spawn(move || {
-+            let _ = remove_no_follow(&trash);
-+            if let Some(parent) = trash.parent() {
-+                let _ = fs::remove_dir(parent);
-+            }
-+        });
      }
-     Ok(gone)
+-    Ok(gone)
++    Ok((gone, trash, moved.len()))
  }
-@@ -511,6 +638,168 @@ mod tests {
+ 
++
+ #[cfg(test)]
+ mod tests {
+     #[test]
+@@ -511,6 +688,176 @@ mod tests {
          let _ = fs::remove_dir_all(root);
      }
  
@@ -633,6 +704,14 @@ index ef847c1..70bf5df 100644
 +        fs::create_dir_all(&lore).unwrap();
 +        fs::write(lore.join("LoreForever.toc"), b"new install").unwrap();
 +        recover_tmp(&addons).unwrap();
++        assert!(trash.exists(), "startup recovery must defer trash to idle cleanup");
++        let operations = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
++        let cleanup = start_trash_cleanup(vec![trash.clone()], operations.clone());
++        std::thread::sleep(std::time::Duration::from_millis(100));
++        assert!(trash.exists(), "pending catalogue/install work must pause unlinks");
++        assert_eq!(fs::read(lore.join("LoreForever.toc")).unwrap(), b"new install");
++        operations.store(0, std::sync::atomic::Ordering::Release);
++        cleanup.join().unwrap();
 +        assert_eq!(fs::read(lore.join("LoreForever.toc")).unwrap(), b"new install");
 +        assert!(!addons.join(TMP_DIR).exists());
 +        let _ = fs::remove_dir_all(root);
@@ -642,18 +721,28 @@ index ef847c1..70bf5df 100644
      fn startup_recovers_each_interrupted_replacement_step() {
          let root = std::env::temp_dir().join(format!("af-recover-{}", unique()));
 diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
-index f6ead3d..d22bf8b 100644
+index f6ead3d..4557c55 100644
 --- a/src-tauri/src/lib.rs
 +++ b/src-tauri/src/lib.rs
-@@ -41,6 +41,7 @@ struct App {
+@@ -19,7 +19,7 @@ use sources::{normalize_version, ResolveOpts, Source};
+ use state::{AppState, Installed};
+ use std::collections::HashMap;
+ use std::path::{Path, PathBuf};
+-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
++use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+ #[cfg(feature = "gui")]
+ use tauri::State;
+ use tokio::sync::{Mutex, Notify, Semaphore};
+@@ -41,6 +41,8 @@ struct App {
      catalog_time: Mutex<Option<std::time::Instant>>,
      stats: Mutex<Option<Stats>>,
      last_install_timing: Mutex<Option<InstallTiming>>,
 +    progress: Arc<std::sync::Mutex<String>>,
++    operations: Arc<AtomicUsize>,
      mutation: Mutex<()>,
      shutdown: Notify,
      shutting_down: AtomicBool,
-@@ -59,6 +60,12 @@ struct InstallTiming {
+@@ -59,6 +61,27 @@ struct InstallTiming {
      broker_write_ms: u128,
  }
  
@@ -663,10 +752,25 @@ index f6ead3d..d22bf8b 100644
 +    }
 +}
 +
++struct OperationGuard(Arc<AtomicUsize>);
++
++impl OperationGuard {
++    fn new(operations: Arc<AtomicUsize>) -> Self {
++        operations.fetch_add(1, Ordering::AcqRel);
++        Self(operations)
++    }
++}
++
++impl Drop for OperationGuard {
++    fn drop(&mut self) {
++        self.0.fetch_sub(1, Ordering::AcqRel);
++    }
++}
++
  fn err(e: impl std::fmt::Display) -> String {
      e.to_string()
  }
-@@ -461,13 +468,16 @@ async fn icon_cached(
+@@ -461,13 +484,16 @@ async fn icon_cached(
      v
  }
  
@@ -684,7 +788,7 @@ index f6ead3d..d22bf8b 100644
          entry.and_then(|e| e.forever),
      )
  }
-@@ -480,13 +490,15 @@ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
+@@ -480,13 +506,15 @@ async fn resolve_into(app: &App, pkg: &mut Package, cat: &Catalog) {
      if matches!(src, Source::Wago(_)) && !st.has_wago_key() {
          return;
      }
@@ -701,7 +805,7 @@ index f6ead3d..d22bf8b 100644
          wago_key: st.wago_key.as_deref(),
          prerelease: st.allow_prerelease,
          flavor,
-@@ -845,14 +857,19 @@ async fn install_from(
+@@ -845,14 +873,19 @@ async fn install_from(
      key: &str,
      src: &Source,
      asset_hint: Option<&str>,
@@ -721,7 +825,7 @@ index f6ead3d..d22bf8b 100644
          wago_key: st.wago_key.as_deref(),
          prerelease: st.allow_prerelease,
          flavor,
-@@ -873,7 +890,17 @@ async fn install_from(
+@@ -873,7 +906,17 @@ async fn install_from(
      );
      let tmp = addons.join(install::TMP_DIR).join("dl");
      let download_started = std::time::Instant::now();
@@ -740,7 +844,7 @@ index f6ead3d..d22bf8b 100644
          .await
          .map_err(|e| {
              loge!("download {key}: {e}");
-@@ -881,7 +908,11 @@ async fn install_from(
+@@ -881,7 +924,11 @@ async fn install_from(
          })?;
      let download_ms = download_started.elapsed().as_millis();
      let addons2 = addons.clone();
@@ -753,7 +857,7 @@ index f6ead3d..d22bf8b 100644
          .await
          .map_err(err)?
          .map_err(|e| {
-@@ -925,12 +956,14 @@ async fn update_package_impl(
+@@ -925,12 +972,14 @@ async fn update_package_impl(
          .clone()
          .ok_or_else(|| "This addon has no update source".to_string())?;
      let cat = catalog_cached(app).await;
@@ -769,7 +873,7 @@ index f6ead3d..d22bf8b 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -983,7 +1016,8 @@ async fn catalog_list_impl(app: &App, refresh: Option<bool>) -> Result<Vec<Catal
+@@ -983,7 +1032,8 @@ async fn catalog_list_impl(app: &App, refresh: Option<bool>) -> Result<Vec<Catal
                  installed: installed_keys.contains(&key),
                  key,
                  downloads: st.and_then(|s| s.downloads),
@@ -779,7 +883,7 @@ index f6ead3d..d22bf8b 100644
                  stat_source: st.map(|s| s.source.clone()).filter(|s| !s.is_empty()),
                  entry: e,
              }
-@@ -1184,6 +1218,8 @@ async fn install_catalog_impl(
+@@ -1184,6 +1234,8 @@ async fn install_catalog_impl(
          &key,
          &src,
          e.asset_hint.as_deref(),
@@ -788,7 +892,7 @@ index f6ead3d..d22bf8b 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -1215,6 +1251,8 @@ async fn install_source(
+@@ -1215,6 +1267,8 @@ async fn install_source(
          &key,
          &source,
          None,
@@ -797,7 +901,7 @@ index f6ead3d..d22bf8b 100644
          allow_non_forever.unwrap_or(false),
      )
      .await?;
-@@ -1244,7 +1282,8 @@ async fn install_github(
+@@ -1244,7 +1298,8 @@ async fn install_github(
          .map(|e| format!("cat:{}", e.id))
          .unwrap_or_else(|| format!("github:{repo}"));
      let src = Source::Github(repo);
@@ -807,15 +911,74 @@ index f6ead3d..d22bf8b 100644
      refreshed(&app, &key).await
  }
  
-@@ -1595,6 +1634,7 @@ fn make_app() -> Shared {
+@@ -1256,10 +1311,14 @@ async fn remove_package_impl(app: &App, key: String) -> Result<Vec<String>, Stri
+         .find(|p| p.key == key)
+         .ok_or_else(|| "Addon not found".to_string())?;
+     let addons = addons_dir(&install);
+-    let gone = tokio::task::spawn_blocking(move || install::remove_folders(&addons, &pkg.folders))
++    let (gone, trash, _) = tokio::task::spawn_blocking(
++        move || install::stage_remove_folders(&addons, &pkg.folders))
+         .await
+         .map_err(err)?
+         .map_err(err)?;
++    if !gone.is_empty() {
++        install::start_trash_cleanup(vec![trash], app.operations.clone());
++    }
+     let mut st = app.state.lock().await;
+     st.installed.remove(&key);
+     st.pinned.remove(&key);
+@@ -1578,30 +1637,42 @@ fn make_app() -> Shared {
+         .build()
+         .expect("http client");
+     let st = AppState::load();
+-    for found in wow::find_installs() {
+-        if let Err(error) = install::recover_tmp(&addons_dir(&found.path)) {
+-            loge!("recover {}: {error}", found.path);
++    let mut install_paths: Vec<String> =
++        wow::find_installs().into_iter().map(|install| install.path).collect();
++    if let Some(path) = &st.install_path {
++        if !install_paths.iter().any(|existing| existing == path) {
++            install_paths.push(path.clone());
+         }
+     }
+-    if let Some(p) = &st.install_path {
+-        if let Err(error) = install::recover_tmp(&addons_dir(p)) {
+-            loge!("recover {p}: {error}");
++    let mut trash = Vec::new();
++    for path in &install_paths {
++        let addons = addons_dir(path);
++        if let Err(error) = install::recover_tmp(&addons) {
++            loge!("recover {path}: {error}");
+         }
++        trash.extend(install::pending_trash(&addons));
+     }
+-    Arc::new(App {
++    let operations = Arc::new(AtomicUsize::new(0));
++    let app = Arc::new(App {
+         client,
+         state: Mutex::new(st),
+         wago_valid: Mutex::new(None),
          catalog: Mutex::new(None),
          catalog_time: Mutex::new(None),
          stats: Mutex::new(None),
 +        progress: Arc::new(std::sync::Mutex::new(String::new())),
++        operations: operations.clone(),
          last_install_timing: Mutex::new(None),
          mutation: Mutex::new(()),
          shutdown: Notify::new(),
-@@ -1667,6 +1707,10 @@ async fn catalog_view(app: &App, rows: Value, unavailable_notice: &str) -> Resul
+         shutting_down: AtomicBool::new(false),
+         #[cfg(feature = "gui")]
+         icon_cache: Mutex::new(HashMap::new()),
+-    })
++    });
++    if !trash.is_empty() {
++        install::start_trash_cleanup(trash, operations);
++    }
++    app
+ }
+ 
+ #[derive(Deserialize)]
+@@ -1667,6 +1738,11 @@ async fn catalog_view(app: &App, rows: Value, unavailable_notice: &str) -> Resul
  }
  
  async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Value, String> {
@@ -823,10 +986,11 @@ index f6ead3d..d22bf8b 100644
 +        let message = app.progress.lock().map(|value| value.clone()).unwrap_or_default();
 +        return Ok(serde_json::json!({"message": message}));
 +    }
++    let _pending = OperationGuard::new(app.operations.clone());
      let _operation = app.mutation.lock().await;
      if app.shutting_down.load(Ordering::Acquire) {
          return Err("add-on service is shutting down".into());
-@@ -1722,7 +1766,8 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
+@@ -1722,7 +1798,8 @@ async fn dispatch_headless(app: Shared, request: HeadlessRequest) -> Result<Valu
                  .map(|entry| format!("cat:{}", entry.id))
                  .unwrap_or_else(|| format!("github:{repo}"));
              let source = Source::Github(repo);
@@ -836,7 +1000,7 @@ index f6ead3d..d22bf8b 100644
              serde_json::to_value(refreshed(&app, &key).await?).map_err(err)
          }
          "install_bundle" => {
-@@ -2184,6 +2229,8 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2184,6 +2261,8 @@ pub fn cli(args: &[String]) -> i32 {
                                  s,
                                  ResolveOpts {
                                      asset_hint: e.asset_hint.as_deref(),
@@ -845,7 +1009,7 @@ index f6ead3d..d22bf8b 100644
                                      wago_key: st.wago_key.as_deref(),
                                      prerelease: st.allow_prerelease,
                                      flavor,
-@@ -2218,9 +2265,10 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2218,9 +2297,10 @@ pub fn cli(args: &[String]) -> i32 {
                  let pkg = pkgs.into_iter().find(|p| &p.key == key).ok_or("no such package")?;
                  let src = pkg.source.clone().ok_or("package has no source")?;
                  let cat = catalog_cached(&app).await;
@@ -858,7 +1022,7 @@ index f6ead3d..d22bf8b 100644
                  Ok(serde_json::to_value(rec).unwrap())
              }
              "install" => {
-@@ -2230,14 +2278,17 @@ pub fn cli(args: &[String]) -> i32 {
+@@ -2230,21 +2310,28 @@ pub fn cli(args: &[String]) -> i32 {
                  let has_wago = app.state.lock().await.has_wago_key();
                  let src = pick_source(Some(&e), &AddonFolder::default(), has_wago, None).ok_or("no source")?;
                  let force = args.iter().any(|a| a == "--force");
@@ -878,7 +1042,19 @@ index f6ead3d..d22bf8b 100644
                  Ok(serde_json::to_value(rec).unwrap())
              }
              "remove" => {
-@@ -2533,7 +2584,8 @@ mod tests {
+                 let key = args.get(1).ok_or("usage: remove <package key>")?;
+                 let install = current_install(&app).await?;
+                 let pkg = scan_packages(&app).await?.into_iter().find(|p| &p.key == key).ok_or("no such package")?;
+-                let gone = install::remove_folders(&addons_dir(&install), &pkg.folders).map_err(err)?;
++                let (gone, trash, _) =
++                    install::stage_remove_folders(&addons_dir(&install), &pkg.folders).map_err(err)?;
++                if !gone.is_empty() {
++                    install::start_trash_cleanup(vec![trash], app.operations.clone());
++                }
+                 let mut st = app.state.lock().await;
+                 st.installed.remove(key);
+                 st.pinned.remove(key);
+@@ -2533,7 +2620,8 @@ mod tests {
          assert_eq!(set_install_path_impl(&app, unknown.to_string_lossy().into()).await.unwrap_err(), flavor::UNSUPPORTED);
          // Even a persisted unsupported selection cannot reach source resolution.
          app.state.lock().await.select_install(unknown.to_string_lossy().into());
@@ -888,7 +1064,7 @@ index f6ead3d..d22bf8b 100644
          assert!(!unknown.join("Interface").exists());
          std::fs::remove_dir_all(root).unwrap();
          std::env::remove_var("ADDONFORGE_STATE_DIR");
-@@ -2687,6 +2739,29 @@ mod tests {
+@@ -2687,6 +2775,29 @@ mod tests {
          assert!(pkgs[0].managed);
      }
  
@@ -918,7 +1094,7 @@ index f6ead3d..d22bf8b 100644
      #[test]
      fn missing_dependencies_are_reported_and_matched_to_catalogue() {
          let st = AppState::default();
-@@ -2842,6 +2917,21 @@ mod tests {
+@@ -2842,6 +2953,21 @@ mod tests {
          assert!(checked_request_total(usize::MAX, 0).is_err());
      }
  
