@@ -631,10 +631,10 @@ Classic Era failure is not established.
   The 0009 receipt pins patch SHA-256
   `8282c3d53d47a279bae4679d45e0b58db087e44ede95c08b56b50f03021a0a78`.
   Both cold Windows builds produced
-  `95e4a43738be2938f662c3eb013fbe5661acc72676fe7495ea7dfb4aa9c76d7a`
+  `37a72c503f4455a7ab42aa0c7f116a16e0966cbcdbaa9b986e68de9e840d6e1d`
   (3,430,400 bytes). Forever's customized snapshot contains 2,674 rows,
-  is 741,876 bytes, and has SHA-256
-  `0caff3a3cc1b3f8b9aeb5dac170861e484c2ffb79a6945a4e794b8937b21a918`.
+  is 741,858 bytes, and has SHA-256
+  `538c62389b307b1f3dedc28a6ab72cff9191b7d0ac365ef6536810bcd6fdc6fa`.
   All 42 enabled offline headless Rust tests passed; the live endpoint/archive
   qualification remains separately opt-in.
   The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows

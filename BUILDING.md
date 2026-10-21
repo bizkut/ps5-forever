@@ -301,8 +301,8 @@ remain in force.
   token, final-channel mapping and behavioural tests; the upstream checkout is
   copied before patching and is never modified.
 - CI uses the committed `ps5/addonforge/github-catalogue.csv` snapshot, not a
-  live fetch: 741,876 bytes, 2,674 rows, SHA-256
-  `0caff3a3cc1b3f8b9aeb5dac170861e484c2ffb79a6945a4e794b8937b21a918`.
+  live fetch: 741,858 bytes, 2,674 rows, SHA-256
+  `538c62389b307b1f3dedc28a6ab72cff9191b7d0ac365ef6536810bcd6fdc6fa`.
   It is compiled into the core and packaged as
   `wine-title/addonforge/github-catalogue.csv`; runtime refreshes remain separate.
 - `0009-own-catalogue-release-streams.patch` uses Forever's daily-refreshed
