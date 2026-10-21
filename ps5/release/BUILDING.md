@@ -586,12 +586,14 @@ Classic Era failure is not established.
   deadline avoids abandoning delayed loopback responses during heavy I/O.
   Removing an add-on atomically renames its folders into hidden
   `.addonforge-tmp/trash-*`, writes `.complete`, and returns immediately;
-  AddonForge never unlinks completed trash. The native maintenance parent
-  waits for the marker to age five seconds, then removes one no-follow entry
-  at a time with 5-ms pacing and emits one `forever: addon trash deleted`
-  receipt. A title killed mid-delete resumes on the next start. A markerless
-  crash mid-rename is rolled back by AddonForge recovery; a replacement install
-  is preserved. The title allows 30 minutes for mutations.
+  AddonForge never unlinks completed trash. After the Add-ons page closes and
+  its core stops, the native maintenance parent removes one no-follow entry at
+  a time with 5-ms pacing; reopening the page pauses cleanup so a reinstall
+  never competes with deletion. Every completed trash directory emits a
+  `forever: addon trash deleted` receipt. A title killed mid-delete resumes on
+  the next start. A markerless crash mid-rename is rolled back by AddonForge
+  recovery; a replacement install is preserved. The title allows 30 minutes
+  for mutations.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
   cached for six hours with last-good fallback. WoWInterface downloads use
