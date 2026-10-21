@@ -2380,9 +2380,9 @@ static int forever_addons_command(
 static void *forever_addons_progress_worker(void *argument)
 {
     struct forever_addons_progress_poll *poll = argument;
-    const struct timespec interval = {.tv_sec = 0, .tv_nsec = 500000000};
+    const struct timespec interval = {.tv_sec = 1, .tv_nsec = 0};
     char response[1024], message[FOREVER_MENU_STATUS_BYTES];
-    poll->client.timeout_ms = 1500;
+    poll->client.timeout_ms = 15000;
     while (!atomic_load_explicit(&poll->done, memory_order_acquire))
     {
         if (!addonforge_http_command(&poll->client, "operation_progress", "{}",

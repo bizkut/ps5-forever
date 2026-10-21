@@ -241,7 +241,7 @@ index 4d97061..7732a53 100644
                  assert_ne!(remote.forever, Some(false), "{} {id}", flavor.id());
                  let zip = crate::install::download(&client, &remote.download_url,
 diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
-index ef847c1..eea5642 100644
+index ef847c1..70bf5df 100644
 --- a/src-tauri/src/install.rs
 +++ b/src-tauri/src/install.rs
 @@ -137,11 +137,19 @@ fn tidy_operation(addons_dir: &Path, work: &Path, zip_path: &Path) {
@@ -305,7 +305,73 @@ index ef847c1..eea5642 100644
  fn has_toc(dir: &Path) -> bool {
      fs::read_dir(dir)
          .map(|rd| {
-@@ -312,7 +331,12 @@ pub struct PlaceResult {
+@@ -303,6 +322,65 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+     Ok(count)
+ }
+ 
++const EXTRACT_SINGLE_WRITE_CAP: u64 = 64 * 1024 * 1024;
++const EXTRACT_WRITE_CHUNK: usize = 4 * 1024 * 1024;
++
++fn copy_archive_entry(
++    reader: &mut impl std::io::Read,
++    writer: &mut impl std::io::Write,
++    size: u64,
++) -> std::io::Result<usize> {
++    if size <= EXTRACT_SINGLE_WRITE_CAP {
++        let mut bytes = vec![0; usize::try_from(size).unwrap_or(usize::MAX)];
++        reader.read_exact(&mut bytes)?;
++        writer.write_all(&bytes)?;
++        return Ok(1);
++    }
++    let mut buffer = vec![0; EXTRACT_WRITE_CHUNK];
++    let mut remaining = size;
++    let mut writes = 0;
++    while remaining > 0 {
++        let count = buffer.len().min(remaining as usize);
++        reader.read_exact(&mut buffer[..count])?;
++        writer.write_all(&buffer[..count])?;
++        remaining -= count as u64;
++        writes += 1;
++    }
++    Ok(writes)
++}
++
++fn extract_archive(
++    archive: &mut zip::ZipArchive<fs::File>,
++    destination: &Path,
++    progress: &mut impl FnMut(usize, usize),
++) -> anyhow::Result<()> {
++    let total = (0..archive.len())
++        .filter(|index| archive.by_index(*index).is_ok_and(|entry| !entry.is_dir()))
++        .count();
++    let mut completed = 0;
++    for index in 0..archive.len() {
++        let mut entry = archive.by_index(index)?;
++        let relative = entry.enclosed_name()
++            .ok_or_else(|| anyhow!("zip contains an unsafe path"))?
++            .to_path_buf();
++        let path = destination.join(relative);
++        if entry.is_dir() {
++            fs::create_dir_all(&path)?;
++            continue;
++        }
++        if let Some(parent) = path.parent() {
++            fs::create_dir_all(parent)?;
++        }
++        let mut output = fs::File::create(&path)?;
++        let size = entry.size();
++        copy_archive_entry(&mut entry, &mut output, size)?;
++        output.flush()?;
++        completed += 1;
++        progress(completed, total);
++    }
++    Ok(())
++}
++
+ #[derive(Clone, Debug)]
+ pub struct PlaceResult {
+     pub folders: Vec<String>,
+@@ -312,7 +390,12 @@ pub struct PlaceResult {
  
  /// Extract `zip_path` and move its addon folders into `addons_dir`,
  /// replacing same-named folders and recording the two local phases.
@@ -319,23 +385,16 @@ index ef847c1..eea5642 100644
      fs::create_dir_all(addons_dir)?;
      let work = addons_dir.join(TMP_DIR).join(unique());
      let extract_dir = work.join("x");
-@@ -323,8 +347,14 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
-         fs::create_dir_all(&backup_dir)?;
+@@ -324,7 +407,7 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
          let zip_started = std::time::Instant::now();
          let file = fs::File::open(zip_path)?;
--        let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
-+        let reader = std::io::BufReader::with_capacity(DOWNLOAD_WRITE_BUFFER, file);
-+        let mut archive = zip::ZipArchive::new(reader).context("not a valid zip")?;
-+        let files = (0..archive.len())
-+            .filter(|index| archive.by_index(*index).is_ok_and(|entry| !entry.is_dir()))
-+            .count();
-+        progress(0, files);
-         archive.extract(&extract_dir).context("extract failed")?;
-+        progress(files, files);
+         let mut archive = zip::ZipArchive::new(file).context("not a valid zip")?;
+-        archive.extract(&extract_dir).context("extract failed")?;
++        extract_archive(&mut archive, &extract_dir, &mut progress).context("extract failed")?;
          let files = safety_scan(&extract_dir)?;
          crate::logi!("zip ok: {} files, no executables", files);
          let sources = addon_dirs(&extract_dir)?;
-@@ -385,24 +415,68 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
+@@ -385,24 +468,68 @@ pub fn place_timed(zip_path: &Path, addons_dir: &Path, flavor: crate::flavor::Fl
      result
  }
  
@@ -413,7 +472,7 @@ index ef847c1..eea5642 100644
      }
      Ok(gone)
  }
-@@ -511,6 +585,75 @@ mod tests {
+@@ -511,6 +638,168 @@ mod tests {
          let _ = fs::remove_dir_all(root);
      }
  
@@ -455,6 +514,99 @@ index ef847c1..eea5642 100644
 +        assert!(writer.get_ref().calls <= 46, "writes={}", writer.get_ref().calls);
 +        println!("LORE_DOWNLOAD_WRITES before={raw_calls} after={}",
 +            writer.get_ref().calls);
++    }
++
++    #[test]
++    fn decompressed_entries_use_one_write_or_four_mib_chunks() {
++        struct Zeros(u64);
++        impl std::io::Read for Zeros {
++            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
++                let count = bytes.len().min(self.0 as usize);
++                bytes[..count].fill(0);
++                self.0 -= count as u64;
++                Ok(count)
++            }
++        }
++        #[derive(Default)]
++        struct Writes { calls: usize, bytes: u64 }
++        impl std::io::Write for Writes {
++            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
++                self.calls += 1;
++                self.bytes += bytes.len() as u64;
++                Ok(bytes.len())
++            }
++            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
++        }
++        let mut small = Writes::default();
++        copy_archive_entry(
++            &mut Zeros(8 * 1024 * 1024), &mut small, 8 * 1024 * 1024).unwrap();
++        assert_eq!((small.calls, small.bytes), (1, 8 * 1024 * 1024));
++
++        let size = 358_u64 * 1024 * 1024;
++        let mut large = Writes::default();
++        copy_archive_entry(&mut Zeros(size), &mut large, size).unwrap();
++        assert_eq!(large.bytes, size);
++        assert_eq!(large.calls, 90);
++    }
++
++    #[test]
++    fn lore_archive_io_measurement_if_requested() {
++        let Some(path) = std::env::var_os("ADDONFORGE_LORE_ZIP") else { return };
++        struct CountedFile {
++            file: fs::File,
++            reads: u64,
++            bytes: u64,
++            seeks: u64,
++        }
++        impl std::io::Read for CountedFile {
++            fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
++                let count = self.file.read(bytes)?;
++                self.reads += 1;
++                self.bytes += count as u64;
++                Ok(count)
++            }
++        }
++        impl std::io::Seek for CountedFile {
++            fn seek(&mut self, position: std::io::SeekFrom) -> std::io::Result<u64> {
++                self.seeks += 1;
++                self.file.seek(position)
++            }
++        }
++        #[derive(Default)]
++        struct Sink { writes: u64, bytes: u64 }
++        impl std::io::Write for Sink {
++            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
++                self.writes += 1;
++                self.bytes += bytes.len() as u64;
++                Ok(bytes.len())
++            }
++            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
++        }
++        let reader = CountedFile {
++            file: fs::File::open(path).unwrap(), reads: 0, bytes: 0, seeks: 0};
++        let mut archive = zip::ZipArchive::new(reader).unwrap();
++        let mut sink = Sink::default();
++        let mut files = 0_u64;
++        let mut decompressed = 0_u64;
++        let mut previous_writes = 0_u64;
++        for index in 0..archive.len() {
++            let mut entry = archive.by_index(index).unwrap();
++            if entry.is_dir() { continue; }
++            files += 1;
++            previous_writes += entry.size().div_ceil(8192);
++            let size = entry.size();
++            decompressed += size;
++            copy_archive_entry(&mut entry, &mut sink, size).unwrap();
++        }
++        let reader = archive.into_inner();
++        println!(
++            "LORE_EXTRACT_IO files={files} writes_before={previous_writes} writes_after={} \
++             read_calls={} read_bytes={} seeks={} pathological_bufread_bytes={}",
++            sink.writes, reader.reads, reader.bytes, reader.seeks,
++            files * DOWNLOAD_WRITE_BUFFER as u64);
++        assert_eq!(sink.bytes, decompressed);
++        assert_eq!(sink.writes, files);
++        assert!(reader.bytes < 500 * 1024 * 1024);
 +    }
 +
 +    #[test]

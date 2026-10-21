@@ -42,6 +42,8 @@ static struct forever_menu_state menu;
 static struct forever_addon_snapshot published;
 static unsigned publications, mutations, mutation_timeout;
 static int mutation_error;
+static atomic_int progress_polls;
+static char progress_status[FOREVER_MENU_STATUS_BYTES];
 static const char *fixture_channel;
 static int forever_addons_current(unsigned generation) { return generation == forever_addons.generation; }
 static int forever_addons_control(const char *command) { assert(command); return 0; }
@@ -52,7 +54,11 @@ static void title_desktop_addons_snapshot(const struct forever_addon_snapshot *s
     published = *snapshot;
     forever_menu_addon_snapshot(&menu, snapshot);
 }
-static void title_desktop_addons_progress(const char *text) { assert(text); }
+static void title_desktop_addons_progress(const char *text)
+{
+    assert(text);
+    snprintf(progress_status, sizeof(progress_status), "%s", text);
+}
 static int forever_addons_command(struct addonforge_client *client, const char *command,
     const char *arguments, unsigned timeout_ms, char *plain, size_t plain_size)
 {
@@ -110,6 +116,17 @@ static int fixture_wago_status(const struct addonforge_client *client,
     *status = service_wago_status;
     return 0;
 }
+static int fixture_http_command(const struct addonforge_client *client, const char *command,
+                                const char *arguments, char *response, size_t size)
+{
+    assert(client && client->timeout_ms == 15000);
+    assert(!strcmp(command, "operation_progress") && !strcmp(arguments, "{}"));
+    atomic_fetch_add(&progress_polls, 1);
+    snprintf(response, size,
+             "{\"ok\":true,\"result\":{\"message\":\"Downloading add-on... 37%%\"}}");
+    return 0;
+}
+#define addonforge_http_command fixture_http_command
 #define addonforge_wago_key_status fixture_wago_status
 #define addonforge_set_wago_key fixture_set_wago_key
 #define addonforge_set_wago_key_file fixture_set_wago_key_file
@@ -119,6 +136,7 @@ static int fixture_wago_status(const struct addonforge_client *client,
 #undef addonforge_set_wago_key
 #undef addonforge_set_wago_key_file
 #undef addonforge_install_github
+#undef addonforge_http_command
 static void run_worker(const char *channel, enum forever_menu_command command,
                        enum forever_addon_tab tab, int fail)
 {
@@ -148,6 +166,18 @@ static void run_worker(const char *channel, enum forever_menu_command command,
 }
 int main(void)
 {
+    {
+        struct forever_addons_progress_poll poll = {
+            .client = {.port = 31981, .token = "fixture", .timeout_ms = 1}};
+        pthread_t thread;
+        atomic_store(&progress_polls, 0);
+        progress_status[0] = 0;
+        assert(!pthread_create(&thread, NULL, forever_addons_progress_worker, &poll));
+        while (!atomic_load(&progress_polls)) usleep(1000);
+        atomic_store(&poll.done, 1);
+        assert(!pthread_join(thread, NULL));
+        assert(!strcmp(progress_status, "Downloading add-on... 37%"));
+    }
     for (size_t i = 0; i < 2; ++i)
     {
         const char *channel = i ? "_classic_era_" : "_retail_";
