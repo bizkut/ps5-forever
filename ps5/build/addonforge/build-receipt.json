@@ -1,18 +1,18 @@
 {
   "addonforge_core": {
-    "sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
+    "sha256": "95e4a43738be2938f662c3eb013fbe5661acc72676fe7495ea7dfb4aa9c76d7a",
     "size": 3430400
   },
   "cargo_lock_sha256": "8d98ec6289137d1fc9414ffe42b26057164e87761e237d70b3e27f0ace64862d",
-  "cold_build_a_sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
-  "cold_build_b_sha256": "9191bca995260c63e0eb8ee1bd10b29193f34b76eba4bdca5204c01a25924b88",
+  "cold_build_a_sha256": "95e4a43738be2938f662c3eb013fbe5661acc72676fe7495ea7dfb4aa9c76d7a",
+  "cold_build_b_sha256": "95e4a43738be2938f662c3eb013fbe5661acc72676fe7495ea7dfb4aa9c76d7a",
   "format": 1,
   "github_catalogue": {
     "etag": null,
     "license": "GPL-3.0",
     "rows": 2674,
-    "sha256": "e41a07c1a9af69ddd3378feafc9c2e21adb28fbe52633ea3ff5bfd5bcac21763",
-    "size": 742020,
+    "sha256": "0caff3a3cc1b3f8b9aeb5dac170861e484c2ffb79a6945a4e794b8937b21a918",
+    "size": 741876,
     "url": "https://raw.githubusercontent.com/bizkut/github-wow-addon-catalogue/main/addons.csv"
   },
   "maintenance_launcher": {
