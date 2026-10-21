@@ -309,8 +309,11 @@ remain in force.
   [catalogue fork](https://github.com/bizkut/github-wow-addon-catalogue), which
   remains GPL-3.0 and credits layday. Optional tag-prefix, asset-name and folder
   columns keep monorepo and multi-pack installs and updates on their selected
-  release stream; old layday-format rows remain valid. Downloads stream to disk
-  under a 4 GiB cap and title mutations allow 30 minutes for large audio packs.
+  release stream; old layday-format rows remain valid. Cache records bind their
+  format and source URL, so upgrades reject fresh legacy/foreign cache data and
+  fall back to this bundled snapshot if immediate refresh fails. Downloads
+  stream to disk under a 4 GiB cap and title mutations allow 30 minutes for
+  large audio packs.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,

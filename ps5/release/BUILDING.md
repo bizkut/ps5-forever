@@ -572,6 +572,10 @@ Classic Era failure is not established.
   never cross tag streams; folder-first reconciliation attaches hand-installed
   copies to the matching row even when several rows share one repository.
   Exact asset rows also separate distinct add-ons published in one release.
+  GitHub cache records include format `2` and their source URL. Legacy records
+  or records from another catalogue endpoint are never treated as fresh or as
+  stale fallback data: the core refreshes immediately and uses the bundled
+  snapshot if that first refresh is unavailable.
   Add-on downloads stream to disk with a 4 GiB safety cap; the title allows
   30 minutes for install/update/remove operations so the largest catalogue
   audio packs can download and extract without the loopback request expiring.
@@ -629,13 +633,13 @@ Classic Era failure is not established.
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
   The 0009 receipt pins patch SHA-256
-  `8282c3d53d47a279bae4679d45e0b58db087e44ede95c08b56b50f03021a0a78`.
+  `0340c3821fe11273e342173cc8d9729bac2d37f022c4359ad4047f5e62973784`.
   Both cold Windows builds produced
-  `37a72c503f4455a7ab42aa0c7f116a16e0966cbcdbaa9b986e68de9e840d6e1d`
-  (3,430,400 bytes). Forever's customized snapshot contains 2,674 rows,
+  `adf42c3f6e789b9951aa7777b07ed2ef3de2ccbd69e31a3fc7d76fb9a3c8cc2b`
+  (3,431,936 bytes). Forever's customized snapshot contains 2,674 rows,
   is 741,858 bytes, and has SHA-256
   `538c62389b307b1f3dedc28a6ab72cff9191b7d0ac365ef6536810bcd6fdc6fa`.
-  All 42 enabled offline headless Rust tests passed; the live endpoint/archive
+  All 43 enabled offline headless Rust tests passed; the live endpoint/archive
   qualification remains separately opt-in.
   The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows
   129 and 2,999, and explicit overflow rejection. Menu and desktop-surface
