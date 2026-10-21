@@ -1,8 +1,8 @@
 diff --git a/src-tauri/src/catalog.rs b/src-tauri/src/catalog.rs
-index 4d97061..c9e289f 100644
+index 4d97061..ef1cc13 100644
 --- a/src-tauri/src/catalog.rs
 +++ b/src-tauri/src/catalog.rs
-@@ -9,7 +9,7 @@ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
+@@ -9,15 +9,16 @@ pub const BUNDLED: &str = include_str!("../../catalog/forever.json");
  pub const REMOTE_URL: &str =
      "https://raw.githubusercontent.com/Topher121/AddonForge/main/catalog/forever.json";
  pub const GITHUB_URL: &str =
@@ -11,7 +11,8 @@ index 4d97061..c9e289f 100644
  pub const BUNDLED_GITHUB: &str = include_str!("../../catalog/github.csv");
  const GITHUB_TTL: Duration = Duration::from_secs(24 * 60 * 60);
  const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
-@@ -17,7 +17,7 @@ const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+ const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
++const GITHUB_CACHE_FORMAT: u32 = 2;
  
  #[derive(Deserialize)]
  struct GithubRow {
@@ -20,7 +21,7 @@ index 4d97061..c9e289f 100644
      name: String,
      full_name: String,
      url: String,
-@@ -26,13 +26,19 @@ struct GithubRow {
+@@ -26,13 +27,19 @@ struct GithubRow {
      curse_id: String,
      wago_id: String,
      wowi_id: String,
@@ -41,7 +42,7 @@ index 4d97061..c9e289f 100644
              && r.url.strip_prefix("https://github.com/") == Some(r.full_name.as_str())
              && crate::sources::parse_github_repo(&r.full_name).as_deref() == Some(&r.full_name)),
          "Invalid GitHub add-on catalogue");
-@@ -50,6 +56,9 @@ fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<Cata
+@@ -50,12 +57,17 @@ fn github_entries(rows: &[GithubRow], flavor: crate::flavor::Flavor) -> Vec<Cata
          github: Some(r.full_name.clone()), url: Some(r.url.clone()),
          wowi: r.wowi_id.parse().ok(), curse: r.curse_id.parse().ok(),
          wago: if r.wago_id.is_empty() { None } else { Some(r.wago_id.clone()) },
@@ -51,7 +52,43 @@ index 4d97061..c9e289f 100644
          forever: Some(true), ..Default::default()
      }).collect()
  }
-@@ -195,6 +204,12 @@ pub struct CatalogEntry {
+ 
+ #[derive(Serialize, Deserialize)]
+ struct CachedGithub {
++    format: u32,
++    source_url: String,
+     fetched_at: u64,
+     etag: Option<String>,
+     text: String,
+@@ -134,7 +146,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
+                       path: &std::path::Path, refresh: bool) -> Vec<GithubRow> {
+     let cached = read_cache(path).ok()
+         .and_then(|bytes| serde_json::from_slice::<CachedGithub>(&bytes).ok())
+-        .filter(|c| parse_github(&c.text).is_ok());
++        .filter(|c| c.format == GITHUB_CACHE_FORMAT && c.source_url == url
++            && parse_github(&c.text).is_ok());
+     if !refresh && cached.as_ref().is_some_and(|c|
+         c.fetched_at <= now() && now() - c.fetched_at < GITHUB_TTL.as_secs()) {
+         return parse_github(&cached.unwrap().text).unwrap();
+@@ -147,6 +160,7 @@ async fn github_index(client: &reqwest::Client, url: &str,
+         let response = request.send().await.ok()?;
+         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+             return cached.as_ref().map(|c| CachedGithub {
++                format: GITHUB_CACHE_FORMAT, source_url: url.to_string(),
+                 fetched_at: now(), etag: c.etag.clone(), text: c.text.clone() });
+         }
+         let response = response.error_for_status().ok()?;
+@@ -154,7 +168,8 @@ async fn github_index(client: &reqwest::Client, url: &str,
+             .and_then(|h| h.to_str().ok()).map(str::to_owned);
+         let text = String::from_utf8(read_index(response).await?).ok()?;
+         parse_github(&text).ok()?;
+-        Some(CachedGithub { fetched_at: now(), etag, text })
++        Some(CachedGithub { format: GITHUB_CACHE_FORMAT, source_url: url.to_string(),
++            fetched_at: now(), etag, text })
+     }.await;
+     if let Some(record) = fetched {
+         if let Ok(bytes) = encode_cache(&record) {
+@@ -195,6 +210,12 @@ pub struct CatalogEntry {
      /// and no release.json.
      #[serde(default)]
      pub asset_hint: Option<String>,
@@ -64,7 +101,7 @@ index 4d97061..c9e289f 100644
      /// Top-level AddOns folders the release installs (used to match what's
      /// already on disk to this entry).
      #[serde(default)]
-@@ -499,6 +514,8 @@ mod live_tests {
+@@ -499,6 +520,8 @@ mod live_tests {
      const CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen\n\
          42,Quoted,Owner/Repo,https://github.com/Owner/Repo,\"Comma, \"\"quote\"\"\nand newline\",2026-10-18,\"mainline,mists,bcc,classic,forever\",123,key,7,True,2026-10-18\n\
          43,Other,Owner/Other,https://github.com/Owner/Other,Other,2026-10-18,wrath,,,,False,2026-10-18\n";
@@ -73,16 +110,32 @@ index 4d97061..c9e289f 100644
  
      fn oversized_chunked_server(prefix: String, fill: u8, suffix: &'static str, lying_length: bool)
          -> (String, std::thread::JoinHandle<()>) {
-@@ -548,7 +565,7 @@ mod live_tests {
+@@ -535,6 +558,7 @@ mod live_tests {
+         let github_path = dir.join("github.json");
+         let json_path = dir.join("public.json");
+         let github = serde_json::to_vec(&CachedGithub {
++            format: GITHUB_CACHE_FORMAT, source_url: String::new(),
+             fetched_at: now(), etag: None, text: CSV_FIXTURE.into(),
+         }).unwrap();
+         let public = serde_json::to_vec(&CachedJson {
+@@ -546,10 +570,14 @@ mod live_tests {
+         for lying_length in [false, true] {
+             let (url, server) = oversized_chunked_server(
                  CSV_FIXTURE.replace("42,Quoted", "99,Quoted"), b'\n', "", lying_length);
++            let mut record: CachedGithub = serde_json::from_slice(&github).unwrap();
++            record.source_url = url.clone();
++            let matching_github = serde_json::to_vec(&record).unwrap();
++            std::fs::write(&github_path, &matching_github).unwrap();
              let rows = github_index(&client, &url, &github_path, true).await;
              server.join().unwrap();
 -            assert_eq!(rows[0].id, 42);
+-            assert_eq!(std::fs::read(&github_path).unwrap(), github);
 +            assert_eq!(rows[0].id, "42");
-             assert_eq!(std::fs::read(&github_path).unwrap(), github);
++            assert_eq!(std::fs::read(&github_path).unwrap(), matching_github);
  
              let (url, server) = oversized_chunked_server("[{\"id\":99,\"padding\":\"".into(), b'x', "\"}]", lying_length);
-@@ -597,6 +614,25 @@ mod live_tests {
+             let data = cached_json(&client, &url, &json_path, true, |v| v.is_array()).await.unwrap();
+@@ -597,6 +625,25 @@ mod live_tests {
          assert!(parse_github(&CSV_FIXTURE.replace("Owner/Repo", "../escape")).is_err());
      }
  
@@ -108,7 +161,67 @@ index 4d97061..c9e289f 100644
      #[test]
      fn cache_replacement_preserves_last_good_until_success_and_on_failure() {
          let dir = std::env::temp_dir().join(format!("af-cache-replace-{}", std::process::id()));
-@@ -753,7 +789,10 @@ mod live_tests {
+@@ -626,6 +673,43 @@ mod live_tests {
+         std::fs::remove_dir_all(dir).unwrap();
+     }
+ 
++    #[tokio::test]
++    async fn legacy_or_foreign_github_cache_refreshes_or_uses_bundled_snapshot() {
++        use std::io::{Read, Write};
++        let dir = std::env::temp_dir().join(format!("af-github-cache-source-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("index.json");
++        let legacy = serde_json::json!({
++            "fetched_at": now(), "etag": "\"old\"", "text": CSV_FIXTURE
++        });
++        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
++
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let server = std::thread::spawn(move || {
++            let (mut stream, _) = listener.accept().unwrap();
++            let mut request = [0;4096];
++            let count = stream.read(&mut request).unwrap();
++            assert!(!String::from_utf8_lossy(&request[..count])
++                .to_lowercase().contains("if-none-match"));
++            let body = CSV_FIXTURE.replace("42,Quoted", "99,Quoted");
++            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
++                body.len()).unwrap();
++        });
++        assert_eq!(github_index(&reqwest::Client::new(), &url, &path, false).await[0].id, "99");
++        server.join().unwrap();
++
++        let foreign = serde_json::json!({
++            "format": 1, "source_url": "https://example.invalid/old.csv",
++            "fetched_at": now(), "etag": "\"foreign\"", "text": CSV_FIXTURE
++        });
++        std::fs::write(&path, serde_json::to_vec(&foreign).unwrap()).unwrap();
++        assert_eq!(
++            github_index(&reqwest::Client::new(), "http://127.0.0.1:1", &path, false).await.len(),
++            parse_github(BUNDLED_GITHUB).unwrap().len());
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
+     #[tokio::test]
+     async fn github_cache_uses_ttl_etag_304_stale_and_bundled_fallback() {
+         use std::io::{Read, Write};
+@@ -648,13 +732,13 @@ mod live_tests {
+         });
+         let client = reqwest::Client::new();
+         assert_eq!(github_index(&client, &url, &path, false).await.len(), 2);
+-        assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(), 2);
++        assert_eq!(github_index(&client, &url, &path, false).await.len(), 2);
+         assert_eq!(github_index(&client, &url, &path, true).await.len(), 2);
+         server.join().unwrap();
+         let mut record: CachedGithub = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+         record.fetched_at = 1;
+         std::fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+-        assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(), 2);
++        assert_eq!(github_index(&client, &url, &path, false).await.len(), 2);
+         std::fs::remove_file(&path).unwrap();
+         assert_eq!(github_index(&client, "http://127.0.0.1:1", &path, false).await.len(),
+             parse_github(BUNDLED_GITHUB).unwrap().len());
+@@ -753,7 +837,10 @@ mod live_tests {
                  let source = entry.github.as_ref().map(|r| Source::Github(r.clone()))
                      .or_else(|| entry.tukui.as_ref().map(|s| Source::Tukui(s.clone()))).unwrap();
                  let remote = crate::sources::resolve(&client, &source,
