@@ -315,10 +315,11 @@ remain in force.
   buffer 8 MiB per Wine write, while extraction writes whole files up to
   64 MiB or 4 MiB chunks without a seek-invalidated large read buffer. The menu
   polls download/unpack progress with a 15-second response deadline. Removal
-  hides folders through same-parent renames. Trash cleanup runs in bounded
-  slices only while no catalogue/mutation request is active or waiting; crash
-  leftovers resume under the same idle gate on the next start. Title mutations
-  allow 30 minutes.
+  only hides folders through same-parent renames and writes a completion marker.
+  The native maintenance parent later removes completed trash outside Wine,
+  one no-follow entry at a time with 5-ms pacing; it resumes completed crash
+  leftovers on the next start. Markerless partial renames are rolled back by
+  AddonForge. Title mutations allow 30 minutes.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,

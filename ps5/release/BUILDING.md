@@ -585,11 +585,13 @@ Classic Era failure is not established.
   download percentage and unpacked file counts to the title; its 15-second poll
   deadline avoids abandoning delayed loopback responses during heavy I/O.
   Removing an add-on atomically renames its folders into hidden
-  `.addonforge-tmp/trash-*` and returns immediately. Reclamation checks an
-  active-or-pending operation counter between every file, runs in bounded
-  20-ms slices, and resumes crash-left trash through the same idle-only worker
-  on the next start. A replacement install is never removed or blocked. The
-  title allows 30 minutes for mutations.
+  `.addonforge-tmp/trash-*`, writes `.complete`, and returns immediately;
+  AddonForge never unlinks completed trash. The native maintenance parent
+  waits for the marker to age five seconds, then removes one no-follow entry
+  at a time with 5-ms pacing and emits one `forever: addon trash deleted`
+  receipt. A title killed mid-delete resumes on the next start. A markerless
+  crash mid-rename is rolled back by AddonForge recovery; a replacement install
+  is preserved. The title allows 30 minutes for mutations.
   [WoWInterface v4 filelist](https://api.mmoui.com/v4/game/WOW/filelist.json) and
   [Tukui v1 addons](https://api.tukui.org/v1/addons) are secondary indexes,
   cached for six hours with last-good fallback. WoWInterface downloads use
@@ -644,10 +646,10 @@ Classic Era failure is not established.
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
   The 0009 receipt pins patch SHA-256
-  `6a71ea53913e666a741cdbfb801d087649cfaca37b401ff9e1fb655d0268d19e`.
+  `e4e295be548e00277736aa3e8cf51f368746eef8c70c07fd27334f94bbe787ac`.
   Both cold Windows builds produced
-  `e51da5bf861d92a37806c2d6c4c13d0e1cb5f8999b392042dc97f63019aaa2bb`
-  (3,438,592 bytes). Forever's customized snapshot contains 2,674 rows,
+  `4ece1d1ec0f85858e59389e24a08a3a3ca095e1c0e2f14d8e09349e12803f9de`
+  (3,441,664 bytes). Forever's customized snapshot contains 2,674 rows,
   is 741,153 bytes, and has SHA-256
   `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
   All 48 enabled offline headless Rust tests passed; the live endpoint/archive
