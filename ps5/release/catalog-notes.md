@@ -15,8 +15,15 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 - **Exit Battle.net** at the bottom of the Forever menu closes Battle.net properly and returns to the PS5 home screen, after a confirmation (Cancel is the default).
 - **Invert mouse scroll** in the Forever menu reverses the USB mouse wheel. It is on by default; touchpad and stick scrolling are unchanged.
 - Fixes a rare crash during Battle.net start-up when one of its processes ended at an unlucky moment.
-- The add-on list is now our own, refreshed daily, and includes the newest Forever add-ons.
+- Battle.net's installer now continues automatically past its fixed install-location page, and its download follows web redirects itself, so a fresh install needs no controller input at that step.
 - If Battle.net is reinstalled, Classic Era and Anniversary may need **Update** or **Scan and Repair** in Battle.net once before they start again.
+
+**Add-ons: our own list, faster installs, instant removal.**
+
+- The add-on list is now Forever's own, refreshed daily, with 408 Forever entries. Find and Starter packs include the Polestar, Lore Forever and Spoken packs, and each pack can be updated by itself.
+- Large add-on installs are much faster: Lore Forever installs in about 2-3 minutes instead of more than 10.
+- Installs and updates show progress text (download percentage and unpacked files).
+- Removing an add-on is instant. The leftover files are deleted in the background once the Add-ons page is closed, and reopening the page pauses that cleanup.
 
 ### Forever Launcher 01.000.015
 

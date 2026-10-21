@@ -39,6 +39,13 @@ or work online.
   returns to the PS5 home screen, after a confirmation.
 - **Invert mouse scroll** (on by default) reverses the USB mouse wheel.
 - Fixes a rare crash during Battle.net start-up.
+- **Own add-on list:** refreshed daily, with 408 Forever entries; Find and
+  Starter packs include the Polestar, Lore Forever and Spoken packs, and each
+  pack can be updated by itself.
+- **Faster large add-on installs** (Lore Forever in about 2-3 minutes instead
+  of more than 10), with progress text while installing.
+- **Instant add-on removal:** leftovers are deleted in the background while the
+  Add-ons page is closed.
 
 01.000.015 added **Voice-to-Text for WoW chat**: turn it on in the Forever
 menu, then hold the touchpad in WoW and speak. See [Controls](#controls).
