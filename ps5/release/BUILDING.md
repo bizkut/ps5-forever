@@ -579,9 +579,12 @@ Classic Era failure is not established.
   Catalogue release timestamps feed Find's Last update field directly. Generated
   descriptions use ASCII separators, while unsupported third-party glyphs are
   rendered as spaces instead of question marks. Add-on downloads retain the
-  4 GiB safety cap but buffer 8 MiB before writing through Wine; ZIP reads use
-  the same buffer. A pollable operation status reports download percentage and
-  unpacked file counts to the title. Removing an add-on atomically renames its
+  4 GiB safety cap but buffer 8 MiB before writing through Wine. ZIP extraction
+  avoids a seek-invalidated large read buffer and writes each decompressed file
+  once up to 64 MiB, then in 4 MiB chunks. A pollable operation status reports
+  download percentage and unpacked file counts to the title; its 15-second poll
+  deadline avoids abandoning delayed loopback responses during heavy I/O.
+  Removing an add-on atomically renames its
   folders into hidden `.addonforge-tmp/trash-*`, returns immediately, and
   deletes in the background; startup removes crash-left trash without touching
   a replacement install. The title allows 30 minutes for mutations.
@@ -639,13 +642,13 @@ Classic Era failure is not established.
   Forever 115. These include catalogue information rows; only the starter
   entries and named smoke downloads received real-archive qualification.
   The 0009 receipt pins patch SHA-256
-  `039436834a3276ef76fb37c64fb1f76c005f94f7da3775bfae23655cf5a2aeaf`.
+  `d6cc25953f8bc2054fd2f923ff14320d191b901e72cef1b81f96a501890d79b0`.
   Both cold Windows builds produced
-  `3029c248148d5bcffe6c327dfcc50abf995677fe8e2c1e85d679086dd461bb07`
-  (3,445,248 bytes). Forever's customized snapshot contains 2,674 rows,
+  `148284d658d23e80a5da4db49ed312baa7778f036ff8df4ef911cd4366c38056`
+  (3,432,960 bytes). Forever's customized snapshot contains 2,674 rows,
   is 741,153 bytes, and has SHA-256
   `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
-  All 46 enabled offline headless Rust tests passed; the live endpoint/archive
+  All 48 enabled offline headless Rust tests passed; the live endpoint/archive
   qualification remains separately opt-in.
   The C client test passed a >512 KiB, 3,000-row catalogue, searches for rows
   129 and 2,999, and explicit overflow rejection. Menu and desktop-surface

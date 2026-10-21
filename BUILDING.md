@@ -312,10 +312,11 @@ remain in force.
   release stream; old layday-format rows remain valid. Cache records bind their
   format and source URL, so upgrades reject fresh legacy/foreign cache data and
   fall back to this bundled snapshot if immediate refresh fails. Downloads
-  buffer 8 MiB per Wine write, publish percentage/unpack progress to the menu,
-  and retain a 4 GiB cap. Removal hides folders through same-parent renames and
-  reclaims hidden trash in the background or on the next start. Title mutations
-  allow 30 minutes for large audio packs.
+  buffer 8 MiB per Wine write, while extraction writes whole files up to
+  64 MiB or 4 MiB chunks without a seek-invalidated large read buffer. The menu
+  polls download/unpack progress with a 15-second response deadline. Removal
+  hides folders through same-parent renames and reclaims hidden trash in the
+  background or on the next start. Title mutations allow 30 minutes.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,
