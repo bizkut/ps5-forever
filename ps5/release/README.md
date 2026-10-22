@@ -27,25 +27,20 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.016
+## What's new in 01.000.017
 
-- **Faster Battle.net installs:** reinstalling Battle.net took about 3 minutes
-  instead of 12 on a test console.
-- **Faster Blizzard game downloads:** downloads of every Blizzard game now
-  combine small disk writes, not only WoW's.
-- **Automatic Battle.net setup:** Forever Launcher accepts Blizzard's fixed
-  Battle.net install location when the installer is ready.
-- **Exit Battle.net** at the bottom of the Forever menu closes Battle.net and
-  returns to the PS5 home screen, after a confirmation.
-- **Invert mouse scroll** (on by default) reverses the USB mouse wheel.
-- Fixes a rare crash during Battle.net start-up.
-- **Own add-on list:** refreshed daily, with 408 Forever entries; Find and
-  Starter packs include the Polestar, Lore Forever and Spoken packs, and each
-  pack can be updated by itself.
-- **Faster large add-on installs** (Lore Forever in about 2-3 minutes instead
-  of more than 10), with progress text while installing.
-- **Instant add-on removal:** leftovers are deleted in the background while the
-  Add-ons page is closed.
+- **More Spoken audio packs:** Find now includes **Spoken Zones Audio (All)**
+  and **Spoken Zones Audio (Portuguese)** for English and Brazilian Portuguese
+  place narration.
+- **Complete GitHub release discovery:** add-ons can install from release
+  streams older than a repository's first 100 releases. Forever follows every
+  release page until it finds the requested stream.
+- GitHub API, connection and malformed-response errors remain visible instead
+  of silently installing the wrong release.
+
+01.000.016 made Battle.net installs and Blizzard game downloads faster, added
+automatic Battle.net setup and Exit Battle.net, and introduced Forever's own
+daily-refreshed add-on list with faster installs and background removal.
 
 01.000.015 added **Voice-to-Text for WoW chat**: turn it on in the Forever
 menu, then hold the touchpad in WoW and speak. See [Controls](#controls).

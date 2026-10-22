@@ -6,6 +6,14 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.017
+
+**More Spoken audio packs and complete GitHub add-on release discovery.**
+
+- Find now includes **Spoken Zones Audio (All)** and **Spoken Zones Audio (Portuguese)** for English and Brazilian Portuguese place narration.
+- Add-ons can now install from release streams older than a GitHub repository's first 100 releases. Forever follows every release page until it finds the requested stream.
+- GitHub API, connection and malformed-response errors remain visible instead of silently installing the wrong release.
+
 ### Forever Launcher 01.000.016
 
 **Faster Battle.net installs and Blizzard game downloads.**
