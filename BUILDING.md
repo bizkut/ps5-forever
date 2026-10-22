@@ -311,8 +311,12 @@ remain in force.
   columns keep monorepo and multi-pack installs and updates on their selected
   release stream; old layday-format rows remain valid. Cache records bind their
   format and source URL, so upgrades reject fresh legacy/foreign cache data and
-  fall back to this bundled snapshot if immediate refresh fails. Downloads
-  buffer 8 MiB per Wine write, while extraction writes whole files up to
+  fall back to this bundled snapshot if immediate refresh fails.
+  Tag-prefix resolution walks GitHub REST releases in order using 100 releases
+  per page, stops at the first eligible match or a short/empty page, and caps
+  traversal at 1,000 pages. API/transport errors and the safety cap are reported
+  separately from exhaustive no-stream results; neither falls back to latest.
+  Downloads buffer 8 MiB per Wine write, while extraction writes whole files up to
   64 MiB or 4 MiB chunks without a seek-invalidated large read buffer. The menu
   polls download/unpack progress with a 15-second response deadline. Removal
   only hides folders through same-parent renames and writes a completion marker.

@@ -1171,10 +1171,9 @@ index f6ead3d..4557c55 100644
      fn shutdown_waits_for_the_active_mutation_boundary() {
          let runtime = tokio::runtime::Runtime::new().unwrap();
 diff --git a/src-tauri/src/sources/github.rs b/src-tauri/src/sources/github.rs
-index da12c12..c3c33d8 100644
 --- a/src-tauri/src/sources/github.rs
 +++ b/src-tauri/src/sources/github.rs
-@@ -37,7 +37,7 @@ struct Meta {
+@@ -37,7 +37,7 @@
      interface: u32,
  }
  
@@ -1183,7 +1182,7 @@ index da12c12..c3c33d8 100644
  struct ApiRelease {
      #[serde(default)]
      tag_name: String,
-@@ -49,7 +49,7 @@ struct ApiRelease {
+@@ -49,7 +49,7 @@
      assets: Vec<ApiAsset>,
  }
  
@@ -1192,7 +1191,7 @@ index da12c12..c3c33d8 100644
  struct ApiAsset {
      name: String,
      browser_download_url: String,
-@@ -100,13 +100,48 @@ fn pick_asset<'a>(zips: &'a [&'a ApiAsset], asset_hint: Option<&str>,
+@@ -100,13 +100,48 @@
          } else { None })
  }
  
@@ -1242,7 +1241,7 @@ index da12c12..c3c33d8 100644
      if let Some(rj_asset) = rel.assets.iter().find(|a| a.name == "release.json") {
          if let Ok(resp) = client.get(&rj_asset.browser_download_url).send().await {
              if resp.status().is_success() {
-@@ -127,6 +162,7 @@ async fn from_api_release(
+@@ -127,6 +162,7 @@
              }
          }
      }
@@ -1250,7 +1249,7 @@ index da12c12..c3c33d8 100644
      let zips: Vec<&ApiAsset> = rel
          .assets
          .iter()
-@@ -135,8 +171,12 @@ async fn from_api_release(
+@@ -135,8 +171,12 @@
      if zips.is_empty() {
          anyhow::bail!("release {} has no zip asset", rel.tag_name);
      }
@@ -1265,7 +1264,41 @@ index da12c12..c3c33d8 100644
      Ok(Remote {
          version: rel.tag_name.clone(),
          download_url: pick.browser_download_url.clone(),
-@@ -158,14 +198,15 @@ pub async fn resolve(
+@@ -154,39 +194,60 @@
+     }
+ }
+ 
++// Bound work even if a server keeps returning full pages; REST permits 100 per page.
++const MAX_RELEASE_PAGES: usize = 1_000;
++
++async fn stream_release(
++    client: &reqwest::Client, api: &str, tag_prefix: Option<&str>, prerelease: bool,
++) -> anyhow::Result<ApiRelease> {
++    for page in 1..=MAX_RELEASE_PAGES {
++        let resp = client.get(format!("{api}?per_page=100&page={page}"))
++            .header("Accept", "application/vnd.github+json")
++            .send().await.map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?;
++        let status = resp.status();
++        if status.as_u16() == 403 || status.as_u16() == 429 {
++            anyhow::bail!("GitHub API rate limit hit on page {page}; try again in an hour");
++        }
++        let list: Vec<ApiRelease> = resp.error_for_status()
++            .map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?
++            .json().await.map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?;
++        let exhausted = list.len() < 100;
++        if let Some(release) = pick_release(&list, tag_prefix, prerelease) {
++            return Ok(release.clone());
++        }
++        // Non-stream prerelease resolution retains its existing single-page behavior.
++        if exhausted || tag_prefix.is_none() {
++            anyhow::bail!("no GitHub release in tag stream {}", tag_prefix.unwrap_or("latest"));
++        }
++    }
++    anyhow::bail!("GitHub API pagination limit ({MAX_RELEASE_PAGES} pages) reached for tag stream {}",
++        tag_prefix.unwrap_or("latest"))
++}
++
+ pub async fn resolve(
      client: &reqwest::Client,
      repo: &str,
      asset_hint: Option<&str>,
@@ -1279,32 +1312,33 @@ index da12c12..c3c33d8 100644
 -    if prerelease {
 -        // Newest release including pre-releases (one API call).
 -        let api = format!("https://api.github.com/repos/{repo}/releases?per_page=5");
-+    if prerelease || release_tag_prefix.is_some() {
-+        let api = format!("https://api.github.com/repos/{repo}/releases?per_page=100");
-         let resp = client
-             .get(&api)
-             .header("Accept", "application/vnd.github+json")
-@@ -175,18 +216,20 @@ pub async fn resolve(
-             return Err(e);
-         }
-         let list: Vec<ApiRelease> = resp.error_for_status()?.json().await?;
+-        let resp = client
+-            .get(&api)
+-            .header("Accept", "application/vnd.github+json")
+-            .send()
+-            .await?;
+-        if let Some(e) = api_error(resp.status().as_u16(), repo) {
+-            return Err(e);
+-        }
+-        let list: Vec<ApiRelease> = resp.error_for_status()?.json().await?;
 -        let rel = list
 -            .into_iter()
 -            .find(|r| !r.draft && !r.assets.is_empty())
 -            .ok_or_else(|| anyhow::anyhow!("no GitHub release with files for {repo}"))?;
 -        return from_api_release(client, rel, asset_hint, flavor).await;
-+        let rel = pick_release(&list, release_tag_prefix, prerelease)
-+            .ok_or_else(|| anyhow::anyhow!(
-+                "no GitHub release in tag stream {}", release_tag_prefix.unwrap_or("latest")))?
-+            .to_owned();
-+        return from_api_release(client, rel, asset_hint, asset_name_pattern, flavor).await;
-     }
- 
+-    }
+-
 -    let base = format!("https://github.com/{repo}/releases/latest/download/");
 -    let resp = client.get(format!("{base}release.json")).send().await?;
 -    if resp.status().is_success() {
 -        let rj: ReleaseJson = resp.json().await?;
 -        return pick_from_release_json(rj, |name| format!("{base}{name}"), false, flavor);
++    if prerelease || release_tag_prefix.is_some() {
++        let api = format!("https://api.github.com/repos/{repo}/releases");
++        let rel = stream_release(client, &api, release_tag_prefix, prerelease).await?;
++        return from_api_release(client, rel, asset_hint, asset_name_pattern, flavor).await;
++    }
++
 +    if asset_name_pattern.is_none() {
 +        let base = format!("https://github.com/{repo}/releases/latest/download/");
 +        let resp = client.get(format!("{base}release.json")).send().await?;
@@ -1315,7 +1349,7 @@ index da12c12..c3c33d8 100644
      }
  
      // No release.json: ask the API for the latest release's assets.
-@@ -200,7 +243,7 @@ pub async fn resolve(
+@@ -200,7 +261,7 @@
          return Err(e);
      }
      let rel: ApiRelease = resp.error_for_status()?.json().await?;
@@ -1324,10 +1358,11 @@ index da12c12..c3c33d8 100644
  }
  
  #[cfg(test)]
-@@ -242,4 +285,34 @@ mod tests {
+@@ -242,4 +303,150 @@
          ]})).unwrap();
          assert!(pick_from_release_json(only_wrong, str::to_string, false, Flavor::Retail).is_err());
      }
+-}
 +    #[test]
 +    fn exact_or_single_wildcard_asset_patterns_are_anchored_and_unambiguous() {
 +        assert!(asset_pattern_matches("LoreForever.zip", "LoreForever.zip"));
@@ -1358,7 +1393,123 @@ index da12c12..c3c33d8 100644
 +            "quests-audio/v2");
 +        assert!(pick_release(&releases, Some("spoken/"), true).is_none());
 +    }
- }
++
++    fn release_page(tag: &str, count: usize) -> String {
++        serde_json::to_string(&vec![serde_json::json!({
++            "tag_name": tag, "draft": false, "prerelease": false,
++            "assets": [{"name":"Addon.zip", "browser_download_url":"https://example.org/Addon.zip"}]
++        }); count]).unwrap()
++    }
++
++    async fn serve_pages(pages: Vec<(u16, String)>) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
++        use std::io::{Read, Write};
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        listener.set_nonblocking(true).unwrap();
++        let url = format!("http://{}/releases", listener.local_addr().unwrap());
++        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
++        let seen = requests.clone();
++        std::thread::spawn(move || {
++            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
++            let mut pages = pages.into_iter();
++            while std::time::Instant::now() < deadline {
++                match listener.accept() {
++                    Ok((mut socket, _)) => {
++                        socket.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
++                        let mut bytes = Vec::new();
++                        let mut byte = [0];
++                        while !bytes.ends_with(b"\r\n\r\n") {
++                            if socket.read(&mut byte).unwrap_or(0) == 0 { break; }
++                            bytes.push(byte[0]);
++                        }
++                        seen.lock().unwrap().push(String::from_utf8(bytes).unwrap().lines().next().unwrap().to_string());
++                        let (status, body) = pages.next().unwrap_or((500, "unexpected page".into()));
++                        write!(socket, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
++                    }
++                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(1)),
++                    Err(_) => break,
++                }
++            }
++        });
++        (url, requests)
++    }
++
++    #[tokio::test]
++    async fn pagination_finds_stream_on_page_two() {
++        let (api, requests) = serve_pages(vec![(200, release_page("manager/v9", 100)),
++            (200, release_page("places/v2", 1))]).await;
++        let rel = stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap();
++        assert_eq!(rel.tag_name, "places/v2");
++        assert_eq!(*requests.lock().unwrap(), [
++            "GET /releases?per_page=100&page=1 HTTP/1.1",
++            "GET /releases?per_page=100&page=2 HTTP/1.1"]);
++    }
++
++    #[tokio::test]
++    async fn pagination_stops_on_first_match() {
++        let (api, requests) = serve_pages(vec![(200, release_page("places/v1", 100))]).await;
++        assert_eq!(stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap().tag_name, "places/v1");
++        assert_eq!(requests.lock().unwrap().len(), 1);
++    }
++
++    #[tokio::test]
++    async fn pagination_exhaustion_and_api_failures_are_distinct() {
++        for tail in [release_page("manager/v1", 1), "[]".into()] {
++            let (api, requests) = serve_pages(vec![(200, release_page("manager/v2", 100)), (200, tail)]).await;
++            let error = stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap_err().to_string();
++            assert!(error.contains("no GitHub release in tag stream places/"), "{error}");
++            assert_eq!(requests.lock().unwrap().len(), 2);
++        }
++        for status in [403, 404, 429, 500] {
++            let (api, requests) = serve_pages(vec![(200, release_page("manager/v2", 100)), (status, "{}".into())]).await;
++            let error = stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap_err().to_string();
++            assert!(error.contains("GitHub API"), "{error}");
++            assert!(!error.contains("no GitHub release in tag stream"), "{error}");
++            assert_eq!(requests.lock().unwrap().len(), 2);
++        }
++    }
++
++    #[tokio::test]
++    async fn pagination_is_bounded() {
++        let (api, requests) = serve_pages(vec![(200, release_page("manager/v2", 100)); MAX_RELEASE_PAGES]).await;
++        let error = stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap_err().to_string();
++        assert!(error.contains("pagination limit"), "{error}");
++        assert_eq!(requests.lock().unwrap().len(), MAX_RELEASE_PAGES);
++    }
++
++    #[tokio::test]
++    async fn pagination_preserves_eligibility_and_asset_selection() {
++        let mut page: Vec<serde_json::Value> = serde_json::from_str(&release_page("places/v3", 100)).unwrap();
++        for release in &mut page { release["draft"] = true.into(); }
++        page[0]["draft"] = false.into();
++        page[0]["prerelease"] = true.into();
++        page[1]["draft"] = false.into();
++        page[1]["assets"] = serde_json::json!([]);
++        let (api, requests) = serve_pages(vec![(200, serde_json::to_string(&page).unwrap()),
++            (200, release_page("places/v1", 1))]).await;
++        let client = reqwest::Client::new();
++        let rel = stream_release(&client, &api, Some("places/"), false).await.unwrap();
++        let remote = from_api_release(&client, rel, None, Some("Addon.zip"), Flavor::Retail).await.unwrap();
++        assert_eq!(remote.version, "places/v1");
++        assert_eq!(remote.filename, "Addon.zip");
++        assert_eq!(requests.lock().unwrap().len(), 2);
++        let (api, requests) = serve_pages(vec![(200, serde_json::to_string(&page).unwrap())]).await;
++        assert!(stream_release(&client, &api, Some("places/"), true).await.unwrap().prerelease);
++        assert_eq!(requests.lock().unwrap().len(), 1);
++        let (api, requests) = serve_pages(vec![(200, release_page("manager/v1", 100))]).await;
++        assert_eq!(stream_release(&client, &api, None, true).await.unwrap().tag_name, "manager/v1");
++        assert_eq!(requests.lock().unwrap().len(), 1);
++    }
++
++    #[tokio::test]
++    async fn pagination_reports_transport_failure() {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let api = format!("http://{}/releases", listener.local_addr().unwrap());
++        drop(listener);
++        let error = stream_release(&reqwest::Client::new(), &api, Some("places/"), false).await.unwrap_err().to_string();
++        assert!(error.contains("GitHub API page 1"), "{error}");
++        assert!(!error.contains("no GitHub release in tag stream"), "{error}");
++    }
++}
 diff --git a/src-tauri/src/sources/mod.rs b/src-tauri/src/sources/mod.rs
 index 40bed0c..911560d 100644
 --- a/src-tauri/src/sources/mod.rs
