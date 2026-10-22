@@ -549,8 +549,8 @@ Classic Era failure is not established.
   CSV parsing uses the maintained `csv` crate, including quoted commas,
   doubled quotes and multiline descriptions. Exact comma-separated flavour
   tokens map `mainline/bcc/classic/mists/forever` to the selected channel;
-  repositories deduplicate case-insensitively against the existing Forever
-  catalogue while preserving its stable IDs and folder mappings.
+  entries deduplicate against the existing Forever catalogue only when their
+  stable IDs match or their repository and release selectors identify one stream.
   GitHub resolution continues to prefer the packager's `release.json`
   flavour/interface metadata, falling back to the existing tagged-asset logic.
   The runtime GitHub cache has a 24-hour TTL, conditional `If-None-Match`/304
@@ -572,6 +572,9 @@ Classic Era failure is not established.
   never cross tag streams; folder-first reconciliation attaches hand-installed
   copies to the matching row even when several rows share one repository.
   Exact asset rows also separate distinct add-ons published in one release.
+- `0010-distinct-github-release-streams.patch` deduplicates GitHub rows only
+  when both repository and release selectors match, so independently packaged
+  add-ons from one repository remain separate Find entries.
   GitHub cache records include format `2` and their source URL. Legacy records
   or records from another catalogue endpoint are never treated as fresh or as
   stale fallback data: the core refreshes immediately and uses the bundled

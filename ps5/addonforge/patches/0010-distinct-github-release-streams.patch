@@ -1,0 +1,77 @@
+diff --git a/src-tauri/src/catalog.rs b/src-tauri/src/catalog.rs
+index 7732a53..2050d92 100644
+--- a/src-tauri/src/catalog.rs
++++ b/src-tauri/src/catalog.rs
+@@ -419,6 +419,13 @@ fn public_entries(wowi: &serde_json::Value, tukui: &serde_json::Value,
+     entries
+ }
+ 
++fn same_github_release_stream(left: &CatalogEntry, right: &CatalogEntry) -> bool {
++    left.github.as_ref().is_some_and(|repo|
++        right.github.as_ref().is_some_and(|other| repo.eq_ignore_ascii_case(other)))
++        && left.release_tag_prefix == right.release_tag_prefix
++        && left.asset_name_pattern == right.asset_name_pattern
++}
++
+ /// Small author-release pointers verified for every supported family by the
+ /// live qualification test. Resolution and archive admission still recheck
+ /// the selected flavour at install/update time.
+@@ -456,8 +463,7 @@ fn compose(flavor: crate::flavor::Flavor, mut cat: Catalog,
+     }
+     for entry in public {
+         if let Some(existing) = cat.addons.iter_mut().find(|e|
+-            e.id == entry.id || (entry.github.as_ref().is_some_and(|repo|
+-                e.github.as_ref().is_some_and(|other| repo.eq_ignore_ascii_case(other))))
++            e.id == entry.id || same_github_release_stream(e, &entry)
+                 || (entry.github.is_none() && entry.wowi.is_some() && e.wowi == entry.wowi)
+                 || (entry.tukui.is_some() && e.tukui == entry.tukui)) {
+             if existing.id.starts_with("tukui-") { *existing = entry; }
+@@ -527,6 +533,10 @@ mod live_tests {
+         43,Other,Owner/Other,https://github.com/Owner/Other,Other,2026-10-18,wrath,,,,False,2026-10-18\n";
+     const EXTENDED_CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen,release_tag_prefix,asset_name_pattern,folders\n\
+         42:quests-audio,Spoken Quests Audio (All),Owner/Repo,https://github.com/Owner/Repo,Audio,2026-10-18,forever,,,,False,2026-10-18,quests-audio/,SpokenQuestsAudioAll-2.4.0.zip,\"SpokenQuestsAudioAlliance,SpokenQuestsAudioHorde\"\n";
++    const MULTI_STREAM_CSV_FIXTURE: &str = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen,release_tag_prefix,asset_name_pattern,folders\n\
++        1360371543:spoken,Spoken,rusty-key/spoken-wow,https://github.com/rusty-key/spoken-wow,Core,2026-10-18,forever,,,,False,2026-10-18,spoken/,Spoken-*.zip,Spoken\n\
++        1360371543:zones-audio,Spoken Zones Audio (All),rusty-key/spoken-wow,https://github.com/rusty-key/spoken-wow,English places,2026-10-18,forever,,,,False,2026-10-18,zones-audio/,SpokenZonesAudio-*.zip,SpokenZonesAudio\n\
++        1360371543:zones-audio-ptbr,Spoken Zones Audio (Portuguese),rusty-key/spoken-wow,https://github.com/rusty-key/spoken-wow,Portuguese places,2026-10-18,forever,,,,False,2026-10-18,zones-audio-ptBR/,SpokenZonesAudio_ptBR-*.zip,SpokenZonesAudio_ptBR\n";
+ 
+     fn oversized_chunked_server(prefix: String, fill: u8, suffix: &'static str, lying_length: bool)
+         -> (String, std::thread::JoinHandle<()>) {
+@@ -630,6 +640,37 @@ mod live_tests {
+         assert!(parse_github(&CSV_FIXTURE.replace("Owner/Repo", "../escape")).is_err());
+     }
+ 
++    #[test]
++    fn compose_keeps_distinct_release_streams_from_one_github_repository() {
++        let rows = parse_github(MULTI_STREAM_CSV_FIXTURE).unwrap();
++        let cat = compose(
++            Flavor::Forever,
++            Catalog::default(),
++            github_entries(&rows, Flavor::Forever),
++        );
++        let streams: Vec<_> = cat
++            .addons
++            .iter()
++            .filter(|entry| entry.github.as_deref() == Some("rusty-key/spoken-wow"))
++            .collect();
++        assert_eq!(streams.len(), 3);
++        assert_eq!(
++            streams.iter().map(|entry| entry.id.as_str()).collect::<Vec<_>>(),
++            [
++                "gh-1360371543:spoken",
++                "gh-1360371543:zones-audio",
++                "gh-1360371543:zones-audio-ptbr",
++            ],
++        );
++        assert_eq!(
++            streams
++                .iter()
++                .map(|entry| entry.release_tag_prefix.as_deref())
++                .collect::<Vec<_>>(),
++            [Some("spoken/"), Some("zones-audio/"), Some("zones-audio-ptBR/")],
++        );
++    }
++
+     #[test]
+     fn extended_csv_selectors_and_folders_round_trip_while_old_rows_default_empty() {
+         let old = github_entries(&parse_github(CSV_FIXTURE).unwrap(), Flavor::Forever);

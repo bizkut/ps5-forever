@@ -301,8 +301,8 @@ remain in force.
   token, final-channel mapping and behavioural tests; the upstream checkout is
   copied before patching and is never modified.
 - CI uses the committed `ps5/addonforge/github-catalogue.csv` snapshot, not a
-  live fetch: 741,153 bytes, 2,674 rows, SHA-256
-  `978f054c1633c72bd6fde6e5866a42fd064cde5ac0b7493aae0ae65b9ff0b018`.
+  live fetch: 750,358 bytes, 2,699 rows, SHA-256
+  `e25e6521ef0e2e8db05965abe95b12c05d92a06add4f74b220434ca28db9a590`.
   It is compiled into the core and packaged as
   `wine-title/addonforge/github-catalogue.csv`; runtime refreshes remain separate.
 - `0009-own-catalogue-release-streams.patch` uses Forever's daily-refreshed
@@ -316,6 +316,9 @@ remain in force.
   per page, stops at the first eligible match or a short/empty page, and caps
   traversal at 1,000 pages. API/transport errors and the safety cap are reported
   separately from exhaustive no-stream results; neither falls back to latest.
+  `0010-distinct-github-release-streams.patch` deduplicates GitHub rows only
+  when both repository and release selectors match, so independently packaged
+  add-ons from one repository remain separate Find entries.
   Downloads buffer 8 MiB per Wine write, while extraction writes whole files up to
   64 MiB or 4 MiB chunks without a seek-invalidated large read buffer. The menu
   polls download/unpack progress with a 15-second response deadline. Removal
