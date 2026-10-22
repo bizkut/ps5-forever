@@ -6,6 +6,15 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.018
+
+**Fixes missing multi-pack add-ons in Find.**
+
+- Repositories that publish several independent add-ons now keep every release stream instead of showing only the first one.
+- Spoken Books, Quests and Zones audio packs appear as separate Find entries, including **Spoken Zones Audio (All)** and **Spoken Zones Audio (Portuguese)**.
+- Includes complete GitHub release pagination from 01.000.017, so older release streams install without silently selecting the wrong release.
+- 01.000.017 was superseded before its homebrew-catalog submission after native testing found the same-repository listing bug.
+
 ### Forever Launcher 01.000.017
 
 **More Spoken audio packs and complete GitHub add-on release discovery.**

@@ -27,23 +27,23 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.017
+## What's new in 01.000.018
 
-- **More Spoken audio packs:** Find now includes **Spoken Zones Audio (All)**
-  and **Spoken Zones Audio (Portuguese)** for English and Brazilian Portuguese
-  place narration.
-- **Complete GitHub release discovery:** add-ons can install from release
-  streams older than a repository's first 100 releases. Forever follows every
-  release page until it finds the requested stream.
-- GitHub API, connection and malformed-response errors remain visible instead
-  of silently installing the wrong release.
+- **Fixes missing multi-pack add-ons in Find:** repositories that publish
+  several independent add-ons now keep every release stream instead of showing
+  only the first one.
+- **Spoken packs are separate again:** Books, Quests and Zones audio packs,
+  including **Spoken Zones Audio (All)** and **Spoken Zones Audio
+  (Portuguese)**, appear as independent Find entries.
+- Add-ons can install from release streams older than a GitHub repository's
+  first 100 releases, with API and connection errors reported instead of
+  silently selecting the wrong release.
 
-01.000.016 made Battle.net installs and Blizzard game downloads faster, added
-automatic Battle.net setup and Exit Battle.net, and introduced Forever's own
-daily-refreshed add-on list with faster installs and background removal.
+01.000.017 was superseded before its store submission: it downloaded the
+correct catalogue but collapsed entries that shared one GitHub repository.
 
-01.000.015 added **Voice-to-Text for WoW chat**: turn it on in the Forever
-menu, then hold the touchpad in WoW and speak. See [Controls](#controls).
+01.000.016 made Battle.net installs and Blizzard game downloads faster and
+introduced Forever's daily-refreshed add-on list.
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 
