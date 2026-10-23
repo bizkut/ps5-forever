@@ -27,23 +27,26 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.018
+## What's new in 01.000.019
 
-- **Fixes missing multi-pack add-ons in Find:** repositories that publish
-  several independent add-ons now keep every release stream instead of showing
-  only the first one.
-- **Spoken packs are separate again:** Books, Quests and Zones audio packs,
-  including **Spoken Zones Audio (All)** and **Spoken Zones Audio
-  (Portuguese)**, appear as independent Find entries.
-- Add-ons can install from release streams older than a GitHub repository's
-  first 100 releases, with API and connection errors reported instead of
-  silently selecting the wrong release.
+- **Fixes Battle.net signature setup failures:** incomplete Wine Trust and PE
+  signature-provider registrations are repaired through normal Wine setup before
+  Battle.net starts. A missing provider now fails closed instead of reporting a
+  false success that breaks Blizzard's follow-up signer check.
+- **Large add-on downloads can finish:** continuously progressing archives get
+  up to 15 minutes, with a 30-second idle limit. Metadata requests retain their
+  shorter timeout and failures now name the download/body/JSON stage.
+- **Polestar is complete:** its core package now installs all 24 folders,
+  including Codex, Guides, Brazilian Portuguese Guides and Names, Item Data,
+  Navigation and the Quest Database. Recorder remains a separate optional pack.
+- **Native add-on staging:** archive hashing, extraction, durability and
+  same-drive activation run in a bounded native worker. Interrupted operations
+  retain their recovery proof; removal cleanup cannot resurrect partial folders.
+- Existing 01.000.018 catalogue caches migrate automatically, so corrected rows
+  appear without deleting files or waiting 24 hours.
 
-01.000.017 was superseded before its store submission: it downloaded the
-correct catalogue but collapsed entries that shared one GitHub repository.
-
-01.000.016 made Battle.net installs and Blizzard game downloads faster and
-introduced Forever's daily-refreshed add-on list.
+01.000.018 restored separate Spoken Books, Quests and Zones release streams and
+complete GitHub release pagination.
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 

@@ -6,6 +6,25 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.019
+
+**Repairs Battle.net signature setup and completes large add-on installs.**
+
+- Incomplete Wine Trust and PE signature-provider registration is repaired
+  through normal Wine setup before Battle.net starts. Verification now fails
+  closed if no provider is registered.
+- Continuously progressing add-on archives may download for up to 15 minutes,
+  with a 30-second idle timeout. Errors identify body-transfer versus JSON
+  failures.
+- Polestar's full package includes all 24 folders, including the requested
+  Brazilian Portuguese and database/navigation modules; Recorder remains a
+  separate optional package.
+- A bounded native worker hashes, extracts, synchronizes and activates add-ons
+  outside Wine. Interrupted install and removal cleanup retains durable recovery
+  proof instead of restoring partial folders.
+- Existing 01.000.018 catalogue caches migrate automatically to the corrected
+  package list.
+
 ### Forever Launcher 01.000.018
 
 **Fixes missing multi-pack add-ons in Find.**
