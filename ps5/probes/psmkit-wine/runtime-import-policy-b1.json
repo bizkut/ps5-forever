@@ -5528,6 +5528,13 @@
       "binding": "strong",
       "module": "wineserver.so",
       "owner": "fself_public_or_platform",
+      "symbol": "ferror",
+      "target": "ferror"
+    },
+    {
+      "binding": "strong",
+      "module": "wineserver.so",
+      "owner": "fself_public_or_platform",
       "symbol": "fflush",
       "target": "fflush"
     },

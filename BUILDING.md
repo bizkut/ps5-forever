@@ -40,7 +40,7 @@ are refused, and the Wine lock must agree with its manifest commit.
 From `ps5-wow`:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.018
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.019
 ```
 
 Source validation and the full host suite run before the SDK and runtime builds.
@@ -72,13 +72,13 @@ The install is `ps5/build/whisper/{include,lib}` and contains `libwhisper.a`,
 After the SDK and RADV outputs exist, rerun just the real release speech stage:
 
 ```sh
-JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.018 --whisper-only
+JOBS=8 bash ps5/release/build-linux.sh /absolute/SOURCE_ROOT 01.000.019 --whisper-only
 ```
 
 This uses the same `build_whisper_cached` function and cache as a full release,
 without running host tests, rebuilding prerequisites, or touching Wine/title
 outputs. It is not runtime qualification. Inside the release container, the
-equivalent entry is `bash ps5/release/build-linux.sh --container 01.000.018 --whisper-only`.
+equivalent entry is `bash ps5/release/build-linux.sh --container 01.000.019 --whisper-only`.
 Both use `PS5_PAYLOAD_SDK=/sources/PS5_Vulkan/.deps/native/ps5-payload-sdk`.
 The underlying `ps5/build-whisper.sh` also supports direct invocation:
 `PS5_WHISPER_BUILD` and `PS5_WHISPER_INSTALL` select empty work/install
@@ -276,6 +276,34 @@ Native acceptance of the exact final `.012` archive is **pending**. These source
 changes do not record a native pass; the C:/W:-only scope and release gates below
 remain in force.
 
+## Prefix signature-provider readiness
+
+- A usable prefix requires the existing hives and timestamp, no in-progress
+  marker, and an exact persistent `.wineboot-trust-ready` proof. Existing
+  prefixes without that versioned proof are repaired in place; user registry,
+  game and settings files are preserved.
+- Title `wineboot -i` performs normal native and Wow64 Wine registration even
+  when the timestamp is current. It requires successful registration children,
+  exact Trust and PE-SIP entries in both registry views, checked server-owned
+  hive saves, and an exact binary transient proof. The native title commits the
+  persistent proof only after Wine and its registry hives have quiesced and the
+  prefix directory is synchronized.
+- `WinVerifyTrust` now returns `TRUST_E_PROVIDER_UNKNOWN` when an action has no
+  verification callbacks instead of reporting success with zero signers. This
+  does not bypass signatures or relax certificate policy.
+- Console `.41` qualification used an isolated disposable prefix. With all 24
+  Trust/PE-SIP registrations removed, the previous path returned
+  `WinVerifyTrust=0` with zero signers and `CryptQueryObject=0x80092009`,
+  reproducing Blizzard's incompatible success-then-no-signer state. The
+  corrected build repaired both views through normal `wineboot`, persisted the
+  exact 25-byte proof after checked hive saves, and accepted the reporter's
+  signed Agent with one signer in both 32- and 64-bit probes. A changed signed
+  byte, unsigned image and truncated image were rejected; an unknown action
+  returned `0x800b0001`. The unchanged 01.000.018 user prefix then migrated in
+  place in 36 seconds and started Battle.net. This verifies the mechanism on
+  `.41`; it is not a claim that the reporter's firmware was tested.
+
+
 ## Forever menu source changes
 
 - The maintenance role links the CPU-composited Forever menu; the headless GPU
@@ -358,6 +386,41 @@ remain in force.
   an in-game add-on test, or a console power-cut qualification. Host regressions
   cover rejected archives, UID isolation, rollback/recovery, cancellation,
   protocol deadlines and serialized request handoff.
+- Add-on metadata retains a 120-second total timeout. Archive bodies use a
+  separate 15-minute total, 30-second read-idle and 15-second connect budget,
+  matching native STORE bounds. Body-transfer, timeout and JSON/schema errors
+  are reported separately; no retry or source substitution is added.
+- Catalogue cache generation `3` invalidates 01.000.018's obsolete package
+  identities once, then retains the 24-hour no-network TTL. The bundled Polestar
+  row is its complete 24-folder release; Recorder is an independent optional
+  asset.
+- In native-title mode, only the native parent cleans completed removal trash.
+  Local/GUI cleanup remains available. Both delete and synchronize payload before
+  removing the root `.complete` marker, so an interrupted removal cannot restore
+  a partially deleted add-on.
+- Production-profile 01.000.019 candidate
+  `c13a770b1b6541a9ed00d8a2aeff350569cbdd215128b2f9193398ff024ce31e`
+  was exercised on console `.41` with the existing 01.000.018 catalogue cache.
+  Generation `3` refreshed to 558 rows and exposed separate Polestar/Recorder
+  rows. The complete Polestar v0.2.6 asset activated all 24 expected folders.
+  Spoken Quests Audio (All) v2.4.0 then crossed the former 120-second body limit
+  without an error:
+
+  | Package | ZIP bytes | Files | Download | Extract | Activate |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Polestar v0.2.6 | 38,395,132 | 447 | 7.114 s | 4.849 s | 0.891 s |
+  | Spoken Quests Audio v2.4.0 | 1,479,238,126 | 14,981 | 164.295 s | 152.552 s | 22.694 s |
+
+  The Spoken operation completed four folders in 361 seconds between core log
+  timestamps; the independent monitor observed 354.017 seconds. Install and
+  update share this archive-body client, but this console run was a fresh
+  installation, not an old-version-to-new-version transition.
+- Removing those 28 test folders left the root completion marker present while
+  the 14,981-file payload was partially deleted. Native cleanup then removed
+  15,499 entries across both committed roots in 380.439 seconds, removed each
+  marker last, and left only the pre-existing HDRTuner plus an empty hidden
+  staging directory. This is a live interruption-state observation and clean
+  resumption, not a console power-cut test.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,

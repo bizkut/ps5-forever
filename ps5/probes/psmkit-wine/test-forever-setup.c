@@ -27,6 +27,8 @@ static dev_t foreign_device;
 static ino_t foreign_inode;
 static int foreign_nlink_zero, denied_rename_error, denied_fsync;
 static unsigned rename_denials, inplace_syncs;
+static const char *denied_unlink, *denied_init_rename;
+static int init_fsync_after = -1;
 
 static int setup_open(const char *name, int flags, ...)
 {
@@ -116,6 +118,11 @@ static int setup_fstat(int fd, struct stat *status)
 
 static int setup_rename(const char *source, const char *destination)
 {
+    if (denied_init_rename && !strcmp(destination, denied_init_rename))
+    {
+        errno = EACCES;
+        return -1;
+    }
     if (foreign_destination && denied_rename_error && !strcmp(destination, foreign_destination))
     {
         ++rename_denials;
@@ -130,8 +137,23 @@ static int setup_rename(const char *source, const char *destination)
     return rename(source, destination);
 }
 
+static int setup_unlink(const char *name)
+{
+    if (denied_unlink && !strcmp(name, denied_unlink))
+    {
+        errno = EACCES;
+        return -1;
+    }
+    return unlink(name);
+}
+
 static int setup_fsync(int fd)
 {
+    if (init_fsync_after >= 0 && !init_fsync_after--)
+    {
+        errno = EIO;
+        return -1;
+    }
     struct stat status;
     if (!fstat(fd, &status) && foreign_destination && status.st_dev == foreign_device &&
         status.st_ino == foreign_inode)
@@ -150,6 +172,7 @@ static int setup_fsync(int fd)
 #define fstat setup_fstat
 #define rename setup_rename
 #define fsync setup_fsync
+#define unlink setup_unlink
 #define FOREVER_MANAGED_CHECK_DEVICE managed_check_device
 #include "forever-setup.h"
 #undef open
@@ -160,6 +183,7 @@ static int setup_fsync(int fd)
 #undef fstat
 #undef rename
 #undef fsync
+#undef unlink
 #undef FOREVER_MANAGED_CHECK_DEVICE
 
 static char root[256];
@@ -215,17 +239,20 @@ static void test_write_if_absent(void)
 
 static void test_prefix_ready(void)
 {
-    char p[1024], stamp[1024];
+    char p[1024], stamp[1024], pending[1024], proof[1024];
     path(p, "ready");
     path(stamp, "ready/.update-timestamp");
+    path(pending, "ready/" FOREVER_INIT_PENDING);
+    path(proof, "ready/" WINE_PS5_PREFIX_TRUST_READY_NAME);
     assert(!forever_prefix_ready(p));
     make_prefix("ready");
+    assert(!forever_prefix_ready(p)); /* legacy hives and stamp are insufficient */
+    put("ready/" WINE_PS5_PREFIX_TRUST_READY_NAME, WINE_PS5_PREFIX_INIT_PROOF);
     assert(forever_prefix_ready(p));
     put("ready/user.reg", "not a registry\n");
     assert(!forever_prefix_ready(p));
 
-    /* first start in an empty folder: every Wine process finds valid hives,
-     * drive_c and a stale stamp, yet the prefix is not ready */
+    /* First start prepares the files Wine requires, but never a positive proof. */
     char fresh[1024], c_drive[1024];
     path(fresh, "fresh/prefix");
     path(c_drive, "fresh/prefix/drive_c");
@@ -239,20 +266,123 @@ static void test_prefix_ready(void)
     assert(text_is("fresh/prefix/.update-timestamp", "1\n"));
     assert(!forever_prefix_ready(fresh));
 
-    /* an interrupted setup keeps its registries and reruns the full install */
+    /* Legacy/interrupted setup repairs in place, preserving all user data. */
     make_prefix("ready");
     put("ready/system.reg", "WINE REGISTRY Version 2\n[Software] 1\n");
+    put("ready/user.reg", "WINE REGISTRY Version 2\n[User sentinel] 123\n");
+    put("ready/drive_c/Games/keep.dat", "game sentinel\n");
+    put("ready/drive_c/wineps5-fg.txt", "fg=off\n");
     assert(!forever_begin_init(p));
     assert(text_is("ready/system.reg", "WINE REGISTRY Version 2\n[Software] 1\n"));
+    assert(text_is("ready/user.reg", "WINE REGISTRY Version 2\n[User sentinel] 123\n"));
     assert(text_is("ready/.update-timestamp", "1\n"));
-    assert(forever_exists(stamp));
+    assert(forever_exists(stamp) && forever_exists(pending) && !forever_exists(proof));
     assert(!forever_prefix_ready(p));
-    assert(forever_finish_init(p) == 0); /* Wine stopped before wineboot finished */
-    assert(!forever_prefix_ready(p));
+    assert(forever_finish_init(p, 0) == 0); /* Wine stopped before its final validation */
     put("ready/" FOREVER_WINEBOOT_DONE, "");
-    assert(forever_finish_init(p) == 1);
-    assert(forever_prefix_ready(p));
     assert(!forever_wineboot_done(p));
+    assert(forever_finish_init(p, 0) == 0);
+    assert(forever_exists(pending) && !forever_prefix_ready(p));
+    put("ready/" FOREVER_WINEBOOT_DONE, WINE_PS5_PREFIX_INIT_PROOF);
+    assert(forever_wineboot_done(p));
+    assert(forever_finish_init(p, 1) == 0); /* proof cannot override a failed exit */
+    assert(forever_exists(pending) && !forever_exists(proof) && !forever_prefix_ready(p));
+    assert(forever_finish_init(p, 0) == 1);
+    assert(forever_prefix_ready(p));
+    assert(!forever_exists(pending) && !forever_wineboot_done(p));
+    assert(text_is("ready/" WINE_PS5_PREFIX_TRUST_READY_NAME, WINE_PS5_PREFIX_INIT_PROOF));
+    assert(text_is("ready/system.reg", "WINE REGISTRY Version 2\n[Software] 1\n"));
+    assert(text_is("ready/user.reg", "WINE REGISTRY Version 2\n[User sentinel] 123\n"));
+    assert(text_is("ready/drive_c/Games/keep.dat", "game sentinel\n"));
+    assert(text_is("ready/drive_c/wineps5-fg.txt", "fg=off\n"));
+}
+
+static void test_prefix_proof_validation(void)
+{
+    static const char *const invalid[] = {
+        "", "WINE_PS5_PREFIX_TRUST_V1", "WINE_PS5_PREFIX_TRUST_V2\n",
+        WINE_PS5_PREFIX_INIT_PROOF "extra", "WINE_PS5_PREFIX_TRUST_V1\n\001"
+    };
+    char prefix[1024], done[1024], proof[1024], pending[1024], other[1024];
+    path(prefix, "proof-validation");
+    path(done, "proof-validation/" FOREVER_WINEBOOT_DONE);
+    path(proof, "proof-validation/" WINE_PS5_PREFIX_TRUST_READY_NAME);
+    path(pending, "proof-validation/" FOREVER_INIT_PENDING);
+    path(other, "proof-source");
+    make_prefix("proof-validation");
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+    {
+        put("proof-validation/" WINE_PS5_PREFIX_TRUST_READY_NAME, invalid[i]);
+        put("proof-validation/" FOREVER_WINEBOOT_DONE, invalid[i]);
+        assert(!forever_prefix_ready(prefix) && !forever_wineboot_done(prefix));
+    }
+    put("proof-source", WINE_PS5_PREFIX_INIT_PROOF);
+    assert(!unlink(proof) && !symlink(other, proof));
+    assert(!unlink(done) && !symlink(other, done));
+    assert(!forever_prefix_ready(prefix) && !forever_wineboot_done(prefix));
+    nofollow_symlink_error = EMLINK; /* PS5's other no-follow symlink errno */
+    assert(!forever_prefix_ready(prefix) && !forever_wineboot_done(prefix));
+    nofollow_symlink_error = 0;
+    assert(!unlink(done) && !symlink("missing-proof", done));
+    assert(!forever_wineboot_done(prefix));
+    assert(!unlink(done) && !mkdir(done, 0777));
+    assert(!forever_wineboot_done(prefix));
+    assert(!rmdir(done) && !mkfifo(done, 0666));
+    assert(!forever_wineboot_done(prefix)); /* nonregular files must not block */
+    assert(!unlink(done));
+    put("proof-validation/" WINE_PS5_PREFIX_TRUST_READY_NAME, WINE_PS5_PREFIX_INIT_PROOF);
+    assert(forever_prefix_ready(prefix));
+    assert(!symlink("missing-pending", pending));
+    assert(!forever_prefix_ready(prefix)); /* dangling pending cannot look absent */
+    assert(!unlink(pending));
+    path(other, "proof-validation/.update-timestamp");
+    assert(!unlink(other) && !mkdir(other, 0777));
+    assert(!forever_prefix_ready(prefix));
+    assert(!rmdir(other));
+    put("proof-validation/.update-timestamp", "1791000000\n");
+    path(other, "proof-validation/user.reg");
+    assert(!unlink(other) && !symlink("system.reg", other));
+    assert(!forever_prefix_ready(prefix));
+    put("proof-validation/user.reg", "WINE REGISTRY Version 2\n");
+    assert(forever_prefix_ready(prefix));
+    put("proof-validation/" FOREVER_WINEBOOT_DONE, WINE_PS5_PREFIX_INIT_PROOF);
+    assert(forever_finish_init(prefix, 0) == 0); /* no matching pending transaction */
+    assert(forever_wineboot_done(prefix));
+    assert(!forever_begin_init(prefix)); /* old ready and transient proofs are invalidated */
+    assert(!forever_exists(proof) && !forever_wineboot_done(prefix) && forever_exists(pending));
+}
+
+static void test_prefix_init_io_failures(void)
+{
+    char prefix[1024], pending[1024], done[1024], proof[1024], temporary[1100];
+    path(prefix, "init-io");
+    path(pending, "init-io/" FOREVER_INIT_PENDING);
+    path(done, "init-io/" FOREVER_WINEBOOT_DONE);
+    path(proof, "init-io/" WINE_PS5_PREFIX_TRUST_READY_NAME);
+    snprintf(temporary, sizeof(temporary), "%s.forever-tmp", proof);
+    assert(!forever_begin_init(prefix));
+    put("init-io/drive_c/keep", "unchanged\n");
+    for (int failure = 0; failure < 8; ++failure)
+    {
+        put("init-io/" FOREVER_WINEBOOT_DONE, WINE_PS5_PREFIX_INIT_PROOF);
+        if (failure < 4) init_fsync_after = failure;
+        if (failure == 4) denied_open = temporary;
+        if (failure == 5) denied_init_rename = proof;
+        if (failure == 6) denied_unlink = done;
+        if (failure == 7) denied_unlink = pending;
+        assert(forever_finish_init(prefix, 0) < 0);
+        init_fsync_after = -1;
+        denied_open = denied_init_rename = denied_unlink = NULL;
+        assert(forever_exists(pending) && !forever_prefix_ready(prefix));
+        assert(text_is("init-io/drive_c/keep", "unchanged\n"));
+        assert(!forever_begin_init(prefix)); /* every failure remains recoverable */
+    }
+    put("init-io/" FOREVER_WINEBOOT_DONE, WINE_PS5_PREFIX_INIT_PROOF);
+    assert(forever_finish_init(prefix, 0) == 1 && forever_prefix_ready(prefix));
+    init_fsync_after = 0;
+    assert(forever_begin_init(prefix) == -EIO); /* failed pending durability is reported */
+    init_fsync_after = -1;
+    assert(!forever_begin_init(prefix) && !forever_prefix_ready(prefix));
 }
 
 static void test_migration(void)
@@ -1042,9 +1172,18 @@ int main(int argc, char **argv)
         benchmark_managed_sync(argv[2], argv[3]);
         goto cleanup;
     }
+    if (argc == 2 && !strcmp(argv[1], "--prefix-init"))
+    {
+        test_prefix_ready();
+        test_prefix_proof_validation();
+        test_prefix_init_io_failures();
+        goto cleanup;
+    }
     assert(argc == 1);
     test_write_if_absent();
     test_prefix_ready();
+    test_prefix_proof_validation();
+    test_prefix_init_io_failures();
     test_migration();
     test_managed_same_size_drift();
     test_managed_mtime_touch();

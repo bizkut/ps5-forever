@@ -46,12 +46,46 @@ struct CommitCancellation
     dev_t session_device = 0;
     ino_t session_inode = 0;
 } commit_cancellation;
+
+enum class CleanupAction { count, fail_before, exit_after };
+
+struct CleanupFault
+{
+    bool armed = false;
+    CleanupAction action = CleanupAction::count;
+    std::size_t boundary = 0;
+    std::size_t seen = 0;
+    std::vector<std::string> events;
+} cleanup_fault;
+
+bool cleanup_before(const std::string &event)
+{
+    ++cleanup_fault.seen;
+    cleanup_fault.events.push_back(event);
+    if (cleanup_fault.action == CleanupAction::fail_before &&
+        cleanup_fault.seen == cleanup_fault.boundary)
+    {
+        cleanup_fault.armed = false;
+        errno = EIO;
+        return true;
+    }
+    return false;
+}
+
+void cleanup_after(int result)
+{
+    if (cleanup_fault.armed && cleanup_fault.action == CleanupAction::exit_after &&
+        cleanup_fault.seen == cleanup_fault.boundary && result == 0)
+        _exit(73);
+}
 }
 
 // Inject one durability failure, or revoke the operation immediately after its
 // final real commit fsync. Every uninjected fsync uses the host syscall unchanged.
 extern "C" int fsync(int descriptor)
 {
+    if (cleanup_fault.armed && cleanup_before("fsync"))
+        return -1;
     if (sync_failure.armed.load())
     {
         struct stat directory{}, installed{};
@@ -78,6 +112,16 @@ extern "C" int fsync(int descriptor)
             S_ISREG(marker.st_mode) && commit_cancellation.armed.exchange(false))
             commit_cancellation.requested = true;
     }
+    cleanup_after(result);
+    return result;
+}
+
+extern "C" int unlinkat(int directory, const char *name, int flags) noexcept
+{
+    if (cleanup_fault.armed && cleanup_before(std::string("unlink:") + name))
+        return -1;
+    const int result = static_cast<int>(syscall(SYS_unlinkat, directory, name, flags));
+    cleanup_after(result);
     return result;
 }
 #endif
@@ -197,6 +241,29 @@ bool extract(const std::string &root, const std::string &id,
 {
     return forever::addon_worker::extract_session(root, id, bytes.size(),
         sha256(bytes.data(), bytes.size()), cancelled, progress, times, error);
+}
+
+void committed_cleanup_fixture(const std::string &root, const std::string &wow_root,
+                                const std::string &addons, const std::string &id,
+                                std::string &error)
+{
+    using namespace forever::addon_worker;
+    fs::remove_all(addons + "/Good");
+    fs::create_directories(addons + "/Good/Libs");
+    put(addons + "/Good/Good.toc", "obsolete");
+    put(addons + "/Good/Libs/first.lua", "obsolete first");
+    put(addons + "/Good/Libs/second.lua", "obsolete second");
+    const auto bytes = make_zip({{"Good/Good.toc", "committed"},
+                                 {"Good/new.lua", "new code"},
+                                 {"Unused/staged.lua", "discard"}});
+    assert(store(root, id, bytes, error));
+    std::atomic<bool> cancelled{false};
+    ExtractTimes times;
+    assert(extract(root, id, bytes, cancelled, {}, times, error));
+    std::uint64_t elapsed = 0;
+    assert(activate_session(root, wow_root, id, "_retail_", {{"Good", "Good"}},
+                            [] { return false; }, elapsed, error));
+    put(addons + "/Good/Good.toc", "postcommit user edit", 0666);
 }
 }
 
@@ -783,6 +850,121 @@ int main()
         assert(get(addons + "/Good/Good.toc") == "committed despite revocation");
     }
 #endif
+
+    // A valid commit proof survives journal deletion and partly deleted obsolete backups.
+    {
+        const std::string id = "0000000000000000000000000000001a";
+        committed_cleanup_fixture(root, wow_root, addons, id, error);
+        const std::string session = root + "/" + id;
+        assert(unlink((session + "/old/Good/Libs/first.lua").c_str()) == 0);
+        assert(unlink((session + "/.activation").c_str()) == 0);
+        const std::string installed = object(addons + "/Good");
+        // Committed cleanup must not even require the old destination pathname to exist.
+        fs::rename(wow_root, wow_root + "-offline");
+        assert(clean_session(root, wow_root, id, error));
+        fs::rename(wow_root + "-offline", wow_root);
+        assert(object(addons + "/Good") == installed);
+        assert(get(addons + "/Good/Good.toc") == "postcommit user edit");
+        assert(!fs::exists(session));
+    }
+
+#ifdef __linux__
+    // Interrupt every real unlink/fsync boundary: including partially deleted backups,
+    // journal-unlinked/marker-present, and marker-unlinked/empty-session terminal states.
+    {
+        const std::string id = "0000000000000000000000000000001b";
+        committed_cleanup_fixture(root, wow_root, addons, id, error);
+        cleanup_fault = {};
+        cleanup_fault.armed = true;
+        assert(clean_session(root, wow_root, id, error));
+        cleanup_fault.armed = false;
+        const auto events = cleanup_fault.events;
+        const auto journal = std::find(events.begin(), events.end(), "unlink:.activation");
+        const auto marker = std::find(events.begin(), events.end(), "unlink:.activated");
+        const auto backup = std::find(events.begin(), events.end(), "unlink:first.lua");
+        assert(backup != events.end() && journal != events.end() && marker != events.end());
+        assert(backup < journal && journal < marker);
+        assert(journal + 1 != events.end() && *(journal + 1) == "fsync");
+        assert(marker + 1 != events.end() && *(marker + 1) == "fsync");
+        for (auto event = events.begin(); event != events.end(); ++event)
+            if (event->starts_with("unlink:") && event != journal && event != marker &&
+                *event != "unlink:" + id)
+                assert(event < journal);
+        assert(journal != events.begin() && *(journal - 1) == "fsync");
+
+        for (const auto action : {CleanupAction::fail_before, CleanupAction::exit_after})
+            for (std::size_t boundary = 1; boundary <= events.size(); ++boundary)
+            {
+                committed_cleanup_fixture(root, wow_root, addons, id, error);
+                const std::string session = root + "/" + id;
+                const auto installed = object(addons + "/Good");
+                cleanup_fault = {};
+                cleanup_fault.action = action;
+                cleanup_fault.boundary = boundary;
+                if (action == CleanupAction::fail_before)
+                {
+                    cleanup_fault.armed = true;
+                    assert(!clean_session(root, wow_root, id, error));
+                    assert(!cleanup_fault.armed);
+                }
+                else
+                {
+                    const pid_t child = fork();
+                    assert(child >= 0);
+                    if (child == 0)
+                    {
+                        cleanup_fault.armed = true;
+                        clean_session(root, wow_root, id, error);
+                        _exit(74); // The selected successful filesystem boundary must be hit.
+                    }
+                    int status = 0;
+                    assert(waitpid(child, &status, 0) == child);
+                    assert(WIFEXITED(status) && WEXITSTATUS(status) == 73);
+                }
+                assert(get(addons + "/Good/Good.toc") == "postcommit user edit");
+                assert(object(addons + "/Good") == installed);
+                if (fs::exists(session + "/old") || fs::exists(session + "/.activation"))
+                    assert(fs::exists(session + "/.activated"));
+                assert(clean_all_sessions(root, wow_root, error));
+                assert(!fs::exists(session));
+                assert(object(addons + "/Good") == installed);
+                assert(get(addons + "/Good/Good.toc") == "postcommit user edit");
+            }
+    }
+#endif
+
+    // Neither a malformed journal nor an invalid commit proof authorizes payload deletion.
+    {
+        const std::string id = "0000000000000000000000000000001c";
+        committed_cleanup_fixture(root, wow_root, addons, id, error);
+        const std::string session = root + "/" + id;
+        const auto installed = object(addons + "/Good");
+        put(session + "/.activated", "not a commit marker", 0600);
+        assert(!clean_session(root, wow_root, id, error));
+        assert(get(session + "/old/Good/Libs/first.lua") == "obsolete first");
+        put(session + "/.activated", "", 0600);
+        put(session + "/.activation", "invalid journal", 0600);
+        assert(!clean_session(root, wow_root, id, error));
+        assert(get(session + "/old/Good/Libs/first.lua") == "obsolete first");
+        assert(unlink((session + "/.activation").c_str()) == 0);
+        assert(chmod((session + "/.activated").c_str(), 0644) == 0);
+        assert(!clean_session(root, wow_root, id, error));
+        assert(chmod((session + "/.activated").c_str(), 0600) == 0);
+        assert(link((session + "/.activated").c_str(), (session + "/extra-link").c_str()) == 0);
+        assert(!clean_session(root, wow_root, id, error));
+        assert(unlink((session + "/extra-link").c_str()) == 0);
+        assert(unlink((session + "/.activated").c_str()) == 0);
+        const std::string outside = std::string(temporary) + "/outside/commit-proof";
+        put(outside, "", 0600);
+        assert(symlink(outside.c_str(), (session + "/.activated").c_str()) == 0);
+        assert(!clean_session(root, wow_root, id, error));
+        assert(fs::is_regular_file(outside));
+        assert(unlink((session + "/.activated").c_str()) == 0);
+        put(session + "/.activated", "", 0600);
+        assert(clean_session(root, wow_root, id, error));
+        assert(object(addons + "/Good") == installed);
+        assert(get(addons + "/Good/Good.toc") == "postcommit user edit");
+    }
 
     assert(clean_all_sessions(root, wow_root, error));
     fs::remove_all(temporary);

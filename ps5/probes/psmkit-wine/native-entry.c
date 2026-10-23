@@ -1535,14 +1535,14 @@ void __attribute__((noreturn)) pw_native_exit(int status)
         pw_maintenance_loadexec_game("shutdown complete");
     if (forever_prefix_init)
     {
-        int finished = forever_finish_init(FOREVER_PREFIX);
+        int finished = forever_finish_init(FOREVER_PREFIX, status);
         int ready, permission_stopped = 0;
         if (forever_permission_error(finished))
         {
             pw_forever_permission_stop(FOREVER_PREFIX, FOREVER_PREFIX);
             permission_stopped = 1;
         }
-        ready = forever_prefix_ready(FOREVER_PREFIX);
+        ready = finished == 1 && !status && forever_prefix_ready(FOREVER_PREFIX);
         io_log("forever: first-start prefix setup finished=%d ready=%d status=%d",
                finished, ready, status);
         if (permission_stopped)
@@ -1975,8 +1975,8 @@ static int pw_forever_start(void)
 
 #if !PW_RUNTIME_GPU
 /* wineboot -i does not end the title's Wine by itself: services.exe and
- * explorer.exe stay. Its last step writes FOREVER_WINEBOOT_DONE: then end
- * them and Wine, which saves the registries; pw_native_exit restarts the app. */
+ * explorer.exe stay. Its validated proof permits shutdown, not readiness:
+ * pw_native_exit commits only after Wine saves its hives and exits cleanly. */
 static void *pw_forever_init_watch(void *unused)
 {
     (void)unused;
@@ -4110,9 +4110,9 @@ int main(int argc, char **argv)
     if (forever_prefix_init)
     {
         pthread_t watch;
-        /* WINEPS5_PREFIX_INIT makes wineboot write FOREVER_WINEBOOT_DONE as
-         * its last step. Bootstrap mode is what Wine gives its own wineboot
-         * --init: builtins load from wine-title before system32 has copies. */
+        /* WINEPS5_PREFIX_INIT makes wineboot validate Trust/SIP initialization
+         * in both architectures before writing the shared transient proof.
+         * Bootstrap mode loads builtins before system32 has copies. */
         if (setenv("WINEPS5_PREFIX_INIT", "1", 1) || setenv("WINEBOOTSTRAPMODE", "1", 1)) return 1;
         if (create_thread(&watch, NULL, pw_forever_init_watch, NULL)) return 1;
         pthread_detach(watch);

@@ -1391,13 +1391,36 @@ bool rollback_activation(int session, int extraction, int addons, int old,
     return unlinkat(session, ".activation", 0) == 0 && fsync(session) == 0;
 }
 
-bool recover_activation(int session, const std::string &wow_root, std::string &error)
+bool recover_activation(int session, const std::string &wow_root, std::string &error,
+                         bool *committed = nullptr)
 {
+    if (committed)
+        *committed = false;
     struct stat info{};
+    bool has_commit = false;
+    if (fstatat(session, ".activated", &info, AT_SYMLINK_NOFOLLOW) == 0)
+    {
+        std::string marker;
+        if (!read_private_file(session, ".activated", marker) || !marker.empty())
+        {
+            set_error(error, "activation commit marker is invalid; staging retained");
+            return false;
+        }
+        has_commit = true;
+    }
+    else if (errno != ENOENT)
+        return false;
     if (fstatat(session, ".activation", &info, AT_SYMLINK_NOFOLLOW) != 0)
     {
         if (errno != ENOENT)
             return false;
+        // The journal is removed before the commit proof during terminal cleanup.
+        if (has_commit)
+        {
+            if (committed)
+                *committed = true;
+            return true;
+        }
         Descriptor old(open_directory_child(session, "old"));
         std::vector<std::string> names;
         return old.get() < 0 ? errno == ENOENT
@@ -1411,15 +1434,12 @@ bool recover_activation(int session, const std::string &wow_root, std::string &e
         set_error(error, "activation journal is invalid; backups retained");
         return false;
     }
-    if (fstatat(session, ".activated", &info, AT_SYMLINK_NOFOLLOW) == 0)
+    if (has_commit)
     {
-        std::string marker;
-        if (!read_private_file(session, ".activated", marker) || !marker.empty())
-            return false;
-        return true; // Durable commit: never restore backups over user edits.
+        if (committed)
+            *committed = true;
+        return true; // Durable commit: never inspect or restore the live destination.
     }
-    if (errno != ENOENT)
-        return false;
     Descriptor extraction(open_directory_child(session, "x"));
     Descriptor old(open_directory_child(session, "old"));
     Descriptor addons(open_addons_directory(wow_root, channel, false));
@@ -1433,6 +1453,26 @@ bool recover_activation(int session, const std::string &wow_root, std::string &e
     return true;
 }
 
+bool remove_committed_session(int root, int session, const std::string &id)
+{
+    std::vector<std::string> names;
+    if (!directory_names(session, names))
+        return false;
+    // Retain both transaction records while obsolete payloads/backups are disappearing.
+    for (const auto &name : names)
+        if (name != ".activation" && name != ".activated" && !remove_tree_at(session, name))
+            return false;
+    if (fsync(session) != 0)
+        return false;
+    // Recovery accepts valid commit proof without a journal at this durable boundary.
+    if ((unlinkat(session, ".activation", 0) != 0 && errno != ENOENT) || fsync(session) != 0)
+        return false;
+    // The commit decision is the LAST private entry removed, after every backup is gone.
+    if (unlinkat(session, ".activated", 0) != 0 || fsync(session) != 0)
+        return false;
+    return unlinkat(root, id.c_str(), AT_REMOVEDIR) == 0 && fsync(root) == 0;
+}
+
 bool clean_session_at(int root, const std::string &wow_root, const std::string &id,
                        std::string &error)
 {
@@ -1444,9 +1484,11 @@ bool clean_session_at(int root, const std::string &wow_root, const std::string &
         set_error(error, "archive session is not a protected directory");
         return false;
     }
-    if (fchmod(session.get(), 0700) != 0 || !recover_activation(session.get(), wow_root, error))
+    bool committed = false;
+    if (fchmod(session.get(), 0700) != 0 ||
+        !recover_activation(session.get(), wow_root, error, &committed))
         return false;
-    if (!remove_tree_at(root, id))
+    if (!(committed ? remove_committed_session(root, session.get(), id) : remove_tree_at(root, id)))
     {
         set_error(error, "could not clean archive staging");
         return false;

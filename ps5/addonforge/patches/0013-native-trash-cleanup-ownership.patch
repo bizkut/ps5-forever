@@ -1,0 +1,342 @@
+diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
+index db50a27..880e4f0 100644
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -8,6 +8,8 @@
+ //!  - the extracted tree is scanned and refused if it contains anything
+ //!    executable (addons are Lua, XML, TOC and media, nothing else);
+ //!  - SavedVariables live in `WTF\`, which we never touch.
++//!  - committed trash retains its root `.complete` until all payload is removed;
++//!    native-token cores leave that cleanup exclusively to native maintenance.
+
+ use anyhow::{anyhow, Context};
+ use futures_util::StreamExt;
+@@ -635,10 +637,31 @@ fn wait_for_idle(operations: &std::sync::atomic::AtomicUsize) {
+     }
+ }
+
++fn open_trash_directory(path: &Path) -> std::io::Result<fs::File> {
++    #[cfg(windows)]
++    {
++        use std::os::windows::fs::OpenOptionsExt;
++        // FlushFileBuffers requires write access; opening a directory also needs
++        // backup semantics. Do not follow a final-component reparse point.
++        const GENERIC_READ_WRITE: u32 = 0xc000_0000;
++        const FILE_SHARE_ALL: u32 = 0x7;
++        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
++        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
++        fs::OpenOptions::new()
++            .access_mode(GENERIC_READ_WRITE)
++            .share_mode(FILE_SHARE_ALL)
++            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
++            .open(path)
++    }
++    #[cfg(not(windows))]
++    fs::File::open(path)
++}
++
+ fn remove_idle_no_follow(
+     path: &Path,
+     operations: &std::sync::atomic::AtomicUsize,
+     slice: &mut std::time::Instant,
++    trash_root: bool,
+ ) -> anyhow::Result<()> {
+     wait_for_idle(operations);
+     let metadata = match fs::symlink_metadata(path) {
+@@ -649,14 +672,44 @@ fn remove_idle_no_follow(
+     if link_or_reparse(&metadata) {
+         unlink_link_or_reparse(path, &metadata)?;
+     } else if metadata.is_dir() {
+-        for entry in fs::read_dir(path)?.flatten() {
+-            remove_idle_no_follow(&entry.path(), operations, slice)?;
++        let complete = trash_root.then(|| path.join(".complete"));
++        if let Some(complete) = &complete {
++            match fs::symlink_metadata(complete) {
++                Ok(marker) if marker.is_file() && !link_or_reparse(&marker) => {}
++                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
++                    // Only empty terminal roots are disposable without commit proof.
++                    wait_for_idle(operations);
++                    fs::remove_dir(path)?;
++                    return Ok(());
++                }
++                Err(error) => return Err(error.into()),
++                _ => anyhow::bail!("invalid committed trash marker"),
++            }
++        }
++        for entry in fs::read_dir(path)? {
++            let entry = entry?;
++            if trash_root && entry.file_name() == ".complete" { continue; }
++            remove_idle_no_follow(&entry.path(), operations, slice, false)?;
+         }
+         wait_for_idle(operations);
++        if let Some(complete) = &complete {
++            // A crash or idle pause before this point must leave the root marker.
++            let directory = open_trash_directory(path)?;
++            directory.sync_all()?;
++            wait_for_idle(operations);
++            fs::remove_file(complete)?;
++            #[cfg(test)]
++            tests::after_trash_remove(complete)?;
++            directory.sync_all()?;
++            drop(directory); // Windows must close the directory handle before remove_dir.
++            wait_for_idle(operations);
++        }
+         fs::remove_dir(path)?;
+     } else {
+         fs::remove_file(path)?;
+     }
++    #[cfg(test)]
++    tests::after_trash_remove(path)?;
+     if slice.elapsed() >= std::time::Duration::from_millis(20) {
+         std::thread::sleep(std::time::Duration::from_millis(20));
+         *slice = std::time::Instant::now();
+@@ -672,7 +725,7 @@ pub fn start_trash_cleanup(
+         let mut slice = std::time::Instant::now();
+         for path in trash {
+             let parent = path.parent().map(Path::to_path_buf);
+-            let _ = remove_idle_no_follow(&path, &operations, &mut slice);
++            let _ = remove_idle_no_follow(&path, &operations, &mut slice, true);
+             if let Some(parent) = parent {
+                 let _ = fs::remove_dir(parent);
+             }
+@@ -726,6 +779,109 @@ pub fn stage_remove_folders(
+
+ #[cfg(test)]
+ mod tests {
++    type TrashHook = Box<dyn FnMut(&Path) -> anyhow::Result<()> + Send>;
++    static TRASH_HOOK: std::sync::Mutex<Option<TrashHook>> = std::sync::Mutex::new(None);
++    static TRASH_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
++
++    pub(super) fn after_trash_remove(path: &Path) -> anyhow::Result<()> {
++        if let Some(hook) = TRASH_HOOK.lock().unwrap().as_mut() { hook(path)?; }
++        Ok(())
++    }
++
++    #[test]
++    fn trash_local_interruption_retains_commit_proof_and_recovery_never_resurrects() {
++        let _serial = TRASH_TEST.lock().unwrap_or_else(|error| error.into_inner());
++        let root = std::env::temp_dir().join(format!("af-trash-interrupt-{}", unique()));
++        let addons = root.join("AddOns");
++        let original = addons.join("Removed");
++        fs::create_dir_all(original.join("nested")).unwrap();
++        fs::write(original.join("first"), b"payload").unwrap();
++        fs::write(original.join("nested/.complete"), b"ordinary payload").unwrap();
++        let (_, trash, _) = stage_remove_folders(&addons, &["Removed".into()]).unwrap();
++        let proof = trash.join(".complete");
++        let interrupted = trash.join("Removed/first");
++        *TRASH_HOOK.lock().unwrap() = Some(Box::new(move |path| {
++            if path == interrupted { anyhow::bail!("interrupted after deleting payload"); }
++            Ok(())
++        }));
++        start_trash_cleanup(vec![trash.clone()], std::sync::Arc::new(
++            std::sync::atomic::AtomicUsize::new(0))).join().unwrap();
++        *TRASH_HOOK.lock().unwrap() = None;
++        assert!(!trash.join("Removed/first").exists());
++        assert!(proof.is_file(), "partial committed trash must retain commit proof");
++        recover_tmp(&addons).unwrap();
++        assert!(!original.exists(), "recovery must not restore a partially deleted add-on");
++        assert!(trash.join("Removed").is_dir());
++        start_trash_cleanup(vec![trash.clone()], std::sync::Arc::new(
++            std::sync::atomic::AtomicUsize::new(0))).join().unwrap();
++        assert!(!trash.exists(), "resume must also remove nested ordinary .complete files");
++
++        // A fault after the last marker unlink has no payload left to resurrect.
++        fs::create_dir_all(&original).unwrap();
++        fs::write(original.join("first"), b"payload").unwrap();
++        let (_, trash, _) = stage_remove_folders(&addons, &["Removed".into()]).unwrap();
++        let proof = trash.join(".complete");
++        let watched_trash = trash.clone();
++        *TRASH_HOOK.lock().unwrap() = Some(Box::new(move |path| {
++            if path == proof {
++                assert!(fs::read_dir(&watched_trash)?.next().is_none(),
++                    "the root commit marker must be removed last");
++                anyhow::bail!("interrupted after deleting final marker");
++            }
++            Ok(())
++        }));
++        start_trash_cleanup(vec![trash.clone()], std::sync::Arc::new(
++            std::sync::atomic::AtomicUsize::new(0))).join().unwrap();
++        *TRASH_HOOK.lock().unwrap() = None;
++        assert!(trash.is_dir() && !trash.join(".complete").exists());
++        recover_tmp(&addons).unwrap();
++        assert!(!trash.exists() && !original.exists());
++
++        // Marker-free nonempty roots remain interrupted-removal recovery's property.
++        let interrupted = addons.join(TMP_DIR).join("trash-uncommitted");
++        fs::create_dir_all(interrupted.join("Removed")).unwrap();
++        fs::write(interrupted.join("Removed/original"), b"not committed").unwrap();
++        start_trash_cleanup(vec![interrupted.clone()], std::sync::Arc::new(
++            std::sync::atomic::AtomicUsize::new(0))).join().unwrap();
++        assert_eq!(fs::read(interrupted.join("Removed/original")).unwrap(), b"not committed");
++        recover_tmp(&addons).unwrap();
++        assert_eq!(fs::read(original.join("original")).unwrap(), b"not committed");
++        fs::remove_dir_all(root).unwrap();
++    }
++
++    #[test]
++    fn trash_local_idle_pause_after_payload_deletion_preserves_proof_until_resume() {
++        let _serial = TRASH_TEST.lock().unwrap_or_else(|error| error.into_inner());
++        let root = std::env::temp_dir().join(format!("af-trash-pause-{}", unique()));
++        let addons = root.join("AddOns");
++        fs::create_dir_all(addons.join("Removed")).unwrap();
++        fs::write(addons.join("Removed/first"), b"payload").unwrap();
++        let (_, trash, _) = stage_remove_folders(&addons, &["Removed".into()]).unwrap();
++        let operations = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
++        let watched_operations = operations.clone();
++        let interrupted = trash.join("Removed/first");
++        let (paused, ready) = std::sync::mpsc::channel();
++        *TRASH_HOOK.lock().unwrap() = Some(Box::new(move |path| {
++            if path == interrupted {
++                watched_operations.store(1, std::sync::atomic::Ordering::Release);
++                paused.send(()).unwrap();
++            }
++            Ok(())
++        }));
++        let cleanup = start_trash_cleanup(vec![trash.clone()], operations.clone());
++        ready.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
++        let proof_present = trash.join(".complete").is_file();
++        let partial_present = trash.join("Removed").is_dir();
++        recover_tmp(&addons).unwrap();
++        let resurrected = addons.join("Removed").exists();
++        operations.store(0, std::sync::atomic::Ordering::Release);
++        cleanup.join().unwrap();
++        *TRASH_HOOK.lock().unwrap() = None;
++        assert!(proof_present && partial_present && !resurrected);
++        assert!(!trash.exists());
++        fs::remove_dir_all(root).unwrap();
++    }
++
+     #[test]
+     fn wrong_flavour_archive_never_replaces_an_installed_folder() {
+         use std::io::Write;
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 20b2897..a52d6e6 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1377,7 +1377,7 @@ async fn remove_package_impl(app: &App, key: String) -> Result<Vec<String>, Stri
+         .await
+         .map_err(err)?
+         .map_err(err)?;
+-    if !gone.is_empty() {
++    if !gone.is_empty() && app.native_worker_token.is_none() {
+         install::start_trash_cleanup(vec![trash], app.operations.clone());
+     }
+     let mut st = app.state.lock().await;
+@@ -1733,7 +1733,8 @@ fn make_app_with_worker_token(native_worker_token: Option<String>) -> Shared {
+         #[cfg(feature = "gui")]
+         icon_cache: Mutex::new(HashMap::new()),
+     });
+-    if !trash.is_empty() {
++    // The native maintenance parent owns committed trash once this core stops.
++    if !trash.is_empty() && app.native_worker_token.is_none() {
+         install::start_trash_cleanup(trash, operations);
+     }
+     app
+@@ -2416,7 +2417,7 @@ pub fn cli(args: &[String]) -> i32 {
+                 let pkg = scan_packages(&app).await?.into_iter().find(|p| &p.key == key).ok_or("no such package")?;
+                 let (gone, trash, _) =
+                     install::stage_remove_folders(&addons_dir(&install), &pkg.folders).map_err(err)?;
+-                if !gone.is_empty() {
++                if !gone.is_empty() && app.native_worker_token.is_none() {
+                     install::start_trash_cleanup(vec![trash], app.operations.clone());
+                 }
+                 let mut st = app.state.lock().await;
+@@ -2541,6 +2542,98 @@ mod tests {
+     use super::*;
+     static STATE_ENV: Mutex<()> = Mutex::const_new(());
+
++    #[tokio::test]
++    async fn trash_native_startup_leaves_committed_payload_untouched_while_idle() {
++        let _environment = STATE_ENV.lock().await;
++        let root = std::env::temp_dir().join(format!("af-trash-startup-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&root);
++        let product = root.join("World of Warcraft/_forever_");
++        let addons = product.join("Interface/AddOns");
++        let trash = addons.join(install::TMP_DIR).join("trash-startup");
++        std::fs::create_dir_all(trash.join("Removed")).unwrap();
++        std::fs::write(trash.join(".complete"), b"complete\n").unwrap();
++        std::fs::write(trash.join("Removed/voice.ogg"), b"committed").unwrap();
++        std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
++        let mut state = AppState::default();
++        state.install_path = Some(product.to_string_lossy().into());
++        state.save().unwrap();
++
++        let app = make_app_with_worker_token(Some("native-worker-token".into()));
++        assert_eq!(app.operations.load(Ordering::Acquire), 0);
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        assert_eq!(std::fs::read(trash.join(".complete")).unwrap(), b"complete\n");
++        assert_eq!(std::fs::read(trash.join("Removed/voice.ogg")).unwrap(), b"committed");
++        install::recover_tmp(&addons).unwrap();
++        assert!(!addons.join("Removed").exists());
++        drop(app);
++        let local = make_app();
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        assert!(!trash.exists(), "local/GUI startup must still clean committed trash");
++        drop(local);
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++        std::fs::remove_dir_all(root).unwrap();
++    }
++
++    #[tokio::test]
++    async fn trash_native_remove_leaves_committed_payload_untouched_while_idle() {
++        let _environment = STATE_ENV.lock().await;
++        let root = std::env::temp_dir().join(format!("af-trash-remove-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&root);
++        let product = root.join("World of Warcraft/_forever_");
++        let addons = product.join("Interface/AddOns");
++        std::fs::create_dir_all(addons.join("Fixture")).unwrap();
++        std::fs::write(product.join(".flavor.info"), "Product Flavor!STRING:0\nwowf\n").unwrap();
++        std::fs::write(product.join("Wow.exe"), flavor::fixture_pe(1, 60, 1)).unwrap();
++        std::fs::write(addons.join("Fixture/Fixture.toc"),
++            b"## Interface: 16001\n## Title: Fixture\n## Version: 1\n").unwrap();
++        std::fs::write(addons.join("Fixture/voice.ogg"), b"committed").unwrap();
++        std::env::set_var("ADDONFORGE_STATE_DIR", root.join("state"));
++        let mut state = AppState::default();
++        state.install_path = Some(product.to_string_lossy().into());
++        state.installed.insert("github:local/fixture".into(), Installed {
++            source: "github".into(), source_id: "local/fixture".into(), version: "1".into(),
++            folders: vec!["Fixture".into()], installed_at: 0,
++        });
++        state.save().unwrap();
++        let app = make_app_with_worker_token(Some("native-worker-token".into()));
++        prime_catalog_cache();
++        *app.stats.lock().await = Some(Stats::default());
++        let removed = dispatch_headless(app.clone(), HeadlessRequest {
++            command: "remove_package".into(), args: serde_json::json!({"key": "github:local/fixture"}),
++        }).await.unwrap();
++        assert!(removed.to_string().contains("Fixture"));
++        assert_eq!(app.operations.load(Ordering::Acquire), 0);
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        let trash = install::pending_trash(&addons);
++        assert_eq!(trash.len(), 1, "native maintenance, never Rust, owns committed trash");
++        assert_eq!(std::fs::read(trash[0].join(".complete")).unwrap(), b"complete\n");
++        assert_eq!(std::fs::read(trash[0].join("Fixture/voice.ogg")).unwrap(), b"committed");
++        install::recover_tmp(&addons).unwrap();
++        assert!(!addons.join("Fixture").exists());
++        drop(app);
++        let local = make_app();
++        *local.stats.lock().await = Some(Stats::default());
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        assert!(install::pending_trash(&addons).is_empty());
++        std::fs::create_dir_all(addons.join("Fixture")).unwrap();
++        std::fs::write(addons.join("Fixture/Fixture.toc"),
++            b"## Interface: 16001\n## Title: Fixture\n## Version: 2\n").unwrap();
++        local.state.lock().await.installed.insert("github:local/fixture".into(), Installed {
++            source: "github".into(), source_id: "local/fixture".into(), version: "2".into(),
++            folders: vec!["Fixture".into()], installed_at: 0,
++        });
++        dispatch_headless(local.clone(), HeadlessRequest {
++            command: "remove_package".into(), args: serde_json::json!({"key": "github:local/fixture"}),
++        }).await.unwrap();
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        assert!(!addons.join("Fixture").exists());
++        assert!(install::pending_trash(&addons).is_empty(),
++            "local/GUI removal must still schedule and complete Rust cleanup");
++        drop(local);
++        std::env::remove_var("ADDONFORGE_STATE_DIR");
++        std::fs::remove_dir_all(root).unwrap();
++    }
++
+     fn prime_catalog_cache() {
+         let dir = AppState::dir().join("catalogue-cache");
+         std::fs::create_dir_all(&dir).unwrap();

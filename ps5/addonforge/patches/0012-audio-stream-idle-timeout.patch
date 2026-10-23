@@ -1,0 +1,470 @@
+diff --git a/src-tauri/src/catalog.rs b/src-tauri/src/catalog.rs
+index 2050d92..72ff4b9 100644
+--- a/src-tauri/src/catalog.rs
++++ b/src-tauri/src/catalog.rs
+@@ -14,7 +14,9 @@ pub const BUNDLED_GITHUB: &str = include_str!("../../catalog/github.csv");
+ const GITHUB_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+ const MAX_INDEX_BYTES: usize = 8 * 1024 * 1024;
+ const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
+-const GITHUB_CACHE_FORMAT: u32 = 2;
++// Invalidate pre-correction row identities even when their 24-hour TTL is fresh.
++// Failed refreshes then use this release's validated bundled catalogue.
++const GITHUB_CACHE_FORMAT: u32 = 3;
+
+ #[derive(Deserialize)]
+ struct GithubRow {
+@@ -757,6 +759,51 @@ mod live_tests {
+         std::fs::remove_dir_all(dir).unwrap();
+     }
+
++    #[tokio::test]
++    async fn issue5_warm_018_cache_uses_corrected_bundle_offline_and_new_generation_keeps_ttl() {
++        let dir = std::env::temp_dir().join(format!("af-issue5-generation-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("index.json");
++        // Exact selector/folder identity from 018, reduced to the affected row.
++        let old_csv = "id,name,full_name,url,description,last_updated,flavors,curse_id,wago_id,wowi_id,has_release_json,last_seen,release_tag_prefix,asset_name_pattern,folders\n\
++            1417882268,polestar,fitzforge/polestar,https://github.com/fitzforge/polestar,Recorder only,2026-10-19,forever,,,,False,2026-10-22,,Polestar_Recorder-*.zip,Polestar_Recorder\n";
++        let old = serde_json::to_vec(&CachedGithub {
++            format: 2, source_url: GITHUB_URL.into(), fetched_at: now(),
++            etag: Some("\"fresh-018\"".into()), text: old_csv.into(),
++        }).unwrap();
++        std::fs::write(&path, &old).unwrap();
++        let offline = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let proxy = format!("http://{}", offline.local_addr().unwrap());
++        drop(offline);
++        let client = reqwest::Client::builder()
++            .proxy(reqwest::Proxy::all(proxy).unwrap()).build().unwrap();
++        let rows = github_index(&client, GITHUB_URL, &path, false).await;
++        let complete = rows.iter().find(|row| row.id == "1417882268:polestar-zip")
++            .expect("a fresh 018 cache must not hide the corrected bundled complete package");
++        assert_eq!(complete.asset_name_pattern, "Polestar-*.zip");
++        assert_eq!(complete.folders.split(',').count(), 24);
++        assert!(complete.folders.split(',').any(|name| name == "Polestar_Guides_ptBR"));
++        assert!(rows.iter().any(|row| row.id == "1417882268:polestar-recorder-zip"));
++        // An offline migration uses the validated bundle without destroying the
++        // old cache; its obsolete generation remains ineligible on next launch.
++        assert_eq!(std::fs::read(&path).unwrap(), old);
++
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        listener.set_nonblocking(true).unwrap();
++        let url = format!("http://{}", listener.local_addr().unwrap());
++        let current = serde_json::to_vec(&CachedGithub {
++            format: 3, source_url: url.clone(), fetched_at: now(),
++            etag: Some("\"current\"".into()), text: CSV_FIXTURE.into(),
++        }).unwrap();
++        std::fs::write(&path, &current).unwrap();
++        let rows = github_index(&reqwest::Client::new(), &url, &path, false).await;
++        assert_eq!(rows[0].id, "42");
++        assert_eq!(std::fs::read(&path).unwrap(), current);
++        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock,
++            "a valid generation-3 cache must retain its 24-hour no-network TTL");
++        std::fs::remove_dir_all(dir).unwrap();
++    }
++
+     #[tokio::test]
+     async fn github_cache_uses_ttl_etag_304_stale_and_bundled_fallback() {
+         use std::io::{Read, Write};
+diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
+index 36ae66b..db50a27 100644
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -179,6 +179,18 @@ fn add_download_bytes(total: u64, chunk: usize) -> Option<u64> {
+     total.checked_add(chunk as u64).filter(|next| *next <= MAX_DOWNLOAD_BYTES)
+ }
+
++pub fn download_client(idle_timeout: std::time::Duration) -> reqwest::Client {
++    reqwest::Client::builder()
++        .user_agent(crate::USER_AGENT)
++        // Large audio packs must not inherit the metadata's 120-second
++        // deadline. Keep STORE's 15-minute total bound plus its idle bound.
++        .timeout(std::time::Duration::from_secs(15 * 60))
++        .read_timeout(idle_timeout)
++        .connect_timeout(std::time::Duration::from_secs(15))
++        .build()
++        .expect("archive http client")
++}
++
+ pub async fn download_with_progress(
+     client: &reqwest::Client,
+     url: &str,
+@@ -217,7 +229,8 @@ pub async fn download_with_progress(
+         let mut stream = resp.bytes_stream();
+         let mut total: u64 = 0;
+         while let Some(chunk) = stream.next().await {
+-            let chunk = chunk?;
++            let chunk = chunk.map_err(|error| anyhow::anyhow!(
++                "archive download body failed after {total} bytes: {:#}", anyhow::Error::new(error)))?;
+             total = add_download_bytes(total, chunk.len())
+                 .ok_or_else(|| anyhow::anyhow!("download exceeded 4 GiB; refusing"))?;
+             file.write_all(&chunk)?;
+@@ -824,6 +837,72 @@ mod tests {
+         assert!(add_download_bytes(u64::MAX, usize::MAX).is_none());
+     }
+
++    fn audio_download_server(body: Vec<u8>, delay: std::time::Duration)
++        -> (String, std::thread::JoinHandle<()>) {
++        use std::io::Read;
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let url = format!("http://{}/SpokenQuestsAudioAll-2.4.0.zip", listener.local_addr().unwrap());
++        let server = std::thread::spawn(move || {
++            let (mut socket, _) = listener.accept().unwrap();
++            socket.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
++            let mut request = Vec::new();
++            let mut byte = [0];
++            while !request.ends_with(b"\r\n\r\n") {
++                if socket.read(&mut byte).unwrap_or(0) == 0 { return; }
++                request.push(byte[0]);
++            }
++            write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
++            for chunk in body.chunks(body.len().div_ceil(4)) {
++                std::thread::sleep(delay);
++                if socket.write_all(chunk).is_err() { break; }
++            }
++        });
++        (url, server)
++    }
++
++    fn audio_zip() -> Vec<u8> {
++        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
++        let options = zip::write::SimpleFileOptions::default();
++        archive.start_file("SpokenQuestsAudioShared/SpokenQuestsAudioShared.toc", options).unwrap();
++        archive.write_all(b"## Interface: 16001\n## Title: Spoken Audio: Quests - Shared\n## Version: 2.4.0\n").unwrap();
++        archive.start_file("SpokenQuestsAudioShared/audio.ogg", options).unwrap();
++        archive.write_all(b"OggS minimized audio payload").unwrap();
++        archive.finish().unwrap().into_inner()
++    }
++
++    #[tokio::test]
++    async fn issue5_audio_download_progress_outlives_metadata_deadline() {
++        let timeout = std::time::Duration::from_millis(200);
++        let payload = audio_zip();
++        let (url, server) = audio_download_server(payload.clone(), std::time::Duration::from_millis(80));
++        let root = std::env::temp_dir().join(format!("af-audio-progress-{}", unique()));
++        let mut received = Vec::new();
++        let result = download_with_progress(&download_client(timeout), &url, &root, "SpokenQuestsAudioAll-2.4.0.zip",
++            |done, length| received.push((done, length))).await;
++        server.join().unwrap();
++        let archive = result.expect("a progressing audio archive must not inherit the metadata total deadline");
++        assert_eq!(fs::read(&archive).unwrap(), payload);
++        assert_eq!(received.last(), Some(&(payload.len() as u64, Some(payload.len() as u64))));
++        let addons = root.join("AddOns");
++        let placed = place_timed_with_progress(&archive, &addons, crate::flavor::Flavor::Forever, |_, _| {}).unwrap();
++        assert_eq!(placed.folders, ["SpokenQuestsAudioShared"]);
++        assert!(addons.join("SpokenQuestsAudioShared/audio.ogg").is_file());
++        fs::remove_dir_all(root).unwrap();
++    }
++
++    #[tokio::test]
++    async fn issue5_audio_download_idle_deadline_still_cleans_partial_archive() {
++        let (url, server) = audio_download_server(audio_zip(), std::time::Duration::from_millis(200));
++        let root = std::env::temp_dir().join(format!("af-audio-idle-{}", unique()));
++        let error = download_with_progress(&download_client(std::time::Duration::from_millis(50)),
++            &url, &root, "SpokenQuestsAudioAll-2.4.0.zip", |_, _| {}).await.unwrap_err();
++        server.join().unwrap();
++        let message = error.to_string();
++        assert!(message.contains("archive download body"), "{message}");
++        assert!(message.contains("timed out"), "{message}");
++        assert!(!root.exists());
++    }
++
+     #[test]
+     fn lore_sized_stream_is_coalesced_into_large_disk_writes() {
+         #[derive(Default)]
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index a2b92fa..20b2897 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -36,6 +36,7 @@ pub const SUPPORT_EMAIL: &str = "PocketForgeStudios@proton.me";
+
+ struct App {
+     client: reqwest::Client,
++    download_client: reqwest::Client,
+     state: Mutex<AppState>,
+     wago_valid: Mutex<Option<bool>>,
+     catalog: Mutex<Option<(Catalog, &'static str)>>,
+@@ -909,7 +910,7 @@ async fn install_from(
+     let (placed, download_ms) = if let Some(token) = app.native_worker_token.clone() {
+         let mut staged = native_worker::download(
+             token,
+-            &app.client,
++            &app.download_client,
+             &remote.download_url,
+             app.progress.clone(),
+         )
+@@ -961,7 +962,7 @@ async fn install_from(
+         let download_started = std::time::Instant::now();
+         let progress = app.progress.clone();
+         let zip = install::download_with_progress(
+-            &app.client,
++            &app.download_client,
+             &remote.download_url,
+             &tmp,
+             &remote.filename,
+@@ -1715,6 +1716,8 @@ fn make_app_with_worker_token(native_worker_token: Option<String>) -> Shared {
+     let operations = Arc::new(AtomicUsize::new(0));
+     let app = Arc::new(App {
+         client,
++        // Match the native STORE frame's idle bound; metadata keeps its total deadline.
++        download_client: install::download_client(std::time::Duration::from_secs(30)),
+         state: Mutex::new(st),
+         wago_valid: Mutex::new(None),
+         catalog: Mutex::new(None),
+@@ -2882,6 +2885,60 @@ mod tests {
+         assert!(packages.iter().all(|package| package.status != "no-source"));
+     }
+
++    #[test]
++    fn issue5_manual_spoken_and_polestar_folders_keep_their_update_selectors() {
++        let complete = CatalogEntry {
++            id: "gh-1417882268:polestar-zip".into(), name: "Polestar".into(),
++            github: Some("fitzforge/polestar".into()),
++            asset_name_pattern: Some("Polestar-*.zip".into()),
++            folders: "Polestar,Polestar_Codex,Polestar_Guides,Polestar_Guides_deDE,Polestar_Guides_esES,Polestar_Guides_esMX,Polestar_Guides_frFR,Polestar_Guides_koKR,Polestar_Guides_ptBR,Polestar_Guides_ruRU,Polestar_Guides_zhCN,Polestar_Guides_zhTW,Polestar_ItemDB,Polestar_Names_deDE,Polestar_Names_esES,Polestar_Names_esMX,Polestar_Names_frFR,Polestar_Names_koKR,Polestar_Names_ptBR,Polestar_Names_ruRU,Polestar_Names_zhCN,Polestar_Names_zhTW,Polestar_Nav,Polestar_QuestDB"
++                .split(',').map(str::to_string).collect(),
++            ..Default::default()
++        };
++        let recorder = CatalogEntry {
++            id: "gh-1417882268:polestar-recorder-zip".into(), name: "Polestar Recorder".into(),
++            github: complete.github.clone(), asset_name_pattern: Some("Polestar_Recorder-*.zip".into()),
++            folders: vec!["Polestar_Recorder".into()], ..Default::default()
++        };
++        let spoken = CatalogEntry {
++            id: "gh-1360371543:quests-audio".into(), name: "Spoken Quests Audio (All)".into(),
++            github: Some("rusty-key/spoken-wow".into()),
++            release_tag_prefix: Some("quests-audio/".into()),
++            asset_name_pattern: Some("SpokenQuestsAudioAll-*.zip".into()),
++            folders: ["SpokenQuestsAudioAlliance", "SpokenQuestsAudioHorde",
++                "SpokenQuestsAudioShared", "SpokenQuestsAudioGossip"].map(str::to_string).to_vec(),
++            ..Default::default()
++        };
++        let cat = Catalog { addons: vec![complete.clone(), recorder.clone(), spoken.clone(),
++            CatalogEntry { id: "spoken".into(), name: "Spoken".into(),
++                github: spoken.github.clone(), folders: vec!["Spoken".into()],
++                release_tag_prefix: Some("spoken/".into()),
++                asset_name_pattern: Some("Spoken-*.zip".into()), ..Default::default() }],
++            ..Default::default() };
++        let st = AppState::default();
++        for entry in [&complete, &recorder, &spoken] {
++            for name in &entry.folders {
++                // Real audio TOCs declare X-Part-Of: Spoken. Catalogue folders
++                // must win rather than merging the audio into the player.
++                let packages = build_packages(&st, &cat, &[
++                    folder(name, &[], Some("Spoken")), folder("Spoken", &[], None)]);
++                let package = packages.iter().find(|p| p.folders.contains(name)).unwrap();
++                assert_eq!(package.catalog_id.as_deref(), Some(entry.id.as_str()), "{name}");
++                assert_eq!(package.key, format!("cat:{}", entry.id));
++                assert_eq!(package.source, Some(Source::Github(entry.github.clone().unwrap())));
++                let (_, tag_prefix, pattern, _) = entry_hint(&cat, package);
++                assert_eq!(tag_prefix, entry.release_tag_prefix, "{name}");
++                assert_eq!(pattern, entry.asset_name_pattern, "{name}");
++            }
++        }
++        let all: Vec<_> = complete.folders.iter().chain(&recorder.folders)
++            .map(|name| folder(name, &[], None)).collect();
++        let packages = build_packages(&st, &cat, &all);
++        assert_eq!(packages.len(), 2);
++        assert_eq!(packages.iter().find(|p| p.catalog_id.as_deref() == Some(&complete.id)).unwrap().folders.len(), 24);
++        assert_eq!(packages.iter().find(|p| p.catalog_id.as_deref() == Some(&recorder.id)).unwrap().folders, ["Polestar_Recorder"]);
++    }
++
+     #[test]
+     fn missing_dependencies_are_reported_and_matched_to_catalogue() {
+         let st = AppState::default();
+diff --git a/src-tauri/src/native_worker.rs b/src-tauri/src/native_worker.rs
+index 39db96e..cce6971 100644
+--- a/src-tauri/src/native_worker.rs
++++ b/src-tauri/src/native_worker.rs
+@@ -289,7 +289,8 @@ pub async fn download(
+     let mut total = 0u64;
+     let mut hash = Sha256::new();
+     while let Some(chunk) = body.next().await {
+-        let chunk = chunk?;
++        let chunk = chunk.map_err(|error| anyhow!(
++            "archive download body failed after {total} bytes: {:#}", anyhow::Error::new(error)))?;
+         total = total
+             .checked_add(chunk.len() as u64)
+             .filter(|value| *value <= MAX_ARCHIVE_BYTES)
+diff --git a/src-tauri/src/sources/github.rs b/src-tauri/src/sources/github.rs
+index 3c0b598..85d9ae4 100644
+--- a/src-tauri/src/sources/github.rs
++++ b/src-tauri/src/sources/github.rs
+@@ -8,7 +8,7 @@
+ //! unauthenticated). With pre-releases allowed we must use the API to list
+ //! releases (the `latest` redirect never points at a pre-release).
+
+-use super::Remote;
++use super::{response_json, Remote};
+ use serde::Deserialize;
+
+ #[derive(Deserialize, Debug)]
+@@ -145,7 +145,8 @@ async fn from_api_release(
+     if let Some(rj_asset) = rel.assets.iter().find(|a| a.name == "release.json") {
+         if let Ok(resp) = client.get(&rj_asset.browser_download_url).send().await {
+             if resp.status().is_success() {
+-                if let Ok(rj) = resp.json::<ReleaseJson>().await {
++                if let Ok(rj) = response_json::<ReleaseJson>(resp,
++                    &format!("GitHub release.json for {}", rel.tag_name)).await {
+                     let assets = &rel.assets;
+                     let url_for = |name: &str| {
+                         assets
+@@ -208,9 +209,10 @@ async fn stream_release(
+         if status.as_u16() == 403 || status.as_u16() == 429 {
+             anyhow::bail!("GitHub API rate limit hit on page {page}; try again in an hour");
+         }
+-        let list: Vec<ApiRelease> = resp.error_for_status()
+-            .map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?
+-            .json().await.map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?;
++        let resp = resp.error_for_status()
++            .map_err(|e| anyhow::anyhow!("GitHub API page {page}: {e}"))?;
++        let list: Vec<ApiRelease> = response_json(resp,
++            &format!("GitHub API page {page} ({api})")).await?;
+         let exhausted = list.len() < 100;
+         if let Some(release) = pick_release(&list, tag_prefix, prerelease) {
+             return Ok(release.clone());
+@@ -245,7 +247,8 @@ pub async fn resolve(
+         let base = format!("https://github.com/{repo}/releases/latest/download/");
+         let resp = client.get(format!("{base}release.json")).send().await?;
+         if resp.status().is_success() {
+-            let rj: ReleaseJson = resp.json().await?;
++            let rj: ReleaseJson = response_json(resp,
++                &format!("GitHub release.json for {repo}")).await?;
+             return pick_from_release_json(rj, |name| format!("{base}{name}"), false, flavor);
+         }
+     }
+@@ -260,7 +263,8 @@ pub async fn resolve(
+     if let Some(e) = api_error(resp.status().as_u16(), repo) {
+         return Err(e);
+     }
+-    let rel: ApiRelease = resp.error_for_status()?.json().await?;
++    let rel: ApiRelease = response_json(resp.error_for_status()?,
++        &format!("GitHub latest release API for {repo}")).await?;
+     from_api_release(client, rel, asset_hint, asset_name_pattern, flavor).await
+ }
+
+@@ -268,6 +272,63 @@ pub async fn resolve(
+ mod tests {
+     use super::*;
+     use crate::flavor::Flavor;
++
++    #[tokio::test]
++    async fn issue5_spoken_real_release_shape_selects_only_english_stream() {
++        // Minimized from rusty-key/spoken-wow's 2026-10-23 releases API.
++        let page = r#"[
++            {"tag_name":"quests-audio-esES/v0.0.6","draft":false,"prerelease":false,
++             "assets":[{"name":"SpokenQuestsAudio_esES-0.0.6.zip","browser_download_url":"https://github.com/rusty-key/spoken-wow/releases/download/quests-audio-esES/v0.0.6/SpokenQuestsAudio_esES-0.0.6.zip"}]},
++            {"tag_name":"quests-audio/v2.4.0","draft":false,"prerelease":false,
++             "assets":[{"name":"SpokenQuestsAudioAll-2.4.0.zip","browser_download_url":"https://github.com/rusty-key/spoken-wow/releases/download/quests-audio/v2.4.0/SpokenQuestsAudioAll-2.4.0.zip"}]}
++        ]"#;
++        let (api, requests) = serve_pages(vec![(200, page.into())]).await;
++        let client = reqwest::Client::new();
++        let release = stream_release(&client, &api, Some("quests-audio/"), false).await.unwrap();
++        let remote = from_api_release(&client, release, None, Some("SpokenQuestsAudioAll-*.zip"), Flavor::Forever).await.unwrap();
++        assert_eq!(remote.version, "quests-audio/v2.4.0");
++        assert_eq!(remote.filename, "SpokenQuestsAudioAll-2.4.0.zip");
++        assert_eq!(remote.download_url, "https://github.com/rusty-key/spoken-wow/releases/download/quests-audio/v2.4.0/SpokenQuestsAudioAll-2.4.0.zip");
++        assert_eq!(requests.lock().unwrap().len(), 1);
++    }
++
++    #[tokio::test]
++    async fn issue5_spoken_metadata_schema_errors_are_not_archive_or_transport_errors() {
++        for body in ["<Error><Code>ExpiredToken</Code></Error>",
++            r#"{"message":"API rate limit exceeded"}"#,
++            r#"[{"tag_name":null,"assets":[]}]"#] {
++            let (api, requests) = serve_pages(vec![(200, body.into())]).await;
++            let error = stream_release(&reqwest::Client::new(), &api, Some("quests-audio/"), false).await.unwrap_err().to_string();
++            assert!(error.contains("GitHub API page 1"), "{error}");
++            assert!(error.contains("JSON parse failed:"), "{error}");
++            assert!(!error.contains("body read failed"), "{error}");
++            assert!(!error.contains("archive download"), "{error}");
++            assert_eq!(requests.lock().unwrap().len(), 1);
++        }
++    }
++
++    #[tokio::test]
++    async fn issue5_spoken_truncated_metadata_reports_body_stage_without_retry() {
++        use std::io::{Read, Write};
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let api = format!("http://{}/releases", listener.local_addr().unwrap());
++        let server = std::thread::spawn(move || {
++            let (mut socket, _) = listener.accept().unwrap();
++            let mut request = Vec::new();
++            let mut byte = [0];
++            while !request.ends_with(b"\r\n\r\n") {
++                if socket.read(&mut byte).unwrap_or(0) == 0 { return; }
++                request.push(byte[0]);
++            }
++            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n[").unwrap();
++        });
++        let error = stream_release(&reqwest::Client::new(), &api, Some("quests-audio/"), false).await.unwrap_err().to_string();
++        server.join().unwrap();
++        assert!(error.contains("GitHub API page 1"), "{error}");
++        assert!(error.contains("body read failed:"), "{error}");
++        assert!(!error.contains("JSON parse failed:"), "{error}");
++        assert!(!error.contains("no GitHub release"), "{error}");
++    }
+     #[test]
+     fn retail_keeps_untagged_mainline_assets_in_multi_flavour_releases() {
+         let mainline = ApiAsset { name: "Addon-1.0.zip".into(), browser_download_url: "retail".into() };
+diff --git a/src-tauri/src/sources/mod.rs b/src-tauri/src/sources/mod.rs
+index 911560d..4929983 100644
+--- a/src-tauri/src/sources/mod.rs
++++ b/src-tauri/src/sources/mod.rs
+@@ -9,6 +9,15 @@ pub mod wowi;
+
+ use serde::{Deserialize, Serialize};
+
++async fn response_json<T: serde::de::DeserializeOwned>(
++    response: reqwest::Response, stage: &str,
++) -> anyhow::Result<T> {
++    let bytes = response.bytes().await.map_err(|error| anyhow::anyhow!(
++        "{stage} body read failed: {:#}", anyhow::Error::new(error)))?;
++    serde_json::from_slice(&bytes)
++        .map_err(|error| anyhow::anyhow!("{stage} JSON parse failed: {error}"))
++}
++
+ #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
+ #[serde(tag = "kind", content = "id", rename_all = "lowercase")]
+ pub enum Source {
+diff --git a/src-tauri/src/sources/tukui.rs b/src-tauri/src/sources/tukui.rs
+index d8cfc35..eb1e793 100644
+--- a/src-tauri/src/sources/tukui.rs
++++ b/src-tauri/src/sources/tukui.rs
+@@ -19,7 +19,8 @@ pub async fn resolve(client: &reqwest::Client, slug: &str, flavor: crate::flavor
+     if resp.status().as_u16() == 404 {
+         anyhow::bail!("TukUI has no addon '{slug}'");
+     }
+-    let a: TukAddon = resp.error_for_status()?.json().await?;
++    let a: TukAddon = super::response_json(resp.error_for_status()?,
++        &format!("TukUI add-on API for {slug}")).await?;
+     if a.url.is_empty() {
+         anyhow::bail!("TukUI entry has no download url");
+     }
+diff --git a/src-tauri/src/sources/wago.rs b/src-tauri/src/sources/wago.rs
+index ab39a8c..c089864 100644
+--- a/src-tauri/src/sources/wago.rs
++++ b/src-tauri/src/sources/wago.rs
+@@ -28,7 +28,8 @@ pub async fn resolve(
+         404 => anyhow::bail!("Wago has no {} release for this addon", flavor.id()),
+         _ => {}
+     }
+-    let v: Value = resp.error_for_status()?.json().await?;
++    let v: Value = super::response_json(resp.error_for_status()?,
++        &format!("Wago release API for {id}")).await?;
+     let recent = v.get("recent_release").or_else(|| v.get("recent_releases")).unwrap_or(&Value::Null);
+     // Stable first unless the user allows beta builds; alpha only as a last resort.
+     let order: &[&str] = if prerelease {
+diff --git a/src-tauri/src/sources/wowi.rs b/src-tauri/src/sources/wowi.rs
+index a675d22..4a3ce40 100644
+--- a/src-tauri/src/sources/wowi.rs
++++ b/src-tauri/src/sources/wowi.rs
+@@ -19,7 +19,8 @@ pub async fn resolve(client: &reqwest::Client, id: u64, flavor: crate::flavor::F
+     if resp.status().as_u16() == 404 {
+         anyhow::bail!("WoWInterface has no addon with id {id}");
+     }
+-    let list: Vec<FileDetails> = resp.error_for_status()?.json().await?;
++    let list: Vec<FileDetails> = super::response_json(resp.error_for_status()?,
++        &format!("WoWInterface file details API for {id}")).await?;
+     let d = list
+         .into_iter()
+         .next()

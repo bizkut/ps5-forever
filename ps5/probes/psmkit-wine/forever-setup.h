@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "wine/ps5_prefix_init.h"
 #include "sha256.h"
 #include "wow-channels.h"
 
@@ -236,26 +237,107 @@ done:
     return error;
 }
 
-/* An initialized prefix has its three registries and the update stamp, and
- * no first-start setup left unfinished. */
-static inline int forever_prefix_ready(const char *prefix)
+/* Read only regular, no-follow title files. Exact proofs include their newline
+ * and version; neither an empty marker nor an unknown version is completion. */
+static inline int forever_init_file_matches(const char *path, const char *text,
+                                            size_t size, int exact)
+{
+    struct stat status;
+    char bytes[64], extra;
+    size_t used = 0;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK), matches = 0;
+    if (fd < 0) return 0;
+    if (fstat(fd, &status) || !S_ISREG(status.st_mode) || size > sizeof(bytes) ||
+        (exact && status.st_size != (off_t)size)) goto done;
+    while (used < size)
+    {
+        ssize_t count = read(fd, bytes + used, size - used);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) goto done;
+        used += (size_t)count;
+    }
+    if (size && memcmp(bytes, text, size)) goto done;
+    if (exact)
+    {
+        ssize_t count;
+        do count = read(fd, &extra, 1); while (count < 0 && errno == EINTR);
+        if (count) goto done;
+    }
+    matches = 1;
+done:
+    if (close(fd)) matches = 0;
+    return matches;
+}
+
+static inline int forever_prefix_hives_ready(const char *prefix)
 {
     static const char *const names[] = { "system.reg", "user.reg", "userdef.reg", ".update-timestamp" };
-    char path[1024], head[32];
+    char path[1024];
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
     {
         if (snprintf(path, sizeof(path), "%s/%s", prefix, names[i]) >= (int)sizeof(path)) return 0;
-        if (i < 3)
-        {
-            int fd = open(path, O_RDONLY);
-            ssize_t got = fd < 0 ? -1 : read(fd, head, 23);
-            if (fd >= 0) close(fd);
-            if (got != 23 || strncmp(head, "WINE REGISTRY Version 2", 23)) return 0;
-        }
-        else if (!forever_exists(path)) return 0;
+        if (!forever_init_file_matches(path, "WINE REGISTRY Version 2", i < 3 ? 23 : 0, 0)) return 0;
     }
-    snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix);
-    return !forever_exists(path);
+    return 1;
+}
+
+/* Legacy hives/stamps alone are not evidence that both Trust/SIP providers
+ * initialized. The native title persists Wine's proof only after shutdown. */
+static inline int forever_prefix_ready(const char *prefix)
+{
+    char path[1024];
+    int fd;
+    if (!forever_prefix_hives_ready(prefix)) return 0;
+    if (snprintf(path, sizeof(path), "%s/" WINE_PS5_PREFIX_TRUST_READY_NAME, prefix) >= (int)sizeof(path))
+        return 0;
+    if (!forever_init_file_matches(path, WINE_PS5_PREFIX_INIT_PROOF,
+                                  sizeof(WINE_PS5_PREFIX_INIT_PROOF) - 1, 1)) return 0;
+    if (snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix) >= (int)sizeof(path)) return 0;
+    fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return errno == ENOENT;
+    close(fd);
+    return 0;
+}
+
+static inline int forever_init_sync_directory(const char *prefix)
+{
+    int error = 0, fd = open(prefix, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (fd < 0) return -errno;
+    if (fsync(fd)) error = -errno;
+    if (close(fd) && !error) error = -errno;
+    return error;
+}
+
+/* Only initialization markers use this durable atomic publication. Pending
+ * must survive interruption before the old ready proof is invalidated. */
+static inline int forever_init_publish(const char *prefix, const char *name, const char *text)
+{
+    char path[1024], temporary[1100];
+    size_t left = strlen(text);
+    int fd, error = 0;
+    if (snprintf(path, sizeof(path), "%s/%s", prefix, name) >= (int)sizeof(path) ||
+        snprintf(temporary, sizeof(temporary), "%s.forever-tmp", path) >= (int)sizeof(temporary))
+        return -ENAMETOOLONG;
+    if (unlink(temporary) && errno != ENOENT) return -errno;
+    fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    if (fd < 0) return -errno;
+    while (left)
+    {
+        ssize_t count = write(fd, text, left);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { error = count < 0 ? -errno : -EIO; break; }
+        text += count;
+        left -= (size_t)count;
+    }
+    if (!error && fsync(fd)) error = -errno;
+    if (close(fd) && !error) error = -errno;
+    if (!error && rename(temporary, path)) error = -errno;
+    if (error)
+    {
+        if (unlink(temporary) && errno != ENOENT) return -errno;
+        return error;
+    }
+    return forever_init_sync_directory(prefix);
 }
 
 /* Before wineboot -i: give every title Wine process the prefix it requires
@@ -272,12 +354,18 @@ static inline int forever_begin_init(const char *prefix)
     char path[1024], text[160];
     int error;
 
-    snprintf(path, sizeof(path), "%s/drive_c", prefix);
+    if (snprintf(path, sizeof(path), "%s/drive_c", prefix) >= (int)sizeof(path)) return -ENAMETOOLONG;
     if ((error = forever_mkdirs(path))) return error;
-    snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix);
-    if ((error = forever_write_file(path, "", 0))) return error;
-    snprintf(path, sizeof(path), "%s/" FOREVER_WINEBOOT_DONE, prefix);
+    if (snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix) >= (int)sizeof(path))
+        return -ENAMETOOLONG;
+    if ((error = forever_init_publish(prefix, FOREVER_INIT_PENDING, ""))) return error;
+    if (snprintf(path, sizeof(path), "%s/" WINE_PS5_PREFIX_TRUST_READY_NAME, prefix) >= (int)sizeof(path))
+        return -ENAMETOOLONG;
     if (unlink(path) && errno != ENOENT) return -errno;
+    if (snprintf(path, sizeof(path), "%s/" FOREVER_WINEBOOT_DONE, prefix) >= (int)sizeof(path))
+        return -ENAMETOOLONG;
+    if (unlink(path) && errno != ENOENT) return -errno;
+    if ((error = forever_init_sync_directory(prefix))) return error;
     for (size_t i = 0; i < sizeof(hives) / sizeof(hives[0]); ++i)
     {
         snprintf(path, sizeof(path), "%s/%s", prefix, hives[i][0]);
@@ -289,24 +377,47 @@ static inline int forever_begin_init(const char *prefix)
     return forever_write_file(path, "1\n", 2);
 }
 
-/* wineboot -i has finished its last step: 1, or 0 while it is still running. */
+/* Wine's last initialization step validates both architectures and writes the
+ * shared proof. This is transient until Wine stops and saves its hives. */
 static inline int forever_wineboot_done(const char *prefix)
 {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/" FOREVER_WINEBOOT_DONE, prefix);
-    return forever_exists(path);
+    if (snprintf(path, sizeof(path), "%s/" FOREVER_WINEBOOT_DONE, prefix) >= (int)sizeof(path)) return 0;
+    return forever_init_file_matches(path, WINE_PS5_PREFIX_INIT_PROOF,
+                                    sizeof(WINE_PS5_PREFIX_INIT_PROOF) - 1, 1);
 }
 
-/* After Wine has ended: a finished setup clears both markers. 1 finished,
- * 0 unfinished, -errno failure. */
-static inline int forever_finish_init(const char *prefix)
+/* After Wine has stopped and saved its registries: publish its validated proof
+ * before removing transient/pending state. A failed Wine exit never commits.
+ * 1 finished, 0 unfinished, -errno failure; failures remain repairable in place. */
+static inline int forever_finish_init(const char *prefix, int wine_status)
 {
     char path[1024];
-    if (!forever_wineboot_done(prefix)) return 0;
-    snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix);
-    if (unlink(path) && errno != ENOENT) return -errno;
+    int error;
+    if (snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix) >= (int)sizeof(path))
+        return -ENAMETOOLONG;
+    if (wine_status || !forever_init_file_matches(path, NULL, 0, 0) ||
+        !forever_wineboot_done(prefix) || !forever_prefix_hives_ready(prefix)) return 0;
+    if ((error = forever_init_publish(prefix, WINE_PS5_PREFIX_TRUST_READY_NAME,
+                                     WINE_PS5_PREFIX_INIT_PROOF))) return error;
     snprintf(path, sizeof(path), "%s/" FOREVER_WINEBOOT_DONE, prefix);
-    if (unlink(path) && errno != ENOENT) return -errno;
+    if (unlink(path)) return -errno;
+    if ((error = forever_init_sync_directory(prefix))) return error;
+    snprintf(path, sizeof(path), "%s/" FOREVER_INIT_PENDING, prefix);
+    if (unlink(path)) return -errno;
+    if ((error = forever_init_sync_directory(prefix)))
+    {
+        /* A failed durability check must not turn into readiness on restart.
+         * Restore pending first; if that fails, invalidate the ready proof. */
+        if (forever_init_publish(prefix, FOREVER_INIT_PENDING, ""))
+        {
+            snprintf(path, sizeof(path), "%s/" WINE_PS5_PREFIX_TRUST_READY_NAME, prefix);
+            if (unlink(path) && errno != ENOENT) return -errno;
+            int sync_error = forever_init_sync_directory(prefix);
+            if (sync_error) return sync_error;
+        }
+        return error;
+    }
     return 1;
 }
 

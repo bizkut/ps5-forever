@@ -13,6 +13,8 @@ NATIVE_TOOL ?= $(PS5_VULKAN)/build/host/ps5-native-tool
 PATCH := ../localproc/patch-local-helper.py
 IO := ../localproc/psmkit-io.c
 WINE_SRC ?= $(abspath ../../../../ps5-wine)
+PREFIX_INIT_HEADER := $(WINE_SRC)/include/wine/ps5_prefix_init.h
+PREFIX_INIT_INCLUDES := -idirafter "$(WINE_SRC)/include"
 HOST_CC ?= cc
 HOST_CXX ?= c++
 LLVM_MINGW ?= $(HOME)/llvm-mingw
@@ -71,7 +73,7 @@ runtime-qualification: runtime-child pe $(HOST_OUT)/test-staged-runtime
 runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py \
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
 		runtime-parent.h runtime-relaunch.h wow-channels.h writebroker-autostart.h writebroker-menu.h \
-		forever-menu-settings.h forever-setup.h sha256.h addon-worker-elf.h runtime-vulkan.c runtime-profile.h runtime-input.c \
+		forever-menu-settings.h forever-setup.h $(PREFIX_INIT_HEADER) sha256.h addon-worker-elf.h runtime-vulkan.c runtime-profile.h runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) $(TITLE_VOICE) \
 		../../title/installer-continue.h \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
@@ -147,7 +149,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-forever-menu $(HOST_OUT)/test-forever-exit \
 		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-worker $(HOST_OUT)/test-addonforge-security $(HOST_OUT)/test-addon-trash-native \
 		$(HOST_OUT)/test-addon-native-worker $(HOST_OUT)/addon-worker-host $(HOST_OUT)/test-addon-worker-elf \
-		$(HOST_OUT)/test-addon-worker-request \
+		$(HOST_OUT)/test-addon-worker-request $(HOST_OUT)/test-registry-save \
 		$(HOST_OUT)/test-forever-menu-diag \
 		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
 		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
@@ -195,6 +197,7 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 	python3 test-addon-native-worker-protocol.py "$(HOST_OUT)/addon-worker-host"
 	$(HOST_OUT)/test-addon-worker-elf
 	$(HOST_OUT)/test-addon-worker-request
+	$(HOST_OUT)/test-registry-save
 	$(HOST_OUT)/test-forever-menu-diag
 	$(HOST_OUT)/test-title-icon
 	$(HOST_OUT)/test-desktop-surface
@@ -231,9 +234,9 @@ $(HOST_OUT)/test-audio-mixer: test-audio-mixer.c \
 		test-audio-mixer.c $(WINE_SRC)/dlls/wineps5audio.drv/mixer.c -o $@
 
 $(HOST_OUT)/test-runtime-relaunch: test-runtime-relaunch.c runtime-relaunch.h wow-channels.h forever-paths.h \
-		forever-setup.h sha256.h protocol.h
+		forever-setup.h $(PREFIX_INIT_HEADER) sha256.h protocol.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) $< -o $@
 
 .PHONY: test-supervisor-admission
 test-supervisor-admission: $(HOST_OUT)/test-supervisor-admission
@@ -298,22 +301,36 @@ $(HOST_OUT)/test-writebroker-space: test-writebroker-space.c build-writebroker-s
 		$(WINE_SRC)/include/wine/ps5_writebroker.h
 	python3 build-writebroker-space-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
 
-$(HOST_OUT)/test-wow-channels: test-wow-channels.c wow-channels.h forever-setup.h sha256.h
+$(HOST_OUT)/test-wow-channels: test-wow-channels.c wow-channels.h forever-setup.h $(PREFIX_INIT_HEADER) sha256.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) $< -o $@
 
-$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h wow-channels.h sha256.h
+.PHONY: test-prefix-init
+test-prefix-init: $(HOST_OUT)/test-forever-setup
+	$(HOST_OUT)/test-forever-setup --prefix-init
+
+
+.PHONY: test-registry-save
+test-registry-save: $(HOST_OUT)/test-registry-save
+	$(HOST_OUT)/test-registry-save
+
+$(HOST_OUT)/test-registry-save: build-registry-save-test.py test-registry-save.c \
+		build-desktop-surface-test.py $(WINE_SRC)/server/registry.c \
+		$(WINE_SRC)/server/file.c $(WINE_SRC)/programs/wineboot/ps5-crypto.h \
+		$(WINE_SRC)/include/wine/ps5_prefix_init.h
+	python3 build-registry-save-test.py --wine "$(WINE_SRC)" --output "$@" --cc "$(HOST_CC)"
+$(HOST_OUT)/test-forever-setup: test-forever-setup.c forever-setup.h $(PREFIX_INIT_HEADER) wow-channels.h sha256.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $< -o $@
+	$(HOST_CC) -std=c11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) $< -o $@
 
 $(HOST_OUT)/test-forever-exit: test-forever-exit.c build-forever-exit-test.py \
 		build-desktop-surface-test.py native-entry.c ../../title/forever-menu.h
 	python3 build-forever-exit-test.py --output "$@" --cc "$(HOST_CC)"
 
 $(HOST_OUT)/test-forever-menu: test-forever-menu.c forever-menu-settings.h forever-download.h ../../title/voice-model.h writebroker-menu.h \
-		forever-setup.h wow-channels.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
+		forever-setup.h $(PREFIX_INIT_HEADER) wow-channels.h sha256.h ../../title/forever-menu.c ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-forever-menu.c \
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) test-forever-menu.c \
 		../../title/forever-menu.c -o $@
 
 $(HOST_OUT)/test-addonforge-client: test-addonforge-client.c \
@@ -382,9 +399,9 @@ $(HOST_OUT)/addon-worker-host: $(ADDON_WORKER_DIR)/main.cpp \
 		$(ADDON_WORKER_DIR)/main.cpp $(ADDON_WORKER_DIR)/addon-worker.cpp \
 		$(ADDON_WORKER_HOST_OBJECTS) -o $@
 
-$(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h sha256.h third_party/stb/stb_image.h
+$(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h $(PREFIX_INIT_HEADER) sha256.h third_party/stb/stb_image.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@ -lm
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) $< -o $@ -lm
 
 # Short tuning poll so the live log_async switch is exercised in milliseconds.
 $(HOST_OUT)/test-title-log: test-title-log.c title-log.c title-log.h
@@ -401,7 +418,7 @@ $(HOST_OUT)/test-battlenet-restart: test-battlenet-restart.c \
 $(HOST_OUT)/test-runtime-input: test-runtime-input.c runtime-input.c ../../title/pointer.c \
 		../../title/input.h ../../title/pointer.h ../../title/ime.h ../../title/cursor-arrow.h \
 		../../title/voice.h ../../title/voice-state.h ../../title/voice-state.c \
-		forever-menu-settings.h forever-setup.h ../../title/forever-menu.h \
+		forever-menu-settings.h forever-setup.h $(PREFIX_INIT_HEADER) ../../title/forever-menu.h \
 		$(WINE_SRC)/include/wine/ps5_title_input.h $(WINE_SRC)/include/wine/ps5_desktop.h \
 		$(WINE_SRC)/include/wine/ps5_title_gamepad.h
 	mkdir -p $(HOST_OUT)
@@ -416,9 +433,9 @@ $(HOST_OUT)/test-title-ime: test-title-ime.c ../../title/ime.c ../../title/ime.h
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
 
 $(HOST_OUT)/test-title-voice: test-title-voice.c ../../title/voice-state.c ../../title/voice-state.h ../../title/input.h \
-		forever-menu-settings.h forever-setup.h ../../title/forever-menu.h
+		forever-menu-settings.h forever-setup.h $(PREFIX_INIT_HEADER) ../../title/forever-menu.h
 	mkdir -p $(HOST_OUT)
-	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-title-voice.c ../../title/voice-state.c -o $@
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $(PREFIX_INIT_INCLUDES) test-title-voice.c ../../title/voice-state.c -o $@
 
 $(HOST_OUT)/test-title-voice-overlay: test-title-voice-overlay.c ../../title/voice-overlay-raster.c \
 		../../title/voice-overlay-raster.h ../../title/bitmap-font.h
