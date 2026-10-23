@@ -176,7 +176,10 @@ import json, sys
 path = sys.argv[1]
 with open(path) as file:
     param = json.load(file)
-param["attribute3"] |= 0x80040
+# Retail VRR titles combine the high-frame-rate bit with 0x40000. The older
+# 0x80000 entitlement asks for a VRR-required 120 Hz mode but disables system
+# VRR; clear it even if an input parameter file still carries it.
+param["attribute3"] = (param.get("attribute3", 0) & ~0x80000) | 0x40040
 with open(path, "w") as file:
     json.dump(param, file, indent=2)
     file.write("\n")

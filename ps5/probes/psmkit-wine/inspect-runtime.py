@@ -826,9 +826,11 @@ base_parameter = read_json(here / '../../title/sce_sys/param.json', 'source titl
 expected_parameter = dict(base_parameter)
 if selected.get('gpu', False):
     expected_parameter['attribute'] = expected_parameter.get('attribute', 0) | 0x20000000
-    expected_parameter['attribute3'] = expected_parameter.get('attribute3', 0) | 0x80040
+    # Keep system VRR enabled while retaining the high-frame-rate declaration.
+    expected_parameter['attribute3'] = (
+        expected_parameter.get('attribute3', 0) & ~0x80000) | 0x40040
 require(read_json(parent_title / 'sce_sys/param.json', 'parent parameters') == expected_parameter,
-        'native parent HDR attribute/profile mismatch')
+        'native parent VRR/HDR attribute/profile mismatch')
 signal_compile = build_manifest.get('signal_compile')
 require(isinstance(signal_compile, list) and '-DWINE_PS5_TITLE' in signal_compile and
         '-DWINE_PS5_TITLE_X64_ONLY' not in signal_compile,

@@ -304,6 +304,24 @@ remain in force.
   `.41`; it is not a claim that the reporter's firmware was tested.
 
 
+## 120 Hz and VRR title metadata
+
+- GPU-role title packaging clears `attribute3` bit `0x80000` and sets
+  `0x40040`: `0x40` lets Mesa offer VideoOut mode 15 (measured 119.88 Hz),
+  while `0x40000` is the metadata used by retail VRR titles. The older
+  `0x80000 | 0x40` combination selected the high-frame-rate mode but disabled
+  the system's VRR path.
+- `inspect-runtime.py` derives and checks the exact packaged value, so a GPU
+  title cannot qualify with the old VRR-disabling bit or without the HFR bit.
+  Mesa still measures vblank and restores 59.94 Hz if the display remains
+  there; metadata does not override the user's system setting or display
+  capability.
+- The inspected system module has internal VRR peg/status libraries and logs
+  `setVrrMaster`, plus a Param.json output-configuration gate. Its title-facing
+  wrapper warns that system processes should use `sceVideoOutSysSetDrrPeg`
+  instead. Forever therefore uses the normal title metadata contract rather
+  than calling that system-only control or patching kernel state.
+
 ## Forever menu source changes
 
 - The maintenance role links the CPU-composited Forever menu; the headless GPU

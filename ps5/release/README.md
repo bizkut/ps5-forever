@@ -231,6 +231,14 @@ its method by itself:
   frame generation. The file is not included and never downloaded.
 - Without it, it uses **AMD FSR 3** frame generation, which needs no extra file.
 
+The GPU game role declares PS5's retail **VRR + high-frame-rate** metadata.
+With VRR set to **Automatic** in the PS5's Screen and Video settings and an
+HDMI 2.1 VRR display, the console can vary refresh while WoW runs. The game
+still requests the measured 119.88 Hz mode for 120 Hz/frame generation and
+falls back to 59.94 Hz when the display does not take it. Battle.net's
+maintenance desktop keeps its normal output path. There is no separate
+Forever menu switch: the console and display settings remain authoritative.
+
 To use Lossless Scaling:
 
 1. On your PC, find `Lossless.dll` in your Lossless Scaling folder
