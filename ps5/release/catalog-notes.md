@@ -6,6 +6,18 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.021
+
+**Adds PS5 VRR support for WoW at up to 120 Hz.**
+
+- The game title now declares the retail VRR and high-frame-rate metadata
+  instead of the older combination that disabled system VRR.
+- Before the first frames, a VRR display may idle at its 48 Hz floor. Forever
+  now keeps the accepted 119.88 Hz mode instead of misreading that idle rate as
+  failed 120 Hz and restoring 59.94 Hz.
+- On a compatible display, set PS5 **VRR** to **Automatic**. If VideoOut does
+  not offer or accept the 119.88 Hz mode, Forever continues at 59.94 Hz.
+
 ### Forever Launcher 01.000.020
 
 **Repairs Battle.net signature setup and completes large add-on installs.**

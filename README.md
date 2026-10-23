@@ -27,26 +27,19 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.020
+## What's new in 01.000.021
 
-- **Fixes Battle.net signature setup failures:** incomplete Wine Trust and PE
-  signature-provider registrations are repaired through normal Wine setup before
-  Battle.net starts. A missing provider now fails closed instead of reporting a
-  false success that breaks Blizzard's follow-up signer check.
-- **Large add-on downloads can finish:** continuously progressing archives get
-  up to 15 minutes, with a 30-second idle limit. Metadata requests retain their
-  shorter timeout and failures now name the download/body/JSON stage.
-- **Polestar is complete:** its core package now installs all 24 folders,
-  including Codex, Guides, Brazilian Portuguese Guides and Names, Item Data,
-  Navigation and the Quest Database. Recorder remains a separate optional pack.
-- **Native add-on staging:** archive hashing, extraction, durability and
-  same-drive activation run in a bounded native worker. Interrupted operations
-  retain their recovery proof; removal cleanup cannot resurrect partial folders.
-- Existing 01.000.018 catalogue caches migrate automatically, so corrected rows
-  appear without deleting files or waiting 24 hours.
+- **Adds PS5 VRR support for WoW at up to 120 Hz.** The game title now declares
+  the retail VRR and high-frame-rate metadata instead of the older combination
+  that disabled system VRR.
+- **Keeps 119.88 Hz active in VRR mode.** Before the first frames, a VRR display
+  may idle at its 48 Hz floor. Forever no longer mistakes that valid idle rate
+  for failed 120 Hz and restores 59.94 Hz.
+- On a compatible display, set PS5 **VRR** to **Automatic**. If VideoOut does
+  not offer or accept the 119.88 Hz mode, Forever continues at 59.94 Hz.
 
-01.000.018 restored separate Spoken Books, Quests and Zones release streams and
-complete GitHub release pagination.
+01.000.020 repaired Battle.net signature setup, completed large add-on
+downloads, and moved add-on staging into the bounded native worker.
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 
