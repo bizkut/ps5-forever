@@ -1,0 +1,55 @@
+--- a/src/vulkan/wsi/wsi_common_videoout.c
++++ b/src/vulkan/wsi/wsi_common_videoout.c
+@@ -141,7 +141,9 @@
+ /* param.json's attribute3 bit for 120 Hz output. PS5_Vulkan R31/R92 declared it with 0x80000
+  * (a 120 Hz mode that requires VRR), which turns the system's VRR off; retail titles with VRR
+  * declare 0x40 with 0x40000. VideoOut itself grants mode 15 or refuses it. */
+ #define VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE 0x40u
++#define VIDEOOUT_ATTRIBUTE3_VRR 0x40000u
++#define VIDEOOUT_ATTRIBUTE3_VRR_DISABLED 0x80000u
+ 
+ #if !defined(__PROSPERO__)
+ /* The host model: flips show at once and a vblank comes every millisecond,
+@@ -733,7 +735,9 @@ videoout_open_locked(void)
+       fprintf(stderr, "wsi/videoout: sceVideoOutOpen failed: 0x%08x\n", (unsigned)out->handle);
+       return false;
+    }
+-   if (videoout_title_declares_high_frame_rate()) {
++   uint32_t attribute3 = 0;
++   if (videoout_title_attribute("\"attribute3\"", VIDEOOUT_ATTRIBUTE3_HIGH_FRAME_RATE,
++                                &attribute3, NULL, NULL)) {
+       const int supported =
+          sceVideoOutIsOutputSupported(out->handle, PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL);
+       const int configured =
+@@ -741,14 +745,23 @@ videoout_open_locked(void)
+             ? sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_HIGH_FRAME_RATE, NULL, NULL, NULL)
+             : supported;
+-      out->high_frame_rate = configured == 0;
++      out->high_frame_rate = supported > 0 && configured == 0;
+       if (out->high_frame_rate) {
+-         const uint64_t period = videoout_vblank_period_ns(out->handle);
+-         if (period > VIDEOOUT_HIGH_REFRESH_LIMIT_NS) {
+-            sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL);
+-            out->high_frame_rate = false;
+-            fprintf(stderr,
+-                    "wsi/videoout: 119.88 Hz accepted, but a vblank comes every %.3f ms; 59.94 Hz restored\n",
+-                    (double)period / 1e6);
++         const bool vrr = (attribute3 & VIDEOOUT_ATTRIBUTE3_VRR) != 0 &&
++                          (attribute3 & VIDEOOUT_ATTRIBUTE3_VRR_DISABLED) == 0;
++         if (vrr) {
++            /* Before the first presents, a VRR output may idle at its 48 Hz
++             * floor. Bare-vblank timing cannot distinguish that valid state
++             * from fixed 60 Hz, so ConfigureOutput is authoritative. */
++            fprintf(stderr, "wsi/videoout: 119.88 Hz selected with title VRR metadata\n");
++         } else {
++            const uint64_t period = videoout_vblank_period_ns(out->handle);
++            if (period > VIDEOOUT_HIGH_REFRESH_LIMIT_NS) {
++               sceVideoOutConfigureOutput(out->handle, PS5_VIDEO_OUT_MODE_RESTORE, NULL, NULL, NULL);
++               out->high_frame_rate = false;
++               fprintf(stderr,
++                       "wsi/videoout: 119.88 Hz accepted, but a vblank comes every %.3f ms; "
++                       "59.94 Hz restored\n", (double)period / 1e6);
++            }
+          }
+       } else {
+          fprintf(stderr, "wsi/videoout: 119.88 Hz %s (%d); presenting at 59.94 Hz\n",

@@ -313,9 +313,11 @@ remain in force.
   the system's VRR path.
 - `inspect-runtime.py` derives and checks the exact packaged value, so a GPU
   title cannot qualify with the old VRR-disabling bit or without the HFR bit.
-  Mesa still measures vblank and restores 59.94 Hz if the display remains
-  there; metadata does not override the user's system setting or display
-  capability.
+  For VRR metadata, Mesa treats a successful mode-15 configuration as
+  authoritative: before the first presents the output may legitimately idle at
+  its 48 Hz floor, so bare-vblank timing must not misclassify it as fixed 60 Hz.
+  Non-VRR HFR titles retain the measured-vblank fallback, and an API refusal
+  still presents at 59.94 Hz.
 - The inspected system module has internal VRR peg/status libraries and logs
   `setVrrMaster`, plus a Param.json output-configuration gate. Its title-facing
   wrapper warns that system processes should use `sceVideoOutSysSetDrrPeg`
