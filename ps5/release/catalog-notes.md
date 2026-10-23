@@ -6,7 +6,7 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
-### Forever Launcher 01.000.019
+### Forever Launcher 01.000.020
 
 **Repairs Battle.net signature setup and completes large add-on installs.**
 

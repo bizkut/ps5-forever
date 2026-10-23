@@ -27,7 +27,7 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.019
+## What's new in 01.000.020
 
 - **Fixes Battle.net signature setup failures:** incomplete Wine Trust and PE
   signature-provider registrations are repaired through normal Wine setup before

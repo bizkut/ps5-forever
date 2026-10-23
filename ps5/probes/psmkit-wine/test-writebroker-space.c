@@ -64,26 +64,26 @@ static void say(const char *format, ...)
     (void)format;
 }
 
-/* Match the PS5 statfs signed available-block counter even on Linux hosts,
- * whose statfs field is unsigned. Other counters come from real statfs. */
+/* Deterministic PS5-shaped counters isolate protocol/conversion behavior from
+ * unrelated concurrent host-disk allocation during parallel release builds. */
 struct test_statfs
 {
     uint64_t f_bsize, f_blocks, f_bfree;
     int64_t f_bavail;
 };
+static const struct test_statfs expected_statfs = {
+    .f_bsize = 16384,
+    .f_blocks = 1000003,
+    .f_bfree = 500009,
+    .f_bavail = 400009,
+};
 
 static int test_statfs(const char *path, struct test_statfs *info)
 {
-    struct statfs native;
-    int result;
-
     __atomic_fetch_add(&statfs_calls, 1, __ATOMIC_SEQ_CST);
     assert(!strcmp(path, WB_USER_ROOT "space"));
-    if ((result = statfs(directory, &native))) return result;
-    info->f_bsize = native.f_bsize;
-    info->f_blocks = native.f_blocks;
-    info->f_bfree = native.f_bfree;
-    info->f_bavail = __atomic_load_n(&negative_available, __ATOMIC_SEQ_CST) ? -4 : (int64_t)native.f_bavail;
+    *info = expected_statfs;
+    if (__atomic_load_n(&negative_available, __ATOMIC_SEQ_CST)) info->f_bavail = -4;
     return 0;
 }
 
@@ -223,7 +223,7 @@ static struct wb_statfs_reply query(int fd, const char *path)
 
 static void protocol_tests(void)
 {
-    struct statfs expected;
+    struct test_statfs expected = expected_statfs;
     struct wb_statfs_reply reply;
     struct wb_write malformed[] = {
         {.magic = WB_STATFS_MAGIC},
@@ -267,13 +267,12 @@ static void protocol_tests(void)
               "menu broker deletion roots are the exact fixed set");
     }
 
-    assert(!statfs(directory, &expected));
     reply = query(fd, WB_USER_ROOT "space");
     check(reply.magic == WB_MAGIC && !reply.result, "query reply accepted");
     check(reply.bsize == (uint64_t)expected.f_bsize && reply.blocks == expected.f_blocks,
-          "real statfs block size and total");
-    check(reply.bfree == expected.f_bfree && reply.bavail == expected.f_bavail,
-          "real statfs free and available");
+          "deterministic statfs block size and total");
+    check(reply.bfree == expected.f_bfree && reply.bavail == (uint64_t)expected.f_bavail,
+          "deterministic statfs free and available");
     __atomic_store_n(&negative_available, 1, __ATOMIC_SEQ_CST);
     reply = query(fd, WB_USER_ROOT "space");
     check(!reply.result && !reply.bavail, "negative statfs availability serialized as zero");
@@ -731,10 +730,10 @@ static void client_tests(void)
 {
     FILE_FS_FULL_SIZE_INFORMATION info;
     FILE_FS_FULL_SIZE_INFORMATION_EX extended;
-    struct statfs expected;
+    struct test_statfs expected = expected_statfs;
     int fd = open(directory, O_RDONLY | O_DIRECTORY), attempts;
 
-    assert(fd >= 0 && !statfs(directory, &expected));
+    assert(fd >= 0);
     check(get_full_size_info(1, fd, &info) == STATUS_SUCCESS, "absent broker falls back successfully");
     check(info.TotalAllocationUnits.QuadPart == (INT64_C(64) << 30) / 4096 &&
           info.CallerAvailableAllocationUnits.QuadPart == (INT64_C(16) << 30) / 4096,
