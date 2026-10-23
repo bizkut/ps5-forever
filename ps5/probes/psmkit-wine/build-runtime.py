@@ -16,7 +16,8 @@ from runtime_imports import (
     write_candidate, write_outputs,
 )
 from runtime_profiles import (
-    WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, runtime_tree_manifest, builtin_prefix_files,
+    ADDON_WORKER_MAX_BYTES, ADDON_WORKER_RELATIVE, WRITEBROKER_MAX_BYTES,
+    WRITEBROKER_RELATIVE, profile, runtime_tree_manifest, builtin_prefix_files,
 )
 
 here = Path(__file__).resolve().parent
@@ -37,6 +38,8 @@ parser.add_argument('--freetype-build', type=Path, default=here / '../../build/f
     help="ps5/build-freetype.sh's CMake build tree, whose objects are relinked (B1 only)")
 parser.add_argument('--writebroker-elf', type=Path,
     help='bounded payload ELF shipped as B1 title data')
+parser.add_argument('--addon-worker-elf', type=Path,
+    help='bounded native add-on worker ELF shipped as B1 title data')
 parser.add_argument('--vkd3d-dlls', type=Path, default=here / '../../build/vkd3d-proton-64/dlls',
     help="ps5/build-vkd3d-proton.sh's 64-bit d3d12.dll and d3d12core.dll (B1 only)")
 parser.add_argument('--dxvk-dlls', type=Path, default=here / '../../build/dxvk-64/dlls',
@@ -47,18 +50,21 @@ selected = profile(args.profile, json.loads(args.profile_config.read_text()) if 
 gnutls_lib = args.gnutls_lib.resolve()
 freetype_build = args.freetype_build.resolve()
 writebroker_elf = args.writebroker_elf.resolve() if args.writebroker_elf else None
+addon_worker_elf = args.addon_worker_elf.resolve() if args.addon_worker_elf else None
 if args.profile == 'b1':
-    if (writebroker_elf is None or writebroker_elf.is_symlink() or
-            not writebroker_elf.is_file()):
-        raise SystemExit(f'B1 write broker ELF missing or unsafe: {writebroker_elf}')
-    writebroker_size = writebroker_elf.stat().st_size
-    if not 0 < writebroker_size <= WRITEBROKER_MAX_BYTES:
-        raise SystemExit(f'B1 write broker ELF exceeds bounded size: {writebroker_size}')
-    with writebroker_elf.open('rb') as source:
-        if source.read(4) != b'\x7fELF':
-            raise SystemExit(f'B1 write broker payload is not an ELF: {writebroker_elf}')
-elif writebroker_elf is not None:
-    raise SystemExit('--writebroker-elf is B1-only')
+    for label, payload, maximum in (
+            ('write broker', writebroker_elf, WRITEBROKER_MAX_BYTES),
+            ('add-on worker', addon_worker_elf, ADDON_WORKER_MAX_BYTES)):
+        if payload is None or payload.is_symlink() or not payload.is_file():
+            raise SystemExit(f'B1 {label} ELF missing or unsafe: {payload}')
+        size = payload.stat().st_size
+        if not 0 < size <= maximum:
+            raise SystemExit(f'B1 {label} ELF exceeds bounded size: {size}')
+        with payload.open('rb') as source:
+            if source.read(4) != b'\x7fELF':
+                raise SystemExit(f'B1 {label} payload is not an ELF: {payload}')
+elif writebroker_elf is not None or addon_worker_elf is not None:
+    raise SystemExit('payload helper ELFs are B1-only')
 profile_leaf = 'title-psmkit-wine-b1' if args.profile == 'b1' else 'title-psmkit-wine-runtime'
 quarantine = (args.quarantine or (here / '../../build' / (profile_leaf + '-quarantine'))).resolve()
 work = quarantine / 'child-work'
@@ -577,6 +583,8 @@ if args.profile == 'b1':
         program + ' ' + ' '.join(switches) for program, switches in selected['browser_switches'].items())) + '\n'
     profile_defines += '#define PW_RUNTIME_WRITEBROKER_ELF ' + json.dumps(
         selected['root'] + '/' + WRITEBROKER_RELATIVE) + '\n'
+    profile_defines += '#define PW_RUNTIME_ADDON_WORKER_ELF ' + json.dumps(
+        selected['root'] + '/' + ADDON_WORKER_RELATIVE) + '\n'
     # Runtime-game profiles deliberately generate no channel-specific argv.
     # native-entry requires the validated Play/direct-game wire before Wine.
     profile_defines += '#define PW_RUNTIME_PARENT_ARGV {' + ','.join(
@@ -698,7 +706,7 @@ if gpu_sources:
     metadata['attribute'] = metadata.get('attribute', 0) | 0x20000000
     parameter.write_text(json.dumps(metadata, indent=2) + '\n')
 
-writebroker_identity = None
+writebroker_identity = addon_worker_identity = None
 if args.profile == 'b1':
     # Use Wine's own install rules for the complete PE/data layout, but copy
     # only the Windows trees and data. No generic Unix library is admitted.
@@ -719,15 +727,21 @@ if args.profile == 'b1':
     if tree.exists():
         shutil.rmtree(tree)
     (tree / 'lib/wine').mkdir(parents=True)
-    writebroker_destination = tree / WRITEBROKER_RELATIVE
-    shutil.copy2(writebroker_elf, writebroker_destination)
-    writebroker_identity = {
-        'path': WRITEBROKER_RELATIVE,
-        'app_path': selected['root'] + '/' + WRITEBROKER_RELATIVE,
-        'classification': 'data_only_not_loaded',
-        'size': writebroker_destination.stat().st_size,
-        'sha256': hashlib.sha256(writebroker_destination.read_bytes()).hexdigest(),
-    }
+    helper_identities = {}
+    for key, relative, payload in (
+            ('writebroker', WRITEBROKER_RELATIVE, writebroker_elf),
+            ('addon_worker', ADDON_WORKER_RELATIVE, addon_worker_elf)):
+        destination = tree / relative
+        shutil.copy2(payload, destination)
+        helper_identities[key] = {
+            'path': relative,
+            'app_path': selected['root'] + '/' + relative,
+            'classification': 'data_only_not_loaded',
+            'size': destination.stat().st_size,
+            'sha256': hashlib.sha256(destination.read_bytes()).hexdigest(),
+        }
+    writebroker_identity = helper_identities['writebroker']
+    addon_worker_identity = helper_identities['addon_worker']
     for arch in ('i386', 'x86_64'):
         shutil.copytree(installed / f'lib/wine/{arch}-windows', tree / f'lib/wine/{arch}-windows')
     shutil.copytree(installed / 'share/wine', tree / 'share/wine')
@@ -821,6 +835,7 @@ build_manifest = {
     'feature_macro': 'WINE_PS5_TITLE',
     'profile': selected,
     **({'writebroker': writebroker_identity} if writebroker_identity else {}),
+    **({'addon_worker': addon_worker_identity} if addon_worker_identity else {}),
     'variant_compiles': variant_compiles,
     'quarantine': str(quarantine.relative_to(here.parent.parent)),
     'generic_outputs_untouched': [

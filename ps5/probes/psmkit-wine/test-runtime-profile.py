@@ -8,8 +8,9 @@ from pathlib import Path
 import tempfile
 
 from runtime_profiles import (
-    WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, installed_paths,
-    runtime_tree_manifest, b1_guard_paths, qualified_b1_folder, file_identity, builtin_prefix_files,
+    ADDON_WORKER_MAX_BYTES, ADDON_WORKER_RELATIVE, WRITEBROKER_MAX_BYTES,
+    WRITEBROKER_RELATIVE, profile, installed_paths, runtime_tree_manifest,
+    b1_guard_paths, qualified_b1_folder, file_identity, builtin_prefix_files,
 )
 from runtime_imports import (
     candidate_ownership, module_manifest, render_include, load_policy, make_records,
@@ -386,7 +387,8 @@ for invalid in ({'root': '/app0/wine'}, {'prefix': '/app0/../data'}, {'argv': []
 
 with tempfile.TemporaryDirectory(prefix='pw-b1-profile-') as temporary:
     root = Path(temporary) / 'tree'
-    for relative in (WRITEBROKER_RELATIVE, 'lib/wine/i386-windows/ntdll.dll',
+    for relative in (WRITEBROKER_RELATIVE, ADDON_WORKER_RELATIVE,
+                     'lib/wine/i386-windows/ntdll.dll',
                      'lib/wine/x86_64-windows/ntdll.dll', 'share/wine/nls/locale.nls',
                      'share/wine/wine.inf', 'lib/wine/x86_64-unix/wine',
                      'lib/wine/x86_64-unix/ntdll.so', 'lib/wine/x86_64-unix/win32u.so',
@@ -397,7 +399,10 @@ with tempfile.TemporaryDirectory(prefix='pw-b1-profile-') as temporary:
                      'lib/wine/x86_64-unix/dwrite.so', 'lib/libfreetype.so'):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b'\x7fELFhost-test' if relative == WRITEBROKER_RELATIVE else relative.encode())
+        path.write_bytes(
+            b'\x7fELFhost-test'
+            if relative in (WRITEBROKER_RELATIVE, ADDON_WORKER_RELATIVE)
+            else relative.encode())
     manifest = runtime_tree_manifest(root, b1)
     assert manifest['remote_root'] == '/data/homebrew/PPSA99030/wine-title'
     assert manifest['pe_dll_counts'] == {'i386': 1, 'x86_64': 1}
@@ -405,6 +410,8 @@ with tempfile.TemporaryDirectory(prefix='pw-b1-profile-') as temporary:
         b'share/wine/nls/locale.nls').hexdigest()
     assert manifest['files'][WRITEBROKER_RELATIVE] == file_identity(root / WRITEBROKER_RELATIVE)
     assert (root / WRITEBROKER_RELATIVE).stat().st_size <= WRITEBROKER_MAX_BYTES
+    assert manifest['files'][ADDON_WORKER_RELATIVE] == file_identity(root / ADDON_WORKER_RELATIVE)
+    assert (root / ADDON_WORKER_RELATIVE).stat().st_size <= ADDON_WORKER_MAX_BYTES
     modules = module_manifest({name: root / relative.removeprefix('/app0/wine-title/')
                               for name, relative in b1['module_paths'].items()}, profile_name='b1')
     assert all(item['path'].startswith('/app0/wine-title/') for item in modules)
@@ -435,8 +442,16 @@ with tempfile.TemporaryDirectory(prefix='pw-b1-profile-') as temporary:
         'size': (root / WRITEBROKER_RELATIVE).stat().st_size,
         'sha256': file_identity(root / WRITEBROKER_RELATIVE)['sha256'],
     }
+    addon_worker_identity = {
+        'path': ADDON_WORKER_RELATIVE,
+        'app_path': b1['root'] + '/' + ADDON_WORKER_RELATIVE,
+        'classification': 'data_only_not_loaded',
+        'size': (root / ADDON_WORKER_RELATIVE).stat().st_size,
+        'sha256': file_identity(root / ADDON_WORKER_RELATIVE)['sha256'],
+    }
     material = {
         'profile': b1, 'modules': modules, 'writebroker': broker_identity,
+        'addon_worker': addon_worker_identity,
         'title_root': inventory(folder / 'wine-title'),
         'parent_title': [item for item in inventory(folder)
                          if not item['path'].startswith('wine-title/') and item['path'] not in

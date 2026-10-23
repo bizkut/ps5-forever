@@ -575,18 +575,38 @@ Classic Era failure is not established.
 - `0010-distinct-github-release-streams.patch` deduplicates GitHub rows only
   when both repository and release selectors match, so independently packaged
   add-ons from one repository remain separate Find entries.
+- `0011-native-addon-worker.patch` keeps source resolution and package state in
+  AddonForge, but streams release bytes through the separately versioned
+  `wine-title/addon-worker.elf` payload. A separate per-page worker key travels
+  over the inherited ELF-loader socket; loopback peers prove possession with
+  domain-separated HMAC challenges rather than transmitting a bearer key.
+  The retained loader connection is also the worker's title-lifetime lease.
+  Archive writes are confined to helper-owned
+  `C:\Forever\AddonStaging\<32-hex-operation>` trees, exposed read-only to Wine.
+  One opened archive object binds hashing, ZIP validation and all extraction
+  readers. The client and helper independently hash the stream; archive size,
+  expansion, entry count, ASCII Windows-safe paths/depth, implicit-directory
+  and case collisions, links, special files, CRC and frames fail closed.
+  Eight fixed extraction workers coalesce one-MiB writes, followed by a bounded
+  file/directory fsync pass. AddonForge scans executable content and bounded
+  selected-flavour TOCs before requesting native activation. The helper can
+  rename admitted folders only below a validated channel in the fixed
+  `C:\Program Files (x86)\World of Warcraft` root. Its private inode-bound
+  journal recovers interrupted replacements and never deletes unrestored
+  backups; committed cleanup preserves later user edits. Connection admission
+  and protocol deadlines are bounded. Disconnects cancel and clean staging;
+  no partial native operation silently falls back to Wine. The worker starts
+  before the core and stops when Add-ons closes or the title loses its lease.
   GitHub cache records include format `2` and their source URL. Legacy records
   or records from another catalogue endpoint are never treated as fresh or as
   stale fallback data: the core refreshes immediately and uses the bundled
   snapshot if that first refresh is unavailable.
   Catalogue release timestamps feed Find's Last update field directly. Generated
   descriptions use ASCII separators, while unsupported third-party glyphs are
-  rendered as spaces instead of question marks. Add-on downloads retain the
-  4 GiB safety cap but buffer 8 MiB before writing through Wine. ZIP extraction
-  avoids a seek-invalidated large read buffer and writes each decompressed file
-  once up to 64 MiB, then in 4 MiB chunks. A pollable operation status reports
-  download percentage and unpacked file counts to the title; its 15-second poll
-  deadline avoids abandoning delayed loopback responses during heavy I/O.
+  rendered as spaces instead of question marks. A pollable operation status
+  reports download percentage and unpacked file counts to the title; its
+  15-second poll deadline avoids abandoning delayed loopback responses during
+  heavy I/O.
   Removing an add-on atomically renames its folders into hidden
   `.addonforge-tmp/trash-*`, writes `.complete`, and returns immediately;
   AddonForge never unlinks completed trash. After the Add-ons page closes and

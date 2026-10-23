@@ -9,6 +9,7 @@
 
 #define ADDONFORGE_CONTROL_SECRET_HEX 64
 #define ADDONFORGE_CORE_TOKEN_MAX 128
+#define ADDONFORGE_WORKER_TOKEN_HEX 64
 
 enum addonforge_control_action
 {
@@ -20,6 +21,7 @@ struct addonforge_control_request
 {
     enum addonforge_control_action action;
     char core_token[ADDONFORGE_CORE_TOKEN_MAX + 1];
+    char worker_token[ADDONFORGE_WORKER_TOKEN_HEX + 1];
 };
 
 enum addonforge_shutdown_delivery
@@ -71,7 +73,7 @@ static inline int addonforge_secret_equal(const char *left, const char *right)
 static inline int addonforge_control_parse(
     char *line, const char *expected_secret, struct addonforge_control_request *request)
 {
-    char *secret, *action, *argument = NULL, *space;
+    char *secret, *action, *argument = NULL, *worker_token = NULL, *space;
     if (!line || !request || strncmp(line, "AUTH ", 5)) return -EINVAL;
     secret = line + 5;
     if (!(space = strchr(secret, ' '))) return -EINVAL;
@@ -86,12 +88,21 @@ static inline int addonforge_control_parse(
         return 0;
     }
     if (!strcmp(action, "START") && argument &&
-        addonforge_hex_token(argument, 32, ADDONFORGE_CORE_TOKEN_MAX))
+        (space = strchr(argument, ' ')) != NULL)
     {
-        memset(request, 0, sizeof(*request));
-        request->action = ADDONFORGE_CONTROL_START;
-        memcpy(request->core_token, argument, strlen(argument) + 1);
-        return 0;
+        *space = 0;
+        worker_token = space + 1;
+        if (!strchr(worker_token, ' ') &&
+            addonforge_hex_token(argument, 32, ADDONFORGE_CORE_TOKEN_MAX) &&
+            addonforge_hex_token(worker_token, ADDONFORGE_WORKER_TOKEN_HEX,
+                                 ADDONFORGE_WORKER_TOKEN_HEX))
+        {
+            memset(request, 0, sizeof(*request));
+            request->action = ADDONFORGE_CONTROL_START;
+            memcpy(request->core_token, argument, strlen(argument) + 1);
+            memcpy(request->worker_token, worker_token, strlen(worker_token) + 1);
+            return 0;
+        }
     }
     return -EINVAL;
 }

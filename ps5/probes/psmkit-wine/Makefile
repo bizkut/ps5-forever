@@ -14,6 +14,7 @@ PATCH := ../localproc/patch-local-helper.py
 IO := ../localproc/psmkit-io.c
 WINE_SRC ?= $(abspath ../../../../ps5-wine)
 HOST_CC ?= cc
+HOST_CXX ?= c++
 LLVM_MINGW ?= $(HOME)/llvm-mingw
 MINGW_CC ?= $(LLVM_MINGW)/bin/x86_64-w64-mingw32-clang
 MINGW32_CC ?= $(LLVM_MINGW)/bin/i686-w64-mingw32-clang
@@ -21,6 +22,10 @@ WINE_BUILD ?= ../../build/wine-ps5-build
 WINEBUILD ?= ../../build/wine-ps5-tools/tools/winebuild/winebuild
 WRITEBROKER_ELF := ../../build/writebroker/writebroker.elf
 WRITEBROKER_DIR := ../../writebroker
+ADDON_WORKER_ELF := ../../build/addon-worker/addon-worker.elf
+ADDON_WORKER_DIR := ../../addon-worker
+ADDON_WORKER_MINIZ := miniz miniz_tinfl miniz_tdef miniz_zip
+ADDON_WORKER_HOST_OBJECTS := $(addprefix $(HOST_OUT)/addon-worker-,$(addsuffix .o,$(ADDON_WORKER_MINIZ)))
 RUNTIME_OUT := ../../build/title-psmkit-wine-runtime
 RUNTIME_QUARANTINE := ../../build/title-psmkit-wine-runtime-quarantine
 RUNTIME_PARENT := $(RUNTIME_QUARANTINE)/parent-title
@@ -66,19 +71,19 @@ runtime-qualification: runtime-child pe $(HOST_OUT)/test-staged-runtime
 runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py \
 		runtime_imports.py runtime-import-policy-b1.json native-entry.c runtime-parent.c \
 		runtime-parent.h runtime-relaunch.h wow-channels.h writebroker-autostart.h writebroker-menu.h \
-		forever-menu-settings.h forever-setup.h sha256.h runtime-vulkan.c runtime-profile.h runtime-input.c \
+		forever-menu-settings.h forever-setup.h sha256.h addon-worker-elf.h runtime-vulkan.c runtime-profile.h runtime-input.c \
 		protocol.c protocol.h title-log.c title-log.h $(TITLE_DESKTOP) $(TITLE_VOICE) \
 		../../title/installer-continue.h \
 		../../title/forever-menu.h ../../title/addonforge-client.h \
 		../../title/addonforge-security.h ../../title/menu-font.h \
 		../../title/menu-diag.h ../../title/tools/make-menu-font.py \
-		../../title/cursor-arrow.h \
-		$(PE_OUT)/audio-tone.exe $(WRITEBROKER_ELF)
+		../../title/cursor-arrow.h ../../addon-worker/protocol.h \
+		$(PE_OUT)/audio-tone.exe $(WRITEBROKER_ELF) $(ADDON_WORKER_ELF)
 	# B1 installs Wine's PE tree (make install-lib), which runs the i686/x86_64
 	# mingw compilers configure chose; they live in llvm-mingw's bin.
 	PATH="$(dir $(MINGW_CC)):$$PATH" python3 build-runtime.py --wine-build "$(WINE_BUILD)" \
 		--profile b1 $(B1_CONFIG_ARG) --writebroker-elf "$(WRITEBROKER_ELF)" \
-		--quarantine "$(B1_QUARANTINE)"
+		--addon-worker-elf "$(ADDON_WORKER_ELF)" --quarantine "$(B1_QUARANTINE)"
 	python3 inspect-runtime.py --wine-build "$(WINE_BUILD)" --profile b1 $(B1_CONFIG_ARG) \
 		--host-test "$(HOST_OUT)/test-staged-runtime" \
 		--parent-title "$(B1_QUARANTINE)/parent-title" --quarantine "$(B1_QUARANTINE)" --publish "$(B1_OUT)"
@@ -86,6 +91,12 @@ runtime-b1: $(HOST_OUT)/test-staged-runtime build-runtime.py runtime_profiles.py
 $(WRITEBROKER_ELF): $(WRITEBROKER_DIR)/writebroker.c $(WRITEBROKER_DIR)/Makefile \
 		writebroker-menu.h $(WINE_SRC)/include/wine/ps5_writebroker.h
 	$(MAKE) -C "$(WRITEBROKER_DIR)" WINE_SRC="$(WINE_SRC)" all
+
+$(ADDON_WORKER_ELF): $(ADDON_WORKER_DIR)/main.cpp $(ADDON_WORKER_DIR)/addon-worker.cpp \
+		$(ADDON_WORKER_DIR)/addon-worker.hpp $(ADDON_WORKER_DIR)/protocol.h \
+		sha256.h $(ADDON_WORKER_DIR)/verify-sources.py \
+		$(ADDON_WORKER_DIR)/Makefile $(wildcard $(ADDON_WORKER_DIR)/third_party/miniz/*)
+	$(MAKE) -C "$(ADDON_WORKER_DIR)" all
 
 # Product publication: independently build/qualify maintenance first and game
 # second, then bind both receipts and both role-specific children into one tree.
@@ -135,6 +146,8 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 		$(HOST_OUT)/test-writebroker-autostart $(HOST_OUT)/test-writebroker-space $(HOST_OUT)/test-title-log \
 		$(HOST_OUT)/test-forever-setup $(HOST_OUT)/test-forever-menu $(HOST_OUT)/test-forever-exit \
 		$(HOST_OUT)/test-addonforge-client $(HOST_OUT)/test-addonforge-worker $(HOST_OUT)/test-addonforge-security $(HOST_OUT)/test-addon-trash-native \
+		$(HOST_OUT)/test-addon-native-worker $(HOST_OUT)/addon-worker-host $(HOST_OUT)/test-addon-worker-elf \
+		$(HOST_OUT)/test-addon-worker-request \
 		$(HOST_OUT)/test-forever-menu-diag \
 		$(HOST_OUT)/test-title-icon $(HOST_OUT)/test-desktop-surface \
 		$(HOST_OUT)/test-cursor $(HOST_OUT)/test-cursor-hub \
@@ -178,6 +191,10 @@ test: $(HOST_OUT)/test-protocol $(HOST_OUT)/test-supervisor-admission $(HOST_OUT
 	$(HOST_OUT)/test-addonforge-worker
 	$(HOST_OUT)/test-addonforge-security
 	$(HOST_OUT)/test-addon-trash-native
+	$(HOST_OUT)/test-addon-native-worker
+	python3 test-addon-native-worker-protocol.py "$(HOST_OUT)/addon-worker-host"
+	$(HOST_OUT)/test-addon-worker-elf
+	$(HOST_OUT)/test-addon-worker-request
 	$(HOST_OUT)/test-forever-menu-diag
 	$(HOST_OUT)/test-title-icon
 	$(HOST_OUT)/test-desktop-surface
@@ -316,6 +333,23 @@ $(HOST_OUT)/test-addon-trash-native: test-addon-trash-native.c addon-trash-nativ
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror test-addon-trash-native.c -o $@
 
+.PHONY: test-addon-worker-elf
+test-addon-worker-elf: $(HOST_OUT)/test-addon-worker-elf
+	$(HOST_OUT)/test-addon-worker-elf
+
+$(HOST_OUT)/test-addon-worker-elf: test-addon-worker-elf.c addon-worker-elf.h \
+		../../addon-worker/protocol.h
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+.PHONY: test-addon-worker-request
+test-addon-worker-request: $(HOST_OUT)/test-addon-worker-request
+	$(HOST_OUT)/test-addon-worker-request
+
+$(HOST_OUT)/test-addon-worker-request: test-addon-worker-request.c build-addon-worker-request-test.py \
+		build-desktop-surface-test.py native-entry.c sha256.h ../../addon-worker/protocol.h
+	python3 build-addon-worker-request-test.py --output "$@" --cc "$(HOST_CC)"
+
 $(HOST_OUT)/test-forever-menu-diag: test-forever-menu-diag.c ../../title/menu-diag.h \
 		../../title/input.h
 	mkdir -p $(HOST_OUT)
@@ -326,6 +360,28 @@ $(HOST_OUT)/test-addonforge-security: test-addonforge-security.c \
 		../../addonforge/addonforge-control.h ../../title/addonforge-security.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@
+
+$(HOST_OUT)/addon-worker-%.o: $(ADDON_WORKER_DIR)/third_party/miniz/%.c \
+		$(wildcard $(ADDON_WORKER_DIR)/third_party/miniz/*.h)
+	mkdir -p $(HOST_OUT)
+	$(HOST_CC) -std=c11 -O2 -w -c $< -o $@
+
+$(HOST_OUT)/test-addon-native-worker: test-addon-native-worker.cpp \
+		$(ADDON_WORKER_DIR)/addon-worker.cpp $(ADDON_WORKER_DIR)/addon-worker.hpp \
+		$(ADDON_WORKER_DIR)/protocol.h sha256.h $(ADDON_WORKER_HOST_OBJECTS)
+	mkdir -p $(HOST_OUT)
+	$(HOST_CXX) -std=c++20 -O2 -g -Wall -Wextra -Werror -pthread \
+		test-addon-native-worker.cpp $(ADDON_WORKER_DIR)/addon-worker.cpp \
+		$(ADDON_WORKER_HOST_OBJECTS) -o $@
+
+$(HOST_OUT)/addon-worker-host: $(ADDON_WORKER_DIR)/main.cpp \
+		$(ADDON_WORKER_DIR)/addon-worker.cpp $(ADDON_WORKER_DIR)/addon-worker.hpp \
+		$(ADDON_WORKER_DIR)/protocol.h sha256.h $(ADDON_WORKER_HOST_OBJECTS)
+	mkdir -p $(HOST_OUT)
+	$(HOST_CXX) -std=c++20 -O2 -g -Wall -Wextra -Werror -pthread \
+		$(ADDON_WORKER_DIR)/main.cpp $(ADDON_WORKER_DIR)/addon-worker.cpp \
+		$(ADDON_WORKER_HOST_OBJECTS) -o $@
+
 $(HOST_OUT)/test-title-icon: test-title-icon.c title-icon.h forever-setup.h sha256.h third_party/stb/stb_image.h
 	mkdir -p $(HOST_OUT)
 	$(HOST_CC) -std=gnu11 -O2 -g -Wall -Wextra -Werror $< -o $@ -lm

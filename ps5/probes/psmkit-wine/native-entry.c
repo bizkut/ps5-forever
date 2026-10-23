@@ -16,6 +16,7 @@
 #include "forever-menu-settings.h"
 #include "../../title/addonforge-client.h"
 #include "../../title/addonforge-security.h"
+#include "../../addon-worker/protocol.h"
 #endif
 #if defined(PW_RUNTIME_B1) && defined(PW_PARENT_ROLE) && !PW_RUNTIME_GPU
 #include "addon-trash-native.h"
@@ -2270,6 +2271,8 @@ void title_desktop_addons_error(const char *);
 void title_desktop_addons_pause(const char *);
 void title_desktop_addons_progress(const char *);
 static int pw_writebroker_connect_port(unsigned int, int64_t);
+static int pw_title_addon_worker_start(const char token[AW_TOKEN_BYTES]);
+static int pw_title_addon_worker_stop(const char token[AW_TOKEN_BYTES]);
 
 struct forever_addons_request
 {
@@ -2290,6 +2293,7 @@ static struct
     size_t channel_count;
     char response[ADDONFORGE_RESPONSE_BYTES];
     char token[65];
+    char worker_token[65];
     char control_token[65];
     unsigned generation;
     enum forever_wago_key_status wago_status; /* global key state survives per-view failures */
@@ -2603,7 +2607,7 @@ static void *forever_addons_worker(void *unused)
     struct addonforge_client client = {
         .port = ADDONFORGE_CORE_PORT, .token = forever_addons.token, .timeout_ms = 1000};
     char plain[FOREVER_MENU_STATUS_BYTES] = {0}, control[160];
-    int error = 0;
+    int error = 0, addon_worker_started = 0, services_ready = 0;
     (void)unused;
     pthread_mutex_lock(&forever_addons.lock);
     request = forever_addons.request;
@@ -2615,12 +2619,18 @@ static void *forever_addons_worker(void *unused)
         forever_addons.channel_count = 0;
         error = wow_channels_scan(PW_RUNTIME_PREFIX, forever_addons_channel_visit, NULL);
         if (error) goto done;
-        snprintf(control, sizeof(control), "START %s", forever_addons.token);
         pthread_mutex_lock(&forever_addons.lifecycle_lock);
         if (!forever_addons_current(request.generation))
             error = -ECANCELED;
         else
+            error = pw_title_addon_worker_start(forever_addons.worker_token);
+        if (!error)
+        {
+            addon_worker_started = 1;
+            snprintf(control, sizeof(control), "START %s %s",
+                     forever_addons.token, forever_addons.worker_token);
             error = forever_addons_control(control);
+        }
         if (!error && !forever_addons_current(request.generation))
         {
             int stop_error = forever_addons_control("STOP");
@@ -2642,6 +2652,7 @@ static void *forever_addons_worker(void *unused)
             usleep(250000);
         }
         if (error) goto done;
+        services_ready = 1;
         io_log("forever addons core ready generation=%u port=%u",
                request.generation, ADDONFORGE_CORE_PORT);
     }
@@ -2671,6 +2682,14 @@ static void *forever_addons_worker(void *unused)
                forever_addons.snapshot.count);
     }
 done:
+    if (error && addon_worker_started && !services_ready)
+    {
+        int stop_error;
+        pthread_mutex_lock(&forever_addons.lifecycle_lock);
+        stop_error = pw_title_addon_worker_stop(forever_addons.worker_token);
+        pthread_mutex_unlock(&forever_addons.lifecycle_lock);
+        io_log("forever addon worker rollback stop result=%d", stop_error);
+    }
     if (error && error != -ECANCELED && forever_addons_current(request.generation))
     {
         memset(&forever_addons.snapshot, 0, sizeof(forever_addons.snapshot));
@@ -2691,14 +2710,16 @@ done:
 
 static void *forever_addons_stop_worker(void *unused)
 {
-    int error;
+    int error, worker_error;
     (void)unused;
     pthread_mutex_lock(&forever_addons.lifecycle_lock);
+    worker_error = pw_title_addon_worker_stop(forever_addons.worker_token);
     error = forever_addons_control("STOP");
     pthread_mutex_unlock(&forever_addons.lifecycle_lock);
-    io_log("forever addons core stop result=%d", error);
+    io_log("forever addons core stop result=%d addon_worker=%d", error, worker_error);
     pthread_mutex_lock(&forever_addons.lock);
     memset(forever_addons.token, 0, sizeof(forever_addons.token));
+    memset(forever_addons.worker_token, 0, sizeof(forever_addons.worker_token));
     forever_addons.stopping = 0;
     if (!error) atomic_store(&forever_addon_core_active, 0);
     pthread_mutex_unlock(&forever_addons.lock);
@@ -2752,8 +2773,12 @@ int forever_title_addons_action(
     if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
     {
         result = forever_addons_new_secret(forever_addons.token);
+        if (!result)
+            result = forever_addons_new_secret(forever_addons.worker_token);
         if (result)
         {
+            memset(forever_addons.token, 0, sizeof(forever_addons.token));
+            memset(forever_addons.worker_token, 0, sizeof(forever_addons.worker_token));
             pthread_mutex_unlock(&forever_addons.lock);
             return result;
         }
@@ -2775,9 +2800,13 @@ int forever_title_addons_action(
     if (result)
     {
         forever_addons.busy = 0;
-        if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN) forever_addons.open = 0;
         if (command == FOREVER_MENU_COMMAND_ADDONS_OPEN)
+        {
+            forever_addons.open = 0;
             atomic_store(&forever_addon_core_active, 0);
+            memset(forever_addons.token, 0, sizeof(forever_addons.token));
+            memset(forever_addons.worker_token, 0, sizeof(forever_addons.worker_token));
+        }
     }
     pthread_mutex_unlock(&forever_addons.lock);
     if (result) return -result;
@@ -3367,6 +3396,295 @@ static int pw_title_writebroker_restart(void)
         return 0;
     return -(outcome.error ? outcome.error : EIO);
 }
+
+#if !PW_RUNTIME_GPU && !PW_RUNTIME_HEADLESS
+#define PW_ADDON_WORKER_ELF_MAX_BYTES (2u * 1024u * 1024u)
+#include "addon-worker-elf.h"
+static int pw_addon_worker_lease_fd = -1;
+
+struct pw_addon_worker_start_context
+{
+    const char *token;
+};
+
+static uint32_t pw_addon_worker_get_u32(const unsigned char *bytes)
+{
+    return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) |
+           ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
+
+static void pw_addon_worker_put_u32(unsigned char *bytes, uint32_t value)
+{
+    for (unsigned i = 0; i < 4; ++i) bytes[i] = (unsigned char)(value >> (i * 8));
+}
+
+static void pw_addon_worker_auth_tag(const char token[AW_TOKEN_BYTES],
+                                     const unsigned char challenge[AW_CHALLENGE_BYTES],
+                                     unsigned char domain, unsigned char output[32])
+{
+    unsigned char inner_pad[64], outer_pad[64], inner[32];
+    struct sha256_context hash;
+    for (unsigned i = 0; i < sizeof(inner_pad); ++i)
+    {
+        inner_pad[i] = (unsigned char)token[i] ^ 0x36u;
+        outer_pad[i] = (unsigned char)token[i] ^ 0x5cu;
+    }
+    sha256_init(&hash);
+    sha256_update(&hash, inner_pad, sizeof(inner_pad));
+    sha256_update(&hash, challenge, AW_CHALLENGE_BYTES);
+    sha256_update(&hash, &domain, 1);
+    sha256_final(&hash, inner);
+    sha256_init(&hash);
+    sha256_update(&hash, outer_pad, sizeof(outer_pad));
+    sha256_update(&hash, inner, sizeof(inner));
+    sha256_final(&hash, output);
+    memset(inner_pad, 0, sizeof(inner_pad));
+    memset(outer_pad, 0, sizeof(outer_pad));
+    memset(inner, 0, sizeof(inner));
+}
+
+static int pw_addon_worker_secure_equal(const unsigned char *left,
+                                        const unsigned char *right, size_t size)
+{
+    unsigned difference = 0;
+    for (size_t i = 0; i < size; ++i) difference |= left[i] ^ right[i];
+    return difference == 0;
+}
+
+static int pw_addon_worker_request_until(
+    const char token[AW_TOKEN_BYTES], uint32_t command, int64_t deadline)
+{
+    unsigned char hello[AW_HELLO_BYTES] = {0};
+    unsigned char challenge_reply[AW_CHALLENGE_REPLY_BYTES] = {0};
+    unsigned char client_proof[AW_AUTH_BYTES] = {0};
+    unsigned char auth_reply[AW_AUTH_REPLY_BYTES] = {0}, expected_server[32] = {0};
+    unsigned char request[AW_REQUEST_BYTES] = {0}, reply[AW_REPLY_BYTES] = {0};
+    int fd, result = -EIO;
+
+    if ((fd = pw_writebroker_connect_port(AW_PORT, deadline)) < 0) return -errno;
+    pw_addon_worker_put_u32(hello, AW_MAGIC);
+    pw_addon_worker_put_u32(hello + 4, AW_VERSION);
+    if (pw_writebroker_transfer(fd, hello, sizeof(hello), 1, deadline) ||
+        pw_writebroker_transfer(fd, challenge_reply, sizeof(challenge_reply), 0, deadline))
+    {
+        result = -(errno ? errno : EIO);
+        goto done;
+    }
+    if (pw_addon_worker_get_u32(challenge_reply) != AW_MAGIC ||
+        pw_addon_worker_get_u32(challenge_reply + 4) != AW_VERSION)
+    {
+        result = -EPROTONOSUPPORT;
+        goto done;
+    }
+    pw_addon_worker_auth_tag(token, challenge_reply + 8, 'C', client_proof);
+    pw_addon_worker_auth_tag(token, challenge_reply + 8, 'S', expected_server);
+    if (pw_writebroker_transfer(fd, client_proof, sizeof(client_proof), 1, deadline) ||
+        pw_writebroker_transfer(fd, auth_reply, sizeof(auth_reply), 0, deadline))
+    {
+        /* A short autostart probe can expire after receiving the challenge.
+         * An incomplete exchange is a transport error, not an invalid proof. */
+        result = -(errno ? errno : EIO);
+        goto done;
+    }
+    if (pw_addon_worker_get_u32(auth_reply) != AW_MAGIC ||
+        pw_addon_worker_get_u32(auth_reply + 4) != AW_VERSION ||
+        !pw_addon_worker_secure_equal(auth_reply + 12, expected_server,
+                                      sizeof(expected_server)) ||
+        (int32_t)pw_addon_worker_get_u32(auth_reply + 8))
+    {
+        result = -EACCES;
+        goto done;
+    }
+    pw_addon_worker_put_u32(request, AW_MAGIC);
+    pw_addon_worker_put_u32(request + 4, command);
+    if (pw_writebroker_transfer(fd, request, sizeof(request), 1, deadline) ||
+        pw_writebroker_transfer(fd, reply, sizeof(reply), 0, deadline))
+    {
+        result = -(errno ? errno : EIO);
+        goto done;
+    }
+    if (pw_addon_worker_get_u32(reply) != AW_MAGIC ||
+        pw_addon_worker_get_u32(reply + 4) != AW_VERSION ||
+        pw_addon_worker_get_u32(reply + 8) != AW_PHASE_COMPLETE)
+        result = -EIO;
+    else
+        result = (int32_t)pw_addon_worker_get_u32(reply + 12);
+done:
+    memset(client_proof, 0, sizeof(client_proof));
+    memset(expected_server, 0, sizeof(expected_server));
+    close(fd);
+    return result;
+}
+
+static int pw_addon_worker_request(const char token[AW_TOKEN_BYTES], uint32_t command)
+{
+    return pw_addon_worker_request_until(token, command, io_now_ms() + 2000);
+}
+
+static int pw_addon_worker_wait_stopped(void)
+{
+    int64_t deadline = io_now_ms() + 2000;
+    for (;;)
+    {
+        int64_t now = io_now_ms();
+        int fd;
+        if (now < 0) return -(errno ? errno : EIO);
+        if (now >= deadline) return -ETIMEDOUT;
+        fd = pw_writebroker_connect_port(
+            AW_PORT, pw_writebroker_min_deadline(now + PW_WRITEBROKER_PROBE_MS, deadline));
+        if (fd < 0)
+        {
+            if (errno == ECONNREFUSED) return 0;
+            if (errno != ETIMEDOUT && errno != ECONNRESET && errno != EPIPE)
+                return -(errno ? errno : EIO);
+        }
+        else close(fd);
+        usleep(PW_WRITEBROKER_POLL_MS * 1000);
+    }
+}
+
+static int pw_addon_worker_probe(void *opaque, int64_t deadline, int *error)
+{
+    struct pw_addon_worker_start_context *context = opaque;
+    int result;
+    *error = 0;
+    result = pw_addon_worker_request_until(context->token, AW_COMMAND_PROBE, deadline);
+    if (!result) return 1;
+    if (result == -ECONNREFUSED || result == -EPIPE || result == -ECONNRESET ||
+        result == -EPROTONOSUPPORT || result == -EPROTO || result == -EIO ||
+        result == -ETIMEDOUT)
+        return 0;
+    *error = -result;
+    return -1;
+}
+
+static int pw_addon_worker_send_elf(void *opaque, int64_t deadline, size_t *sent, int *error)
+{
+    unsigned char bytes[16384], startup[AW_STARTUP_BYTES] = {0};
+    struct pw_addon_worker_start_context *context = opaque;
+    struct stat status;
+    uint64_t loader_extent = 0;
+    int file = -1, socket_fd = -1, result = PW_WRITEBROKER_SEND_ERROR;
+    int saved_errno = 0;
+    *sent = 0;
+    if ((file = open(PW_RUNTIME_ADDON_WORKER_ELF, O_RDONLY | O_NOFOLLOW)) < 0)
+    {
+        saved_errno = errno;
+        goto done;
+    }
+    if (fstat(file, &status))
+    {
+        saved_errno = errno;
+        goto done;
+    }
+    if (!S_ISREG(status.st_mode) || status.st_size < 4 ||
+        (uint64_t)status.st_size > PW_ADDON_WORKER_ELF_MAX_BYTES)
+    {
+        saved_errno =
+            (uint64_t)status.st_size > PW_ADDON_WORKER_ELF_MAX_BYTES ? EFBIG : EINVAL;
+        goto done;
+    }
+    saved_errno = -pw_addon_worker_elf_extent(file, (uint64_t)status.st_size, &loader_extent);
+    if (saved_errno) goto done;
+    if ((socket_fd = pw_writebroker_connect_port(PW_WRITEBROKER_ELFLDR_PORT, deadline)) < 0)
+    {
+        saved_errno = errno;
+        result = PW_WRITEBROKER_SEND_ELFLDR_UNAVAILABLE;
+        goto done;
+    }
+    while (*sent < (size_t)loader_extent)
+    {
+        size_t remaining = (size_t)loader_extent - *sent;
+        size_t wanted = remaining < sizeof(bytes) ? remaining : sizeof(bytes);
+        ssize_t count;
+        do count = read(file, bytes, wanted);
+        while (count < 0 && errno == EINTR);
+        if (count <= 0)
+        {
+            saved_errno = count < 0 ? errno : EIO;
+            goto done;
+        }
+        if (!*sent && ((size_t)count < 4 || memcmp(bytes, "\177ELF", 4)))
+        {
+            saved_errno = ENOEXEC;
+            goto done;
+        }
+        if (io_transfer(socket_fd, bytes, (size_t)count, 1, deadline))
+        {
+            saved_errno = errno ? errno : EIO;
+            goto done;
+        }
+        *sent += (size_t)count;
+    }
+    pw_addon_worker_put_u32(startup, AW_MAGIC);
+    pw_addon_worker_put_u32(startup + 4, AW_VERSION);
+    memcpy(startup + 8, context->token, AW_TOKEN_BYTES);
+    if (io_transfer(socket_fd, startup, sizeof(startup), 1, deadline))
+    {
+        saved_errno = errno ? errno : EIO;
+        goto done;
+    }
+    pw_addon_worker_lease_fd = socket_fd;
+    socket_fd = -1;
+    result = PW_WRITEBROKER_SEND_OK;
+done:
+    memset(startup, 0, sizeof(startup));
+    if (file >= 0 && close(file) && !saved_errno) saved_errno = errno;
+    if (socket_fd >= 0 && close(socket_fd) && !saved_errno) saved_errno = errno;
+    if (saved_errno && result == PW_WRITEBROKER_SEND_OK) result = PW_WRITEBROKER_SEND_ERROR;
+    *error = saved_errno;
+    return result;
+}
+
+static int pw_title_addon_worker_start(const char token[AW_TOKEN_BYTES])
+{
+    static const struct pw_writebroker_ops ops = {
+        .now_ms = pw_writebroker_now,
+        .probe = pw_addon_worker_probe,
+        .send_elf = pw_addon_worker_send_elf,
+        .wait_until = pw_writebroker_wait_until,
+    };
+    struct pw_addon_worker_start_context context = {.token = token};
+    struct pw_writebroker_outcome outcome;
+    int result;
+    if (pw_addon_worker_lease_fd >= 0)
+    {
+        close(pw_addon_worker_lease_fd);
+        pw_addon_worker_lease_fd = -1;
+    }
+    result = pw_addon_worker_wait_stopped();
+    if (result)
+    {
+        io_log("forever addon worker start refused: port still active result=%d", result);
+        return result;
+    }
+    outcome = pw_writebroker_autostart(&ops, &context);
+    io_log("forever addon worker start sent=%zu result=%s errno=%d",
+           outcome.sent, pw_writebroker_status_name(outcome.status), outcome.error);
+    if (outcome.status == PW_WRITEBROKER_PRESENT ||
+        outcome.status == PW_WRITEBROKER_STARTED)
+        return 0;
+    if (pw_addon_worker_lease_fd >= 0)
+    {
+        close(pw_addon_worker_lease_fd);
+        pw_addon_worker_lease_fd = -1;
+    }
+    return -(outcome.error ? outcome.error : EIO);
+}
+
+static int pw_title_addon_worker_stop(const char token[AW_TOKEN_BYTES])
+{
+    int request_result = pw_addon_worker_request(token, AW_COMMAND_QUIT);
+    int result;
+    if (pw_addon_worker_lease_fd >= 0)
+    {
+        close(pw_addon_worker_lease_fd);
+        pw_addon_worker_lease_fd = -1;
+    }
+    result = pw_addon_worker_wait_stopped();
+    return result ? (request_result ? request_result : result) : 0;
+}
+#endif
 
 #if !PW_RUNTIME_GPU
 /* Ask the broker to put WB_ICON_FILE on the home screen. 0 with *answer

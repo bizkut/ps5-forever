@@ -75,7 +75,7 @@ static inline void sha256_init(struct sha256_context *context)
 }
 static inline void sha256_update(struct sha256_context *context, const void *data, size_t size)
 {
-    const unsigned char *bytes = data;
+    const unsigned char *bytes = (const unsigned char *)data;
     context->length += (uint64_t)size;
     while (size) {
         size_t available = sizeof(context->block) - context->used;

@@ -1781,4 +1781,5 @@ wine-title/share/wine/winmd/windows.system.winmd
 wine-title/share/wine/winmd/windows.ui.winmd
 wine-title/share/wine/winmd/windows.ui.xaml.winmd
 wine-title/title-root-manifest.json
+wine-title/addon-worker.elf
 wine-title/writebroker.elf

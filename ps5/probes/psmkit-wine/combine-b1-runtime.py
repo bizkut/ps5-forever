@@ -6,7 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
-from runtime_profiles import WRITEBROKER_RELATIVE
+from runtime_profiles import ADDON_WORKER_RELATIVE, WRITEBROKER_RELATIVE
 
 
 def identity(path, root):
@@ -45,22 +45,24 @@ if maintenance_receipt['material']['profile'].get('gpu'):
     raise SystemExit('maintenance input is a GPU profile')
 if not game_receipt['material']['profile'].get('gpu'):
     raise SystemExit('game input is not a GPU profile')
-maintenance_writebroker = maintenance_receipt['material'].get('writebroker')
-game_writebroker = game_receipt['material'].get('writebroker')
-if (not isinstance(maintenance_writebroker, dict) or
-        maintenance_writebroker != game_writebroker):
-    raise SystemExit('maintenance/game write broker data identity differs')
-for folder, writebroker in (
-        (maintenance, maintenance_writebroker), (game, game_writebroker)):
-    actual = identity(folder / 'wine-title' / WRITEBROKER_RELATIVE,
-                      folder / 'wine-title')
-    expected = {
-        'path': writebroker.get('path'),
-        'size': writebroker.get('size'),
-        'sha256': writebroker.get('sha256'),
-    }
-    if actual != expected:
-        raise SystemExit(f'qualified write broker data changed: {folder}')
+helper_identities = {}
+for key, label, relative in (
+        ('writebroker', 'write broker', WRITEBROKER_RELATIVE),
+        ('addon_worker', 'add-on worker', ADDON_WORKER_RELATIVE)):
+    maintenance_helper = maintenance_receipt['material'].get(key)
+    game_helper = game_receipt['material'].get(key)
+    if not isinstance(maintenance_helper, dict) or maintenance_helper != game_helper:
+        raise SystemExit(f'maintenance/game {label} data identity differs')
+    for folder, helper in ((maintenance, maintenance_helper), (game, game_helper)):
+        actual = identity(folder / 'wine-title' / relative, folder / 'wine-title')
+        expected = {
+            'path': helper.get('path'),
+            'size': helper.get('size'),
+            'sha256': helper.get('sha256'),
+        }
+        if actual != expected:
+            raise SystemExit(f'qualified {label} data changed: {folder}')
+    helper_identities[key] = maintenance_helper
 stage = output.with_name(output.name + '-dual-stage')
 if stage.exists(): shutil.rmtree(stage)
 if output.exists(): shutil.rmtree(output)
@@ -79,7 +81,7 @@ material = {
     'game_profile': game_receipt['material']['profile'],
     'maintenance_qualification_key': maintenance_receipt['qualification_key'],
     'game_qualification_key': game_receipt['qualification_key'],
-    'writebroker': maintenance_writebroker,
+    **helper_identities,
     'parent_title': title_inventory(stage),
     'title_root': inventory(stage / 'wine-title'),
     'native_child': maintenance_receipt['material']['native_child'],

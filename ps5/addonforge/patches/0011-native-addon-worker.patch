@@ -1,0 +1,1285 @@
+diff --git a/src-tauri/Cargo.lock b/src-tauri/Cargo.lock
+index c7186e5..b0dc6f3 100644
+--- a/src-tauri/Cargo.lock
++++ b/src-tauri/Cargo.lock
+@@ -16,6 +16,7 @@ dependencies = [
+  "reqwest 0.12.28",
+  "serde",
+  "serde_json",
++ "sha2",
+  "tauri",
+  "tauri-build",
+  "tauri-plugin-dialog",
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 042fee6..b4d05b6 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -51,6 +51,7 @@ anyhow = "1"
+ image = { version = "0.25", default-features = false, features = ["png", "tga", "jpeg", "gif"], optional = true }
+ image-blp = { version = "1", optional = true }
+ base64 = { version = "0.22", optional = true }
++sha2 = "0.10.9"
+ 
+ [profile.release]
+ opt-level = "s"
+diff --git a/src-tauri/src/install.rs b/src-tauri/src/install.rs
+index f39ae4a..36ae66b 100644
+--- a/src-tauri/src/install.rs
++++ b/src-tauri/src/install.rs
+@@ -293,7 +293,8 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+         if depth > 32 {
+             anyhow::bail!("zip nests folders absurdly deep");
+         }
+-        for e in fs::read_dir(dir)?.flatten() {
++        for e in fs::read_dir(dir)? {
++            let e = e?;
+             let p = e.path();
+             let ft = e.file_type()?;
+             if ft.is_symlink() {
+@@ -314,40 +315,15 @@ pub fn safety_scan(root: &Path) -> anyhow::Result<usize> {
+                     p.strip_prefix(root).unwrap_or(&p).display()
+                 );
+             }
+-            // Windows also runs by "magic": check the first bytes of anything unusual.
+-            if !matches!(
+-                ext,
+-                "lua"
+-                    | "xml"
+-                    | "toc"
+-                    | "tga"
+-                    | "blp"
+-                    | "png"
+-                    | "jpg"
+-                    | "jpeg"
+-                    | "gif"
+-                    | "ttf"
+-                    | "otf"
+-                    | "mp3"
+-                    | "ogg"
+-                    | "wav"
+-                    | "txt"
+-                    | "md"
+-                    | "json"
+-                    | "html"
+-                    | "css"
+-                    | "csv"
+-            ) {
+-                if let Ok(mut f) = fs::File::open(&p) {
+-                    let mut head = [0u8; 4];
+-                    use std::io::Read;
+-                    if f.read(&mut head).unwrap_or(0) >= 2 && &head[..2] == b"MZ" {
+-                        anyhow::bail!(
+-                            "SAFETY: refused, {} is a Windows executable in disguise",
+-                            p.strip_prefix(root).unwrap_or(&p).display()
+-                        );
+-                    }
+-                }
++            // Extensions are not an executable admission boundary.
++            let mut f = fs::File::open(&p)?;
++            let mut head = [0u8; 4];
++            use std::io::Read;
++            if f.read(&mut head)? >= 2 && &head[..2] == b"MZ" {
++                anyhow::bail!(
++                    "SAFETY: refused, {} is a Windows executable in disguise",
++                    p.strip_prefix(root).unwrap_or(&p).display()
++                );
+             }
+         }
+         Ok(())
+@@ -503,6 +479,120 @@ pub fn place_timed_with_progress(
+     result
+ }
+ 
++/// Validate a native worker's durable, immutable extraction before asking the
++/// worker to activate it. No live AddOns path is mutated in this process.
++#[derive(Debug)]
++pub struct NativePlacementPlan {
++    pub sources: Vec<(String, String)>,
++    pub result: PlaceResult,
++}
++
++fn validate_native_tree(root: &Path, depth: usize, entries: &mut usize) -> anyhow::Result<()> {
++    if depth > 32 {
++        anyhow::bail!("native extraction nests folders absurdly deep");
++    }
++    let mut names = std::collections::HashSet::new();
++    for entry in fs::read_dir(root)? {
++        let entry = entry?;
++        *entries += 1;
++        if *entries > 32768 {
++            anyhow::bail!("native extraction contains too many entries");
++        }
++        let name = entry.file_name();
++        let name = name.to_str().ok_or_else(|| anyhow!("non-UTF-8 native filename"))?;
++        let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
++        let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
++            || (stem.len() == 4
++                && (stem.starts_with("COM") || stem.starts_with("LPT"))
++                && matches!(stem.as_bytes()[3], b'1'..=b'9'));
++        if name.is_empty() || name.len() > 255 || !name.is_ascii() || name.starts_with('.')
++            || name.contains("..") || name.ends_with(['.', ' '])
++            || name.chars().any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
++            || reserved
++        {
++            anyhow::bail!("refusing suspicious folder name or filename {name}");
++        }
++        // The worker accepts ASCII names only, avoiding Unicode case ambiguity.
++        if !names.insert(name.to_ascii_lowercase()) {
++            anyhow::bail!("native extraction contains a Windows namespace collision");
++        }
++        let kind = entry.file_type()?;
++        if kind.is_symlink() || (!kind.is_dir() && !kind.is_file()) {
++            anyhow::bail!("native extraction contains a non-regular entry");
++        }
++        if kind.is_dir() {
++            validate_native_tree(&entry.path(), depth + 1, entries)?;
++        }
++    }
++    Ok(())
++}
++
++pub fn validate_native_extracted(
++    extract_dir: &Path,
++    flavor: crate::flavor::Flavor,
++    extract_ms: u64,
++) -> anyhow::Result<NativePlacementPlan> {
++    validate_native_tree(extract_dir, 0, &mut 0)?;
++    let files = safety_scan(extract_dir)?;
++    crate::logi!("native zip ok: {} files, no executables", files);
++    let sources = addon_dirs(extract_dir)?;
++    if sources.is_empty() || sources.len() > 2048 {
++        anyhow::bail!("native activation has too many add-on folders");
++    }
++    for source in &sources {
++        if !crate::wow::addon_supports(source, flavor) {
++            anyhow::bail!(
++                "Add-on TOCs do not support the selected {} client",
++                flavor.id()
++            );
++        }
++    }
++    let mut mappings = Vec::with_capacity(sources.len());
++    for source in sources {
++        let name = source
++            .file_name()
++            .and_then(|name| name.to_str())
++            .ok_or_else(|| anyhow!("bad folder name"))?
++            .to_string();
++        if name.is_empty()
++            || name.starts_with('.')
++            || name.contains("..")
++            || name.contains(['/', '\\'])
++        {
++            anyhow::bail!("refusing suspicious folder name {name}");
++        }
++        let relative = source
++            .strip_prefix(extract_dir)
++            .map_err(|_| anyhow!("native worker returned a folder outside staging"))?;
++        let mut source_wire = String::new();
++        for component in relative.components() {
++            let std::path::Component::Normal(component) = component else {
++                anyhow::bail!("native worker returned an unsafe staged folder");
++            };
++            let component = component
++                .to_str()
++                .ok_or_else(|| anyhow!("native worker returned a non-UTF-8 folder"))?;
++            if !source_wire.is_empty() {
++                source_wire.push('/');
++            }
++            source_wire.push_str(component);
++        }
++        if source_wire.len() > 1024 {
++            anyhow::bail!("native staged folder path is too long");
++        }
++        mappings.push((source_wire, name));
++    }
++    let folders = mappings.iter().map(|(_, name)| name.clone()).collect();
++    Ok(NativePlacementPlan {
++        sources: mappings,
++        result: PlaceResult {
++            folders,
++            zip_ms: extract_ms as u128,
++            broker_move_ms: 0,
++        },
++    })
++}
++
+ #[cfg(test)]
+ pub fn place_timed(
+     zip_path: &Path,
+@@ -971,4 +1061,104 @@ mod tests {
+         assert!(!addons.join(TMP_DIR).exists());
+         let _ = fs::remove_dir_all(root);
+     }
++
++    #[test]
++    fn native_extraction_produces_an_immutable_activation_plan() {
++        let root = std::env::temp_dir().join(format!("af-native-place-{}", unique()));
++        let extracted = root.join("staging/x");
++        let source = extracted.join("NativeAddon");
++        fs::create_dir_all(&source).unwrap();
++        fs::write(source.join("NativeAddon.toc"), b"## Interface: 16001\n").unwrap();
++        fs::write(source.join("NativeAddon.lua"), b"print('new')\n").unwrap();
++        let plan =
++            validate_native_extracted(&extracted, crate::flavor::Flavor::Forever, 123).unwrap();
++        assert_eq!(plan.result.folders, ["NativeAddon"]);
++        assert_eq!(plan.result.zip_ms, 123);
++        assert_eq!(
++            plan.sources,
++            [("NativeAddon".to_string(), "NativeAddon".to_string())]
++        );
++        assert!(source.join("NativeAddon.lua").is_file());
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    fn native_wrong_flavour_never_replaces_existing_addon() {
++        let root = std::env::temp_dir().join(format!("af-native-flavour-{}", unique()));
++        let extracted = root.join("staging/x");
++        let source = extracted.join("Wrong");
++        let addons = root.join("World of Warcraft/_forever_/Interface/AddOns");
++        let target = addons.join("Wrong");
++        fs::create_dir_all(&source).unwrap();
++        fs::write(source.join("Wrong.toc"), b"## Interface: 120000\n").unwrap();
++        fs::create_dir_all(&target).unwrap();
++        fs::write(target.join("keep.lua"), b"keep").unwrap();
++        let error = validate_native_extracted(
++            &extracted, crate::flavor::Flavor::Forever, 0)
++            .unwrap_err()
++            .to_string();
++        assert!(error.contains("selected forever client"), "{error}");
++        assert_eq!(fs::read(target.join("keep.lua")).unwrap(), b"keep");
++        assert!(!addons.join(TMP_DIR).exists());
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    fn native_rejects_every_folder_name_before_replacing_any_addon() {
++        let root = std::env::temp_dir().join(format!("af-native-name-{}", unique()));
++        let extracted = root.join("staging/x");
++        let addons = root.join("World of Warcraft/_forever_/Interface/AddOns");
++        for name in ["A", "Z..bad"] {
++            let source = extracted.join(name);
++            fs::create_dir_all(&source).unwrap();
++            fs::write(
++                source.join(format!("{name}.toc")),
++                b"## Interface: 16001\n",
++            )
++            .unwrap();
++        }
++        let target = addons.join("A");
++        fs::create_dir_all(&target).unwrap();
++        fs::write(target.join("keep.lua"), b"old").unwrap();
++
++        let error = validate_native_extracted(
++            &extracted,
++            crate::flavor::Flavor::Forever,
++            0,
++        )
++        .unwrap_err()
++        .to_string();
++        assert!(error.contains("suspicious folder name"), "{error}");
++        assert_eq!(fs::read(target.join("keep.lua")).unwrap(), b"old");
++        let _ = fs::remove_dir_all(root);
++    }
++
++    #[test]
++    #[cfg(not(windows))]
++    fn native_admission_rejects_windows_aliases_and_disguised_executables() {
++        for invalid in ["CON.txt", "trailing.", "trailing ", "name:stream", "payload.lua"] {
++            let root = std::env::temp_dir().join(format!("af-native-alias-{}", unique()));
++            let addon = root.join("Fixture");
++            fs::create_dir_all(&addon).unwrap();
++            fs::write(addon.join("Fixture.toc"), b"## Interface: 16001\n").unwrap();
++            fs::write(addon.join(invalid), b"MZexecutable").unwrap();
++            assert!(validate_native_extracted(&root, crate::flavor::Flavor::Forever, 0).is_err(), "{invalid}");
++            assert_eq!(fs::read(addon.join(invalid)).unwrap(), b"MZexecutable");
++            fs::remove_dir_all(root).unwrap();
++        }
++    }
++
++    #[test]
++    #[cfg(not(windows))]
++    fn native_admission_rejects_case_collisions_in_nested_content() {
++        let root = std::env::temp_dir().join(format!("af-native-case-{}", unique()));
++        let addon = root.join("Fixture");
++        fs::create_dir_all(addon.join("media")).unwrap();
++        fs::write(addon.join("Fixture.toc"), b"## Interface: 16001\n").unwrap();
++        fs::write(addon.join("media/Logo.png"), b"one").unwrap();
++        fs::write(addon.join("media/logo.png"), b"two").unwrap();
++        assert!(validate_native_extracted(&root, crate::flavor::Flavor::Forever, 0)
++            .unwrap_err().to_string().contains("namespace collision"));
++        fs::remove_dir_all(root).unwrap();
++    }
+ }
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 4557c55..a2b92fa 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -5,6 +5,7 @@ mod flavor;
+ #[cfg(feature = "gui")]
+ mod icons;
+ mod install;
++mod native_worker;
+ pub mod log;
+ #[cfg(feature = "gui")]
+ mod selfupdate;
+@@ -46,6 +47,7 @@ struct App {
+     mutation: Mutex<()>,
+     shutdown: Notify,
+     shutting_down: AtomicBool,
++    native_worker_token: Option<String>,
+     /// icon key -> data URL, for this run (disk cache underneath).
+     #[cfg(feature = "gui")]
+     icon_cache: Mutex<HashMap<String, Option<String>>>,
+@@ -904,37 +906,95 @@ async fn install_from(
+         remote.version,
+         remote.download_url
+     );
+-    let tmp = addons.join(install::TMP_DIR).join("dl");
+-    let download_started = std::time::Instant::now();
+-    let progress = app.progress.clone();
+-    let zip = install::download_with_progress(
+-        &app.client, &remote.download_url, &tmp, &remote.filename,
+-        move |total, length| {
+-            let message = if let Some(length) = length.filter(|length| *length > 0) {
+-                format!("Downloading add-on... {}%", total.saturating_mul(100) / length)
+-            } else {
+-                format!("Downloading add-on... {} MiB", total / (1024 * 1024))
+-            };
+-            set_progress(&progress, message);
++    let (placed, download_ms) = if let Some(token) = app.native_worker_token.clone() {
++        let mut staged = native_worker::download(
++            token,
++            &app.client,
++            &remote.download_url,
++            app.progress.clone(),
++        )
++        .await
++        .map_err(|error| {
++            loge!("native download {key}: {error}");
++            error.to_string()
++        })?;
++        let download_ms = staged.timing.download_ms;
++        let extracted = native_worker::extract(&mut staged, app.progress.clone())
++            .await
++            .map_err(|error| {
++                loge!("native extract {key}: {error}");
++                error.to_string()
++            })?;
++        set_progress(&app.progress, "Checking add-on...".into());
++        let extract_ms = staged.timing.extract_ms;
++        let plan = tokio::task::spawn_blocking(move || {
++            install::validate_native_extracted(&extracted, flavor, extract_ms)
+         })
+         .await
+-        .map_err(|e| {
+-            loge!("download {key}: {e}");
+-            e.to_string()
++        .map_err(err)?
++        .map_err(|error| {
++            loge!("native validation {key}: {error}");
++            error.to_string()
+         })?;
+-    let download_ms = download_started.elapsed().as_millis();
+-    let addons2 = addons.clone();
+-    let progress = app.progress.clone();
+-    let placed = tokio::task::spawn_blocking(move ||
+-        install::place_timed_with_progress(&zip, &addons2, flavor, move |done, total| {
+-            set_progress(&progress, format!("Unpacking add-on... {done}/{total} files"));
+-        }))
++        set_progress(&app.progress, "Activating add-on...".into());
++        let move_ms = native_worker::activate(&mut staged, addons.clone(), plan.sources)
++            .await
++            .map_err(|error| {
++                loge!("native activation {key}: {error}");
++                error.to_string()
++            })?;
++        let mut placed = plan.result;
++        placed.broker_move_ms = move_ms as u128;
++        logi!(
++            "native archive {key}: bytes={} files={} download_ms={} extract_ms={} write_ms={} sync_ms={} activate_ms={}",
++            staged.timing.bytes,
++            staged.timing.files,
++            staged.timing.download_ms,
++            staged.timing.extract_ms,
++            staged.timing.write_ms,
++            staged.timing.sync_ms,
++            placed.broker_move_ms,
++        );
++        (placed, download_ms)
++    } else {
++        let tmp = addons.join(install::TMP_DIR).join("dl");
++        let download_started = std::time::Instant::now();
++        let progress = app.progress.clone();
++        let zip = install::download_with_progress(
++            &app.client,
++            &remote.download_url,
++            &tmp,
++            &remote.filename,
++            move |total, length| {
++                let message = if let Some(length) = length.filter(|length| *length > 0) {
++                    format!("Downloading add-on... {}%", total.saturating_mul(100) / length)
++                } else {
++                    format!("Downloading add-on... {} MiB", total / (1024 * 1024))
++                };
++                set_progress(&progress, message);
++            },
++        )
++        .await
++        .map_err(|error| {
++            loge!("download {key}: {error}");
++            error.to_string()
++        })?;
++        let download_ms = download_started.elapsed().as_millis();
++        let addons2 = addons.clone();
++        let progress = app.progress.clone();
++        let placed = tokio::task::spawn_blocking(move || {
++            install::place_timed_with_progress(&zip, &addons2, flavor, move |done, total| {
++                set_progress(&progress, format!("Unpacking add-on... {done}/{total} files"));
++            })
++        })
+         .await
+         .map_err(err)?
+-        .map_err(|e| {
+-            loge!("place {key}: {e}");
+-            e.to_string()
++        .map_err(|error| {
++            loge!("place {key}: {error}");
++            error.to_string()
+         })?;
++        (placed, download_ms)
++    };
+     let timing = InstallTiming {
+         resolve_tls_ms,
+         download_ms,
+@@ -1629,7 +1689,7 @@ async fn diagnostics(app: State<'_, Shared>) -> Result<String, String> {
+ 
+ // ---------------------------------------------------------------- boot
+ 
+-fn make_app() -> Shared {
++fn make_app_with_worker_token(native_worker_token: Option<String>) -> Shared {
+     let client = reqwest::Client::builder()
+         .user_agent(USER_AGENT)
+         .timeout(std::time::Duration::from_secs(120))
+@@ -1666,6 +1726,7 @@ fn make_app() -> Shared {
+         mutation: Mutex::new(()),
+         shutdown: Notify::new(),
+         shutting_down: AtomicBool::new(false),
++        native_worker_token,
+         #[cfg(feature = "gui")]
+         icon_cache: Mutex::new(HashMap::new()),
+     });
+@@ -1675,6 +1736,10 @@ fn make_app() -> Shared {
+     app
+ }
+ 
++fn make_app() -> Shared {
++    make_app_with_worker_token(None)
++}
++
+ #[derive(Deserialize)]
+ struct HeadlessRequest {
+     command: String,
+@@ -1964,17 +2029,25 @@ async fn handle_http_connection(
+     finish_headless_response(&app, notify_shutdown, response_result)
+ }
+ 
+-async fn serve_headless(port: u16, token: String) -> Result<(), String> {
++async fn serve_headless(port: u16, token: String, worker_token: String) -> Result<(), String> {
+     if token.len() < 32
+         || token.len() > 128
+         || !token.bytes().all(|byte| byte.is_ascii_hexdigit())
+     {
+         return Err("token must be 32 to 128 hexadecimal characters".into());
+     }
++    if worker_token.len() != 64
++        || !worker_token.bytes().all(|byte| byte.is_ascii_hexdigit())
++    {
++        return Err("worker token must be 64 hexadecimal characters".into());
++    }
++    if token.eq_ignore_ascii_case(&worker_token) {
++        return Err("core and worker tokens must be distinct".into());
++    }
+     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+         .await
+         .map_err(err)?;
+-    let app = make_app();
++    let app = make_app_with_worker_token(Some(worker_token));
+     let token = Arc::new(token);
+     println!("addonforge-core: serving http://127.0.0.1:{port}");
+     loop {
+@@ -2155,18 +2228,29 @@ pub fn headless_main(args: &[String]) -> i32 {
+                 .find(|pair| pair[0] == "--port")
+                 .and_then(|pair| pair[1].parse::<u16>().ok())
+                 .ok_or_else(|| {
+-                    "usage: addonforge-core serve --port N --token HEX".to_string()
++                    "usage: addonforge-core serve --port N --token HEX --worker-token HEX".to_string()
+                 });
+             let token = args
+                 .windows(2)
+                 .find(|pair| pair[0] == "--token")
+                 .map(|pair| pair[1].clone())
+                 .ok_or_else(|| {
+-                    "usage: addonforge-core serve --port N --token HEX".to_string()
++                    "usage: addonforge-core serve --port N --token HEX --worker-token HEX"
++                        .to_string()
++                });
++            let worker_token = args
++                .windows(2)
++                .find(|pair| pair[0] == "--worker-token")
++                .map(|pair| pair[1].clone())
++                .ok_or_else(|| {
++                    "usage: addonforge-core serve --port N --token HEX --worker-token HEX"
++                        .to_string()
+                 });
+-            match (port, token) {
+-                (Ok(port), Ok(token)) => runtime.block_on(serve_headless(port, token)),
+-                (Err(error), _) | (_, Err(error)) => Err(error),
++            match (port, token, worker_token) {
++                (Ok(port), Ok(token), Ok(worker_token)) => {
++                    runtime.block_on(serve_headless(port, token, worker_token))
++                }
++                (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => Err(error),
+             }
+         }
+         Some("selftest") => match args.get(1) {
+@@ -2174,7 +2258,7 @@ pub fn headless_main(args: &[String]) -> i32 {
+             None => Err("usage: addonforge-core selftest <product dir>".into()),
+         },
+         _ => Err(
+-            "usage: addonforge-core serve --port N --token HEX | selftest <product dir>".into(),
++            "usage: addonforge-core serve --port N --token HEX --worker-token HEX | selftest <product dir>".into(),
+         ),
+     };
+     match result {
+diff --git a/src-tauri/src/native_worker.rs b/src-tauri/src/native_worker.rs
+new file mode 100644
+index 0000000..39db96e
+--- /dev/null
++++ b/src-tauri/src/native_worker.rs
+@@ -0,0 +1,605 @@
++// Native Forever add-on archive worker client. The authenticated helper owns
++// staging and activation; the core admits the immutable extracted contents.
++use anyhow::{anyhow, Context};
++use futures_util::StreamExt;
++use sha2::{Digest as ShaDigest, Sha256};
++use std::io::{Read, Write};
++use std::net::TcpStream;
++use std::path::PathBuf;
++use std::sync::{Arc, Mutex};
++use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
++
++const MAGIC: u32 = 0x3157_4146;
++const VERSION: u32 = 2;
++const PORT: u16 = 9142;
++const TOKEN_BYTES: usize = 64;
++const OPERATION_BYTES: usize = 32;
++const MAX_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
++const HELLO_BYTES: usize = 8;
++const CHALLENGE_REPLY_BYTES: usize = 40;
++const AUTH_REPLY_BYTES: usize = 44;
++const REQUEST_BYTES: usize = 88;
++const REPLY_BYTES: usize = 100;
++const COMMAND_STORE: u32 = 2;
++const COMMAND_EXTRACT: u32 = 3;
++const COMMAND_CLEAN: u32 = 4;
++const COMMAND_ACTIVATE: u32 = 7;
++const PHASE_READY: u32 = 1;
++const PHASE_PROGRESS: u32 = 2;
++const PHASE_COMPLETE: u32 = 3;
++const WINDOWS_ROOT: &str = "C:\\Forever\\AddonStaging";
++
++fn put_u32(bytes: &mut [u8], value: u32) {
++    bytes[..4].copy_from_slice(&value.to_le_bytes());
++}
++
++fn put_u64(bytes: &mut [u8], value: u64) {
++    bytes[..8].copy_from_slice(&value.to_le_bytes());
++}
++
++fn get_u32(bytes: &[u8]) -> u32 {
++    u32::from_le_bytes(bytes[..4].try_into().unwrap())
++}
++
++fn get_i32(bytes: &[u8]) -> i32 {
++    i32::from_le_bytes(bytes[..4].try_into().unwrap())
++}
++
++fn get_u64(bytes: &[u8]) -> u64 {
++    u64::from_le_bytes(bytes[..8].try_into().unwrap())
++}
++
++fn operation_id(token: &str) -> String {
++    let nanos = SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|duration| duration.as_nanos())
++        .unwrap_or(0);
++    let mut hash = Sha256::new();
++    hash.update(token.as_bytes());
++    hash.update(nanos.to_le_bytes());
++    hash.update(std::process::id().to_le_bytes());
++    hash.finalize()[..16]
++        .iter()
++        .map(|byte| format!("{byte:02x}"))
++        .collect()
++}
++
++fn checked_token(token: &str) -> anyhow::Result<[u8; TOKEN_BYTES]> {
++    if token.len() != TOKEN_BYTES || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
++        anyhow::bail!("native add-on worker token is invalid");
++    }
++    let mut bytes = [0; TOKEN_BYTES];
++    bytes.copy_from_slice(token.as_bytes());
++    Ok(bytes)
++}
++
++fn authentication_tag(
++    token: &[u8; TOKEN_BYTES],
++    challenge: &[u8; 32],
++    domain: u8,
++) -> [u8; 32] {
++    let mut inner_pad = [0u8; 64];
++    let mut outer_pad = [0u8; 64];
++    for index in 0..64 {
++        inner_pad[index] = token[index] ^ 0x36;
++        outer_pad[index] = token[index] ^ 0x5c;
++    }
++    let mut hash = Sha256::new();
++    hash.update(inner_pad);
++    hash.update(challenge);
++    hash.update([domain]);
++    let inner = hash.finalize();
++    let mut hash = Sha256::new();
++    hash.update(outer_pad);
++    hash.update(inner);
++    hash.finalize().into()
++}
++
++fn secure_equal(left: &[u8], right: &[u8]) -> bool {
++    left.len() == right.len()
++        && left
++            .iter()
++            .zip(right)
++            .fold(0u8, |difference, (left, right)| difference | (left ^ right))
++            == 0
++}
++
++fn connect(token: &str) -> anyhow::Result<TcpStream> {
++    checked_token(token)?;
++    let mut stream =
++        TcpStream::connect(("127.0.0.1", PORT)).context("native add-on worker is unavailable")?;
++    stream.set_read_timeout(Some(Duration::from_secs(300)))?;
++    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
++    stream.set_nodelay(true)?;
++    authenticate(&mut stream, token)?;
++    Ok(stream)
++}
++
++fn authenticate(stream: &mut TcpStream, token: &str) -> anyhow::Result<()> {
++    let token = checked_token(token)?;
++    let mut hello = [0; HELLO_BYTES];
++    put_u32(&mut hello, MAGIC);
++    put_u32(&mut hello[4..], VERSION);
++    stream.write_all(&hello)?;
++    let mut challenge_reply = [0; CHALLENGE_REPLY_BYTES];
++    stream.read_exact(&mut challenge_reply)?;
++    if get_u32(&challenge_reply) != MAGIC || get_u32(&challenge_reply[4..]) != VERSION {
++        anyhow::bail!("native add-on worker challenge is invalid");
++    }
++    let challenge: [u8; 32] = challenge_reply[8..].try_into().unwrap();
++    let client_proof = authentication_tag(&token, &challenge, b'C');
++    stream.write_all(&client_proof)?;
++    let mut reply = [0; AUTH_REPLY_BYTES];
++    stream.read_exact(&mut reply)?;
++    let expected_server = authentication_tag(&token, &challenge, b'S');
++    if get_u32(&reply) != MAGIC
++        || get_u32(&reply[4..]) != VERSION
++        || !secure_equal(&reply[12..], &expected_server)
++        || get_i32(&reply[8..]) != 0
++    {
++        anyhow::bail!("native add-on worker authentication failed");
++    }
++    Ok(())
++}
++
++fn send_request(
++    stream: &mut TcpStream,
++    command: u32,
++    operation: &str,
++    limit: u64,
++    expected_size: u64,
++    digest: &[u8; 32],
++) -> anyhow::Result<()> {
++    if !operation.is_empty()
++        && (operation.len() != OPERATION_BYTES
++            || !operation.bytes().all(|byte| byte.is_ascii_hexdigit()))
++    {
++        anyhow::bail!("native add-on operation id is invalid");
++    }
++    let mut request = [0; REQUEST_BYTES];
++    put_u32(&mut request, MAGIC);
++    put_u32(&mut request[4..], command);
++    request[8..8 + operation.len()].copy_from_slice(operation.as_bytes());
++    put_u64(&mut request[40..], limit);
++    put_u64(&mut request[48..], expected_size);
++    request[56..88].copy_from_slice(digest);
++    stream.write_all(&request)?;
++    Ok(())
++}
++
++struct WorkerReply {
++    phase: u32,
++    result: i32,
++    done: u64,
++    total: u64,
++    files: u64,
++    write_ms: u64,
++    sync_ms: u64,
++    total_ms: u64,
++    digest: [u8; 32],
++    path: String,
++}
++
++fn read_reply(stream: &mut TcpStream) -> anyhow::Result<WorkerReply> {
++    let mut bytes = [0; REPLY_BYTES];
++    stream.read_exact(&mut bytes)?;
++    if get_u32(&bytes) != MAGIC || get_u32(&bytes[4..]) != VERSION {
++        anyhow::bail!("native add-on worker response is invalid");
++    }
++    let path_length = usize::try_from(get_u32(&bytes[96..])).unwrap_or(usize::MAX);
++    if path_length > 4096 {
++        anyhow::bail!("native add-on worker path is too long");
++    }
++    let mut path = vec![0; path_length];
++    stream.read_exact(&mut path)?;
++    let mut digest = [0; 32];
++    digest.copy_from_slice(&bytes[64..96]);
++    Ok(WorkerReply {
++        phase: get_u32(&bytes[8..]),
++        result: get_i32(&bytes[12..]),
++        done: get_u64(&bytes[16..]),
++        total: get_u64(&bytes[24..]),
++        files: get_u64(&bytes[32..]),
++        write_ms: get_u64(&bytes[40..]),
++        sync_ms: get_u64(&bytes[48..]),
++        total_ms: get_u64(&bytes[56..]),
++        digest,
++        path: String::from_utf8(path).context("native add-on worker path is not UTF-8")?,
++    })
++}
++
++fn checked_worker_path(path: String, operation: &str, leaf: &str) -> anyhow::Result<PathBuf> {
++    let expected = format!("{WINDOWS_ROOT}\\{operation}\\{leaf}");
++    if path != expected {
++        anyhow::bail!("native add-on worker returned an unexpected path");
++    }
++    Ok(PathBuf::from(path))
++}
++
++#[derive(Clone, Debug, Default)]
++pub struct NativeTiming {
++    pub download_ms: u128,
++    pub extract_ms: u64,
++    pub write_ms: u64,
++    pub sync_ms: u64,
++    pub files: u64,
++    pub bytes: u64,
++    pub activate_ms: u64,
++}
++
++pub struct StoredArchive {
++    token: String,
++    operation: String,
++    size: u64,
++    digest: [u8; 32],
++    pub timing: NativeTiming,
++}
++
++impl StoredArchive {
++    fn clean(&self) -> anyhow::Result<()> {
++        let mut stream = connect(&self.token)?;
++        send_request(&mut stream, COMMAND_CLEAN, &self.operation, 0, 0, &[0; 32])?;
++        let reply = read_reply(&mut stream)?;
++        if reply.phase != PHASE_COMPLETE || reply.result != 0 {
++            anyhow::bail!("native add-on worker could not clean staging");
++        }
++        Ok(())
++    }
++}
++
++impl Drop for StoredArchive {
++    fn drop(&mut self) {
++        let _ = self.clean();
++    }
++}
++
++pub async fn download(
++    token: String,
++    client: &reqwest::Client,
++    url: &str,
++    progress: Arc<Mutex<String>>,
++) -> anyhow::Result<StoredArchive> {
++    let operation = operation_id(&token);
++    let mut stream = connect(&token)?;
++    send_request(
++        &mut stream,
++        COMMAND_STORE,
++        &operation,
++        MAX_ARCHIVE_BYTES,
++        0,
++        &[0; 32],
++    )?;
++    let ready = read_reply(&mut stream)?;
++    if ready.phase != PHASE_READY || ready.result != 0 {
++        anyhow::bail!("native add-on worker refused archive staging");
++    }
++    let started = Instant::now();
++    let response = client
++        .get(url)
++        .send()
++        .await
++        .with_context(|| format!("download failed: {url}"))?
++        .error_for_status()
++        .with_context(|| format!("download refused: {url}"))?;
++    let expected_length = response.content_length();
++    if expected_length.is_some_and(|length| length > MAX_ARCHIVE_BYTES) {
++        anyhow::bail!("download exceeded 4 GiB; refusing");
++    }
++    let mut body = response.bytes_stream();
++    let mut total = 0u64;
++    let mut hash = Sha256::new();
++    while let Some(chunk) = body.next().await {
++        let chunk = chunk?;
++        total = total
++            .checked_add(chunk.len() as u64)
++            .filter(|value| *value <= MAX_ARCHIVE_BYTES)
++            .ok_or_else(|| anyhow!("download exceeded 4 GiB; refusing"))?;
++        for piece in chunk.chunks(1024 * 1024) {
++            let length = u32::try_from(piece.len()).context("download chunk is too large")?;
++            stream.write_all(&length.to_le_bytes())?;
++            stream.write_all(piece)?;
++        }
++        hash.update(&chunk);
++        let message = if let Some(length) = expected_length.filter(|length| *length > 0) {
++            format!(
++                "Downloading add-on... {}%",
++                total.saturating_mul(100) / length
++            )
++        } else {
++            format!("Downloading add-on... {} MiB", total / (1024 * 1024))
++        };
++        if let Ok(mut current) = progress.lock() {
++            *current = message;
++        }
++    }
++    if expected_length.is_some_and(|length| length != total) {
++        anyhow::bail!("download ended before its declared size");
++    }
++    let digest: [u8; 32] = hash.finalize().into();
++    stream.write_all(&0u32.to_le_bytes())?;
++    stream.write_all(&total.to_le_bytes())?;
++    stream.write_all(&digest)?;
++    stream.flush()?;
++    let complete = read_reply(&mut stream)?;
++    if complete.phase != PHASE_COMPLETE
++        || complete.result != 0
++        || complete.done != total
++        || complete.total != total
++        || complete.digest != digest
++    {
++        anyhow::bail!("native add-on worker did not accept the downloaded archive");
++    }
++    checked_worker_path(complete.path, &operation, "archive.zip")?;
++    Ok(StoredArchive {
++        token,
++        operation,
++        size: total,
++        digest,
++        timing: NativeTiming {
++            download_ms: started.elapsed().as_millis(),
++            bytes: total,
++            ..Default::default()
++        },
++    })
++}
++
++pub async fn extract(
++    archive: &mut StoredArchive,
++    progress: Arc<Mutex<String>>,
++) -> anyhow::Result<PathBuf> {
++    let token = archive.token.clone();
++    let operation = archive.operation.clone();
++    let size = archive.size;
++    let digest = archive.digest;
++    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<(PathBuf, NativeTiming)> {
++        let mut stream = connect(&token)?;
++        send_request(&mut stream, COMMAND_EXTRACT, &operation, 0, size, &digest)?;
++        let ready = read_reply(&mut stream)?;
++        if ready.phase != PHASE_READY || ready.result != 0 {
++            anyhow::bail!("native add-on worker refused extraction");
++        }
++        loop {
++            let reply = read_reply(&mut stream)?;
++            if reply.phase == PHASE_PROGRESS {
++                if let Ok(mut current) = progress.lock() {
++                    *current = format!("Unpacking add-on... {}/{} files", reply.done, reply.total);
++                }
++                continue;
++            }
++            if reply.phase != PHASE_COMPLETE || reply.result != 0 || reply.done != reply.total {
++                anyhow::bail!("native add-on worker extraction failed");
++            }
++            let path = checked_worker_path(reply.path, &operation, "x")?;
++            return Ok((
++                path,
++                NativeTiming {
++                    extract_ms: reply.total_ms,
++                    write_ms: reply.write_ms,
++                    sync_ms: reply.sync_ms,
++                    files: reply.files,
++                    bytes: size,
++                    ..Default::default()
++                },
++            ));
++        }
++    })
++    .await
++    .map_err(|error| anyhow!(error))??;
++    archive.timing.extract_ms = result.1.extract_ms;
++    archive.timing.write_ms = result.1.write_ms;
++    archive.timing.sync_ms = result.1.sync_ms;
++    archive.timing.files = result.1.files;
++    Ok(result.0)
++}
++
++fn channel_from_addons(addons_dir: &std::path::Path) -> anyhow::Result<String> {
++    // Parse Windows paths explicitly so host tests exercise the same boundary.
++    // Do not canonicalize another drive/root into the helper's fixed destination.
++    let path = addons_dir.to_str().ok_or_else(|| anyhow!("invalid WoW path"))?;
++    let normalized = path.replace('\\', "/");
++    let parts: Vec<_> = normalized.split('/').collect();
++    if parts.len() != 6
++        || !parts[0].eq_ignore_ascii_case("C:")
++        || !parts[1].eq_ignore_ascii_case("Program Files (x86)")
++        || !parts[2].eq_ignore_ascii_case("World of Warcraft")
++        || !parts[4].eq_ignore_ascii_case("Interface")
++        || !parts[5].eq_ignore_ascii_case("AddOns")
++    {
++        anyhow::bail!("native activation requires C:\\Program Files (x86)\\World of Warcraft");
++    }
++    let channel = parts[3];
++    if channel.len() < 3 || channel.len() > 64
++        || !channel.starts_with('_') || !channel.ends_with('_')
++        || !channel.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
++    {
++        anyhow::bail!("selected WoW channel name is invalid");
++    }
++    Ok(channel.to_string())
++}
++
++pub async fn activate(
++    archive: &mut StoredArchive,
++    addons_dir: PathBuf,
++    sources: Vec<(String, String)>,
++) -> anyhow::Result<u64> {
++    let channel = channel_from_addons(&addons_dir)?;
++    let product_dir = addons_dir.parent().and_then(|path| path.parent())
++        .ok_or_else(|| anyhow!("selected WoW install is invalid"))?;
++    if crate::wow::describe_install(product_dir).is_none() {
++        anyhow::bail!("native activation requires a supported installed WoW client");
++    }
++    activate_channel(archive, channel, sources).await
++}
++
++async fn activate_channel(
++    archive: &mut StoredArchive,
++    channel: String,
++    sources: Vec<(String, String)>,
++) -> anyhow::Result<u64> {
++    let token = archive.token.clone();
++    let operation = archive.operation.clone();
++    if sources.is_empty() || sources.len() > 2048 {
++        anyhow::bail!("native add-on activation folder count is invalid");
++    }
++    for (source, name) in &sources {
++        if source.is_empty() || source.len() > 1024 || name.is_empty() || name.len() > 255 {
++            anyhow::bail!("native add-on activation path is invalid");
++        }
++    }
++    let move_ms = tokio::task::spawn_blocking(move || -> anyhow::Result<u64> {
++        let mut stream = connect(&token)?;
++        send_request(
++            &mut stream,
++            COMMAND_ACTIVATE,
++            &operation,
++            0,
++            0,
++            &[0; 32],
++        )?;
++        let channel_length =
++            u32::try_from(channel.len()).context("WoW channel name is too long")?;
++        let count = u32::try_from(sources.len()).context("too many add-on folders")?;
++        stream.write_all(&channel_length.to_le_bytes())?;
++        stream.write_all(&count.to_le_bytes())?;
++        stream.write_all(channel.as_bytes())?;
++        for (source, name) in &sources {
++            stream.write_all(&(source.len() as u32).to_le_bytes())?;
++            stream.write_all(&(name.len() as u32).to_le_bytes())?;
++            stream.write_all(source.as_bytes())?;
++            stream.write_all(name.as_bytes())?;
++        }
++        stream.flush()?;
++        let reply = read_reply(&mut stream)?;
++        if reply.phase != PHASE_COMPLETE
++            || reply.result != 0
++            || reply.files != sources.len() as u64
++        {
++            anyhow::bail!("native add-on worker activation failed");
++        }
++        Ok(reply.write_ms)
++    })
++    .await
++    .map_err(|error| anyhow!(error))??;
++    archive.timing.activate_ms = move_ms;
++    Ok(move_ms)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn refuses_to_redirect_another_install_into_the_fixed_root() {
++        let accepted = PathBuf::from(r"C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns");
++        assert_eq!(channel_from_addons(&accepted).unwrap(), "_forever_");
++        for path in [
++            r"W:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns",
++            r"C:\Games\World of Warcraft\_forever_\Interface\AddOns",
++            r"C:\Program Files (x86)\World of Warcraft\..\Interface\AddOns",
++            r"C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns\",
++        ] {
++            assert!(channel_from_addons(&PathBuf::from(path)).is_err());
++        }
++    }
++
++    #[test]
++    fn authenticates_server_and_rejects_replayed_or_reflected_proofs() {
++        for mode in 0..4 {
++            let token = "a".repeat(64);
++            let server_token = token.clone();
++            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
++            let address = listener.local_addr().unwrap();
++            let server = std::thread::spawn(move || {
++                let (mut socket, _) = listener.accept().unwrap();
++                let mut hello = [0; HELLO_BYTES];
++                socket.read_exact(&mut hello).unwrap();
++                let challenge = [7u8; 32];
++                let mut reply = [0; CHALLENGE_REPLY_BYTES];
++                put_u32(&mut reply, MAGIC);
++                put_u32(&mut reply[4..], VERSION);
++                reply[8..].copy_from_slice(&challenge);
++                socket.write_all(&reply).unwrap();
++                let mut proof = [0; 32];
++                socket.read_exact(&mut proof).unwrap();
++                let key = checked_token(&server_token).unwrap();
++                assert_eq!(proof, authentication_tag(&key, &challenge, b'C'));
++                let tag = match mode {
++                    0 => authentication_tag(&key, &challenge, b'S'),
++                    1 => proof,
++                    2 => authentication_tag(&key, &[6; 32], b'S'),
++                    _ => [0; 32],
++                };
++                let mut auth = [0; AUTH_REPLY_BYTES];
++                put_u32(&mut auth, MAGIC);
++                put_u32(&mut auth[4..], VERSION);
++                auth[12..].copy_from_slice(&tag);
++                socket.write_all(&auth).unwrap();
++            });
++            let mut socket = TcpStream::connect(address).unwrap();
++            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
++            assert_eq!(authenticate(&mut socket, &token).is_ok(), mode == 0);
++            server.join().unwrap();
++        }
++    }
++
++    // Opt in against a separately started real helper on its protocol port, with
++    // disposable roots matching the helper's FOREVER_ADDON_WORKER_*_ROOT values.
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn client_matches_native_worker_if_requested() {
++        let Ok(token) = std::env::var("ADDONFORGE_NATIVE_WORKER_E2E_TOKEN") else {
++            return;
++        };
++        let staging = PathBuf::from(std::env::var("FOREVER_ADDON_WORKER_ROOT").unwrap());
++        let wow = PathBuf::from(std::env::var("FOREVER_ADDON_WORKER_WOW_ROOT").unwrap());
++        let addons = wow.join("_forever_/Interface/AddOns");
++        let folder = format!("NativeE2E{}", std::process::id());
++        let target = addons.join(&folder);
++        assert!(!target.exists(), "E2E requires a fresh disposable target");
++        std::fs::create_dir_all(&target).unwrap();
++        std::fs::write(target.join("original.lua"), b"original").unwrap();
++        let client = reqwest::Client::new();
++        for invalid in [true, false] {
++            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
++            zip.start_file(format!("{folder}/{folder}.toc"), zip::write::SimpleFileOptions::default()).unwrap();
++            zip.write_all(b"## Interface: 16001\n").unwrap();
++            zip.start_file(format!("{folder}/payload.lua"), zip::write::SimpleFileOptions::default()).unwrap();
++            let payload = vec![b'x'; 128 * 1024];
++            zip.write_all(&payload).unwrap();
++            if invalid {
++                zip.start_file(format!("{folder}/bad.exe"), zip::write::SimpleFileOptions::default()).unwrap();
++                zip.write_all(b"MZbad").unwrap();
++            }
++            let bytes = zip.finish().unwrap().into_inner();
++            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
++            let url = format!("http://{}/archive.zip", listener.local_addr().unwrap());
++            let http = tokio::spawn(async move {
++                use tokio::io::{AsyncReadExt, AsyncWriteExt};
++                let (mut socket, _) = listener.accept().await.unwrap();
++                let mut request = vec![0; 4096];
++                socket.read(&mut request).await.unwrap();
++                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", bytes.len()).as_bytes()).await.unwrap();
++                for chunk in bytes.chunks(1024) {
++                    socket.write_all(chunk).await.unwrap();
++                }
++            });
++            let progress = Arc::new(Mutex::new(String::new()));
++            let mut archive = download(token.clone(), &client, &url, progress.clone()).await.unwrap();
++            extract(&mut archive, progress).await.unwrap();
++            let tree = staging.join(&archive.operation).join("x");
++            let plan = crate::install::validate_native_extracted(&tree, crate::flavor::Flavor::Forever, 0);
++            if invalid {
++                assert!(plan.is_err());
++                assert_eq!(std::fs::read(target.join("original.lua")).unwrap(), b"original");
++                assert!(!target.join("payload.lua").exists());
++            } else {
++                let plan = plan.unwrap();
++                activate_channel(&mut archive, "_forever_".into(), plan.sources).await.unwrap();
++                assert_eq!(std::fs::read(target.join("payload.lua")).unwrap(), payload);
++                assert!(!target.join("original.lua").exists());
++            }
++            archive.clean().unwrap();
++            http.await.unwrap();
++        }
++        std::fs::remove_dir_all(target).unwrap();
++    }
++}
+diff --git a/src-tauri/src/wow.rs b/src-tauri/src/wow.rs
+index 9120e8d..13ccd2b 100644
+--- a/src-tauri/src/wow.rs
++++ b/src-tauri/src/wow.rs
+@@ -4,6 +4,7 @@
+ 
+ use serde::Serialize;
+ use std::fs;
++use std::io::Read;
+ use std::path::{Path, PathBuf};
+ 
+ /// Interface numbers that mean "WoW: Forever" (1.60.x -> 160xx).
+@@ -229,16 +230,38 @@ pub fn clean_title(raw: &str) -> String {
+             out.push(c);
+         }
+     }
+-    out.split_whitespace().collect::<Vec<_>>().join(" ")
++    let mut normalized = String::with_capacity(out.len());
++    for word in out.split_whitespace() {
++        if !normalized.is_empty() {
++            normalized.push(' ');
++        }
++        normalized.push_str(word);
++    }
++    normalized
+ }
+ 
++const MAX_TOC_BYTES: u64 = 1024 * 1024;
++const MAX_TOC_LINE_BYTES: usize = 64 * 1024;
++
+ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+-    let Ok(bytes) = fs::read(path) else {
++    let Ok(file) = fs::File::open(path) else {
+         return false;
+     };
++    let mut bytes = Vec::new();
++    if file
++        .take(MAX_TOC_BYTES + 1)
++        .read_to_end(&mut bytes)
++        .is_err()
++        || bytes.len() as u64 > MAX_TOC_BYTES
++    {
++        return false;
++    }
+     let text = String::from_utf8_lossy(&bytes);
+     let text = text.trim_start_matches('\u{feff}');
+     for line in text.lines() {
++        if line.len() > MAX_TOC_LINE_BYTES {
++            return false;
++        }
+         let line = line.trim();
+         let Some(rest) = line.strip_prefix("##") else {
+             continue;
+@@ -275,6 +298,9 @@ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+             key if key == "interface" || key.starts_with("interface-") => {
+                 for n in val.split(',').filter_map(|s| s.trim().parse::<u32>().ok()) {
+                     if !into.interfaces.contains(&n) {
++                        if into.interfaces.len() >= 256 {
++                            return false;
++                        }
+                         into.interfaces.push(n);
+                     }
+                 }
+@@ -301,6 +327,9 @@ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+             }
+             "dependencies" | "requireddeps" => {
+                 for d in val.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
++                    if into.dependencies.len() >= 256 || d.len() > 255 {
++                        return false;
++                    }
+                     into.dependencies.push(d.to_string());
+                 }
+             }
+@@ -324,10 +353,17 @@ fn parse_toc(path: &Path, into: &mut AddonFolder) -> bool {
+ /// merge metadata from other clients into its version or source identity.
+ fn read_addon(directory: &Path, folder: &str, flavor: crate::flavor::Flavor) -> Option<AddonFolder> {
+     let mut selected: Option<(u8, String, AddonFolder)> = None;
++    let mut toc_count = 0usize;
++    let mut toc_bytes = 0u64;
+     for entry in fs::read_dir(directory).ok()?.flatten() {
+         let filename = entry.file_name().to_string_lossy().into_owned();
+         let Some((stem, extension)) = filename.rsplit_once('.') else { continue };
+         if !extension.eq_ignore_ascii_case("toc") { continue; }
++        toc_count += 1;
++        toc_bytes = toc_bytes.checked_add(entry.metadata().ok()?.len())?;
++        if toc_count > 64 || toc_bytes > 4 * MAX_TOC_BYTES {
++            return None;
++        }
+         let rank = if stem.eq_ignore_ascii_case(folder) { 1 } else {
+             if !stem.get(..folder.len()).is_some_and(|s| s.eq_ignore_ascii_case(folder)) { continue; }
+             let suffix = &stem[folder.len()..];
+@@ -462,4 +498,27 @@ mod tests {
+         assert_eq!(clean_title("Plain"), "Plain");
+         assert_eq!(clean_title("|TInterface\\Icons\\x:16|t Name"), "Name");
+     }
++
++    #[test]
++    fn rejects_oversized_toc_before_parsing_metadata() {
++        let path = std::env::temp_dir().join(format!("af-large-toc-{}", std::process::id()));
++        std::fs::write(&path, vec![b'a'; MAX_TOC_BYTES as usize + 1]).unwrap();
++        let mut addon = AddonFolder::default();
++        assert!(!parse_toc(&path, &mut addon));
++        let _ = std::fs::remove_file(path);
++    }
++    #[test]
++    fn rejects_raw_oversized_lines_and_metadata_amplification() {
++        let path = std::env::temp_dir().join(format!("af-toc-bounds-{}", std::process::id()));
++        let contents = [
++            format!("{}## Title: tiny\n", " ".repeat(MAX_TOC_LINE_BYTES)),
++            format!("## Dependencies: {}\n", vec!["Same"; 257].join(",")),
++            format!("## Interface: {}\n", (1..=257).map(|n| n.to_string()).collect::<Vec<_>>().join(",")),
++        ];
++        for text in contents {
++            std::fs::write(&path, text).unwrap();
++            assert!(!parse_toc(&path, &mut AddonFolder::default()));
++        }
++        std::fs::remove_file(path).unwrap();
++    }
+ }

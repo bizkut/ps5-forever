@@ -121,14 +121,17 @@ static int valid_token(const char *token)
     return addonforge_hex_token(token, 32, ADDONFORGE_CORE_TOKEN_MAX);
 }
 
-static DWORD start_core(const char *token)
+static DWORD start_core(const char *token, const char *worker_token)
 {
     static const char executable[] = "C:\\Forever\\Addons\\addonforge-core.exe";
     STARTUPINFOA startup = {.cb = sizeof(startup)};
     PROCESS_INFORMATION process;
     char command[512];
 
-    if (!valid_token(token)) return ERROR_INVALID_PARAMETER;
+    if (!valid_token(token) ||
+        !addonforge_hex_token(worker_token, ADDONFORGE_WORKER_TOKEN_HEX,
+                              ADDONFORGE_WORKER_TOKEN_HEX))
+        return ERROR_INVALID_PARAMETER;
     if (core_process)
     {
         if (WaitForSingleObject(core_process, 0) != WAIT_OBJECT_0) return ERROR_BUSY;
@@ -137,12 +140,18 @@ static DWORD start_core(const char *token)
         SecureZeroMemory(core_token, sizeof(core_token));
     }
     if (snprintf(command, sizeof(command),
-                 "\"%s\" serve --port %u --token %s", executable, CORE_PORT, token) < 0)
+                 "\"%s\" serve --port %u --token %s --worker-token %s",
+                 executable, CORE_PORT, token, worker_token) < 0)
         return ERROR_INVALID_PARAMETER;
     memset(&process, 0, sizeof(process));
     if (!CreateProcessA(executable, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
                         NULL, NULL, &startup, &process))
-        return GetLastError();
+    {
+        DWORD error = GetLastError();
+        SecureZeroMemory(command, sizeof(command));
+        return error;
+    }
+    SecureZeroMemory(command, sizeof(command));
     CloseHandle(process.hThread);
     core_process = process.hProcess;
     snprintf(core_token, sizeof(core_token), "%s", token);
@@ -157,7 +166,8 @@ static void answer(SOCKET socket, const char *text)
 static void serve(SOCKET client)
 {
     struct addonforge_control_request request;
-    char line[256], response[48];
+    char line[ADDONFORGE_CONTROL_SECRET_HEX + ADDONFORGE_CORE_TOKEN_MAX +
+              ADDONFORGE_WORKER_TOKEN_HEX + 32], response[48];
     const ULONGLONG deadline = GetTickCount64() + 2000;
     int used = 0, count, error;
     while (used < (int)sizeof(line) - 1)
@@ -184,7 +194,7 @@ static void serve(SOCKET client)
     if (request.action == ADDONFORGE_CONTROL_STOP)
         error = (int)stop_core();
     else
-        error = (int)start_core(request.core_token);
+        error = (int)start_core(request.core_token, request.worker_token);
     if (!error) answer(client, "OK\n");
     else
     {

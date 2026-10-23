@@ -11,6 +11,8 @@ PAYLOAD_DLL_OVERRIDES = ('winemenubuilder.exe=d;mscoree=d;mshtml=d;winedbg.exe=d
 
 WRITEBROKER_RELATIVE = 'writebroker.elf'
 WRITEBROKER_MAX_BYTES = 1024 * 1024
+ADDON_WORKER_RELATIVE = 'addon-worker.elf'
+ADDON_WORKER_MAX_BYTES = 2 * 1024 * 1024
 # User data outside the app folder, which a store update replaces. ShadowMountPlus
 # 1.7beta3+ mounts /data into the title's sandbox.
 USER_DATA_ROOT = '/data/forever'
@@ -325,7 +327,7 @@ def runtime_tree_manifest(root, selected):
     required = {'lib/wine/x86_64-unix/wine', 'share/wine/wine.inf', 'share/wine/nls/locale.nls',
                 'lib/wine/i386-windows/ntdll.dll', 'lib/wine/x86_64-windows/ntdll.dll'}
     if selected['name'] == 'b1':
-        required.add(WRITEBROKER_RELATIVE)
+        required.update((WRITEBROKER_RELATIVE, ADDON_WORKER_RELATIVE))
     if not required <= files.keys():
         raise ValueError(f'incomplete title runtime: {sorted(required-files.keys())}')
     return {'format': 1, 'profile': selected['name'], 'title_root': selected['root'],
@@ -430,6 +432,19 @@ def qualified_b1_folder(folder):
             not 0 < len(writebroker_data) <= WRITEBROKER_MAX_BYTES or
             material.get('writebroker') != writebroker):
         raise ValueError('B1 write broker data identity differs from qualification')
+    addon_worker_path = root / ADDON_WORKER_RELATIVE
+    addon_worker_data = addon_worker_path.read_bytes()
+    addon_worker = {
+        'path': ADDON_WORKER_RELATIVE,
+        'app_path': (game_selected or selected)['root'] + '/' + ADDON_WORKER_RELATIVE,
+        'classification': 'data_only_not_loaded',
+        'size': len(addon_worker_data),
+        'sha256': hashlib.sha256(addon_worker_data).hexdigest(),
+    }
+    if (not addon_worker_data.startswith(b'\x7fELF') or
+            not 0 < len(addon_worker_data) <= ADDON_WORKER_MAX_BYTES or
+            material.get('addon_worker') != addon_worker):
+        raise ValueError('B1 add-on worker data identity differs from qualification')
     inventories = ((folder, material['parent_title']), (root, material['title_root']))
     for directory, inventory in inventories:
         for item in inventory:

@@ -18,7 +18,8 @@ from runtime_imports import (
     make_candidate_manifest, make_records,
 )
 from runtime_profiles import (
-    WRITEBROKER_MAX_BYTES, WRITEBROKER_RELATIVE, profile, runtime_tree_manifest,
+    ADDON_WORKER_MAX_BYTES, ADDON_WORKER_RELATIVE, WRITEBROKER_MAX_BYTES,
+    WRITEBROKER_RELATIVE, profile, runtime_tree_manifest,
 )
 
 parser = argparse.ArgumentParser()
@@ -756,26 +757,28 @@ require(build_manifest.get('feature_macro') == 'WINE_PS5_TITLE',
         'runtime build did not select the title WoW64 implementation')
 require(build_manifest.get('profile') == selected,
         'runtime build profile differs from qualifier profile')
-writebroker_identity = None
+payload_identities = {}
 if args.profile == 'b1':
-    writebroker_path = quarantine / 'wine-title' / WRITEBROKER_RELATIVE
-    regular(writebroker_path, 'B1 write broker data ELF')
-    writebroker_data = writebroker_path.read_bytes()
-    require(writebroker_data.startswith(b'\x7fELF') and
-            0 < len(writebroker_data) <= WRITEBROKER_MAX_BYTES,
-            'B1 write broker data ELF is invalid or oversized')
-    writebroker_identity = {
-        'path': WRITEBROKER_RELATIVE,
-        'app_path': selected['root'] + '/' + WRITEBROKER_RELATIVE,
-        'classification': 'data_only_not_loaded',
-        'size': len(writebroker_data),
-        'sha256': hashlib.sha256(writebroker_data).hexdigest(),
-    }
-    require(build_manifest.get('writebroker') == writebroker_identity,
-            'B1 write broker build identity drift')
+    for key, label, relative, maximum in (
+            ('writebroker', 'write broker', WRITEBROKER_RELATIVE, WRITEBROKER_MAX_BYTES),
+            ('addon_worker', 'add-on worker', ADDON_WORKER_RELATIVE, ADDON_WORKER_MAX_BYTES)):
+        path = quarantine / 'wine-title' / relative
+        regular(path, f'B1 {label} data ELF')
+        data = path.read_bytes()
+        require(data.startswith(b'\x7fELF') and 0 < len(data) <= maximum,
+                f'B1 {label} data ELF is invalid or oversized')
+        identity = {
+            'path': relative,
+            'app_path': selected['root'] + '/' + relative,
+            'classification': 'data_only_not_loaded',
+            'size': len(data),
+            'sha256': hashlib.sha256(data).hexdigest(),
+        }
+        payload_identities[key] = identity
+        require(build_manifest.get(key) == identity, f'B1 {label} build identity drift')
 else:
-    require('writebroker' not in build_manifest,
-            'non-B1 runtime unexpectedly carries write broker data')
+    require('writebroker' not in build_manifest and 'addon_worker' not in build_manifest,
+            'non-B1 runtime unexpectedly carries payload helper data')
 if args.profile == 'b1':
     variants = build_manifest.get('variant_compiles', {})
     require(f'-DWINE_PS5_TITLE_ROOT={json.dumps(selected["root"])}' in variants.get('server', []),
@@ -1168,7 +1171,7 @@ qualification_material = {
     'topology': 'PARENT_SHARED_INPROCESS_WINESERVER',
     'runtime_abi': 3,
     'profile': selected,
-    **({'writebroker': writebroker_identity} if writebroker_identity else {}),
+    **payload_identities,
     'title_root': title_root_inventory,
     'native_resolver_audit': native_resolver_audit,
     'test_pes': test_pes,

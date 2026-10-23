@@ -319,14 +319,45 @@ remain in force.
   `0010-distinct-github-release-streams.patch` deduplicates GitHub rows only
   when both repository and release selectors match, so independently packaged
   add-ons from one repository remain separate Find entries.
-  Downloads buffer 8 MiB per Wine write, while extraction writes whole files up to
-  64 MiB or 4 MiB chunks without a seek-invalidated large read buffer. The menu
-  polls download/unpack progress with a 15-second response deadline. Removal
-  only hides folders through same-parent renames and writes a completion marker.
-  The native maintenance parent later removes completed trash outside Wine,
-  one no-follow entry at a time with 5-ms pacing; it resumes completed crash
-  leftovers on the next start. Markerless partial renames are rolled back by
-  AddonForge. Title mutations allow 30 minutes.
+  `0011-native-addon-worker.patch` streams release bytes through the separately
+  versioned `wine-title/addon-worker.elf` payload instead of Wine filesystem
+  writes. A separate worker key travels over the inherited ELF-loader socket;
+  mutual HMAC challenges authenticate loopback requests without sending it.
+  The retained loader socket leases the worker to the Add-ons page/title.
+  Archive writes stay in helper-owned, read-only-to-Wine
+  `C:\Forever\AddonStaging\<operation>` trees. The helper enforces a 4-GiB
+  archive, 16-GiB expansion, 32,768-entry, ASCII Windows-safe path/depth,
+  implicit-directory/case collision, link/special-file, CRC, size and dual
+  SHA-256 bounds. Hashing, metadata validation and parallel extraction share
+  one opened archive identity. One-MiB coalescing feeds eight extraction workers,
+  followed by a bounded file/directory durability pass. AddonForge scans executable
+  content and bounded selected-flavour TOCs before authorizing activation.
+  The helper then renames only into a validated channel below the fixed
+  `C:\Program Files (x86)\World of Warcraft` root; a private inode-bound journal
+  recovers interrupted replacements and retains unrestored backups. There is
+  no silent Wine fallback after native staging starts.
+  Removal still hides folders through same-parent renames and writes a
+  completion marker. The native maintenance parent later removes completed
+  trash outside Wine, one no-follow entry at a time with 5-ms pacing; it resumes
+  completed crash leftovers on the next start. Markerless partial renames are
+  rolled back by AddonForge. Title mutations allow 30 minutes.
+- Private native-worker qualification on console `.41`: Lore Forever v0.26.0,
+  373,473,339 ZIP bytes, 5,980 extracted files and four activated folders.
+  Candidate ZIP SHA-256:
+  `dd481a471027e4196637527b4e1449a697db3a669c00811c6ee83bcd795bc9ff`.
+
+  | Observed phase | Time |
+  | --- | ---: |
+  | Download and durable archive reception | 53.427 s |
+  | Extraction, validation and durability | 46.797 s |
+  | Activation and commit | 10.675 s |
+  | Total between core install log timestamps | 120 s |
+
+  The total also includes core safety/admission and state work. This is one
+  native install workload, not an old/new speed comparison on the same console,
+  an in-game add-on test, or a console power-cut qualification. Host regressions
+  cover rejected archives, UID isolation, rollback/recovery, cancellation,
+  protocol deadlines and serialized request handoff.
 - The container pins rustup-init 1.28.2 by SHA-256 and Rust 1.99.1 with the
   `x86_64-pc-windows-gnullvm` target. `cargo vendor --locked --versioned-dirs`
   populates the persistent cache, verifies each vendored `.cargo-checksum.json`,

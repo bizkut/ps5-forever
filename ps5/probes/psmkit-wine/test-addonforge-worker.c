@@ -31,7 +31,7 @@ static struct
     struct forever_addon_snapshot snapshot;
     struct forever_addon_install channels[FOREVER_ADDON_CHANNELS];
     size_t channel_count;
-    char response[ADDONFORGE_RESPONSE_BYTES], token[65];
+    char response[ADDONFORGE_RESPONSE_BYTES], token[65], worker_token[65];
     unsigned generation;
     enum forever_wago_key_status wago_status;
     int busy;
@@ -48,6 +48,16 @@ static const char *fixture_channel;
 static int forever_addons_current(unsigned generation) { return generation == forever_addons.generation; }
 static int forever_addons_control(const char *command) { assert(command); return 0; }
 static void io_log(const char *format, ...) { (void)format; }
+static int pw_title_addon_worker_start(const char token[64])
+{
+    assert(token);
+    return 0;
+}
+static int pw_title_addon_worker_stop(const char token[64])
+{
+    assert(token);
+    return 0;
+}
 static void title_desktop_addons_snapshot(const struct forever_addon_snapshot *snapshot)
 {
     ++publications;

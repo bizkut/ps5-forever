@@ -22,12 +22,21 @@ int main(void)
     static const char secret[] =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     static const char token[] = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    static const char worker_token[] =
+        "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0";
     struct addonforge_control_request request;
     char line[256], output[65];
 
-    snprintf(line, sizeof(line), "AUTH %s START %s", secret, token);
+    snprintf(line, sizeof(line), "AUTH %s START %s %s", secret, token, worker_token);
     assert(!addonforge_control_parse(line, secret, &request));
     assert(request.action == ADDONFORGE_CONTROL_START && !strcmp(request.core_token, token));
+    assert(!strcmp(request.worker_token, worker_token));
+    snprintf(line, sizeof(line), "AUTH %s START %s", secret, token);
+    assert(addonforge_control_parse(line, secret, &request) == -EINVAL);
+    snprintf(line, sizeof(line), "AUTH %s START %s short", secret, token);
+    assert(addonforge_control_parse(line, secret, &request) == -EINVAL);
+    snprintf(line, sizeof(line), "AUTH %s START %s %s extra", secret, token, worker_token);
+    assert(addonforge_control_parse(line, secret, &request) == -EINVAL);
     snprintf(line, sizeof(line), "AUTH %s STOP", secret);
     assert(!addonforge_control_parse(line, secret, &request));
     assert(request.action == ADDONFORGE_CONTROL_STOP);

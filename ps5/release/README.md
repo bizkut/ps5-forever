@@ -177,6 +177,14 @@ URL. CurseForge-only rows say so and cannot be installed. GitHub, WoWInterface
 and TukUI entries work without a key. Changes load the next time WoW starts, or
 after typing `/reload` in WoW.
 
+Install and update stream the ZIP through a dedicated native archive worker
+instead of writing or unpacking it through Wine. The worker hashes the received
+bytes, extracts into `C:\Forever\AddonStaging` with bounded parallel workers,
+makes every file durable, and returns only a staged tree. AddonForge still
+checks file types and the selected WoW client's TOCs before same-drive renames
+replace live add-on folders. Interrupted replacements recover when Add-ons
+reopens; backups are retained if recovery cannot finish safely.
+
 If Battle.net needs another web renderer process, Add-ons pauses and releases its
 helper process instead of blocking Battle.net. Close and reopen **Add-ons** to
 resume; the process limit and Battle.net's updater/game reserve stay unchanged.
