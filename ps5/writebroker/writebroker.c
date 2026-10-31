@@ -58,6 +58,7 @@
 #endif
 
 static unsigned char token[WB_TOKEN_BYTES];
+static const char *token_file = WB_TOKEN_FILE;
 static unsigned long long served_writes, served_bytes;
 static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -777,6 +778,34 @@ static int install_icon(unsigned char *buffer, unsigned char *other)
     return replaced;
 }
 
+/* The token file is the credential: whoever can read it is trusted. A broker
+ * whose user data folder was replaced (new token file) used to refuse every
+ * hello until the console restarted, and a replacement could not take the
+ * port. On a mismatch, adopt the file's current token if the client offers
+ * exactly that. */
+static int token_accepts(const unsigned char offered[WB_TOKEN_BYTES])
+{
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    unsigned char current[WB_TOKEN_BYTES];
+    int fd, ok;
+
+    pthread_mutex_lock(&lock);
+    ok = !memcmp(offered, token, sizeof(token));
+    if (!ok && (fd = open(token_file, O_RDONLY)) >= 0)
+    {
+        ok = read(fd, current, sizeof(current)) == (ssize_t)sizeof(current) &&
+             !memcmp(offered, current, sizeof(current));
+        close(fd);
+        if (ok)
+        {
+            memcpy(token, current, sizeof(token));
+            say("adopted the current token file");
+        }
+    }
+    pthread_mutex_unlock(&lock);
+    return ok;
+}
+
 static void *serve(void *arg)
 {
     int client = (int)(intptr_t)arg;
@@ -786,7 +815,7 @@ static void *serve(void *arg)
     unsigned char *buffer = malloc(WB_CHUNK);
 
     if (!buffer || transfer(client, &hello, sizeof(hello), 0) || hello.magic != WB_MAGIC ||
-        !hello.version || memcmp(hello.token, token, sizeof(token)))
+        !hello.version || !token_accepts(hello.token))
     {
         say("connection refused (hello)");
         goto done;
@@ -890,14 +919,16 @@ int main(void)
 {
     struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = htons(WB_PORT),
                                   .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
-    int listener = socket(AF_INET, SOCK_STREAM, 0), one = 1, attempt;
+    int listener = socket(AF_INET, SOCK_STREAM, 0), one = 1, attempt, prepared = 0;
 
     if (listener < 0 || setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)))
     {
         say("not started: socket errno=%d", errno);
         return 1;
     }
-    /* an older copy holds the port: ask it to exit, then retry for 2 s */
+    /* an older copy holds the port: ask it to exit, then retry for 2 s. Write
+     * this broker's token first: the user data folder may be new (no token
+     * file), and a current broker adopts the file's token for the quit. */
     for (attempt = 0; bind(listener, (struct sockaddr *)&address, sizeof(address)); attempt++)
     {
         if (errno != EADDRINUSE || attempt == 10)
@@ -905,10 +936,19 @@ int main(void)
             say("not started: port %d errno=%d", WB_PORT, errno);
             return 1;
         }
-        if (!attempt) replace_running();
+        if (!attempt)
+        {
+            if (broker_prepare_startup())
+            {
+                say("not started: cannot write %s errno=%d", WB_TOKEN_FILE, errno);
+                return 1;
+            }
+            prepared = 1;
+            replace_running();
+        }
         usleep(200000);
     }
-    if (broker_prepare_startup())
+    if (!prepared && broker_prepare_startup())
     {
         say("not started: cannot write %s errno=%d", WB_TOKEN_FILE, errno);
         return 1;

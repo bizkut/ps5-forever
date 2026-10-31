@@ -3368,6 +3368,41 @@ static struct pw_writebroker_outcome pw_title_writebroker_autostart(void)
     return outcome;
 }
 
+/* The write broker is a separate payload: it may die (a crash, another app's
+ * payload taking its place) while the title runs, and the title would then
+ * write without it (slow writes, the sandbox's small free-space figure). Check
+ * it every 30 s and start it again when it no longer answers. */
+#define PW_WRITEBROKER_WATCH_SECONDS 30
+static void *pw_title_writebroker_watch(void *unused)
+{
+    static const struct pw_writebroker_ops ops = {
+        .now_ms = pw_writebroker_now,
+        .probe = pw_writebroker_probe,
+        .send_elf = pw_writebroker_send_elf,
+        .wait_until = pw_writebroker_wait_until,
+    };
+    (void)unused;
+    for (;;)
+    {
+        struct pw_writebroker_outcome outcome;
+        sleep(PW_WRITEBROKER_WATCH_SECONDS);
+        outcome = pw_writebroker_autostart(&ops, NULL);
+        if (outcome.status != PW_WRITEBROKER_PRESENT)
+            io_log("title write broker watch sent=%zu result=%s errno=%d",
+                   outcome.sent, pw_writebroker_status_name(outcome.status), outcome.error);
+    }
+    return NULL;
+}
+
+static void pw_title_writebroker_watch_start(void)
+{
+    pthread_t thread;
+    if (!pthread_create(&thread, NULL, pw_title_writebroker_watch, NULL))
+        pthread_detach(thread);
+    else
+        io_log("title write broker watch not started errno=%d", errno);
+}
+
 static int pw_title_writebroker_restart(void)
 {
     struct pw_writebroker_outcome outcome;
@@ -3920,6 +3955,7 @@ int main(int argc, char **argv)
 #endif
     /* If this was a genuinely new root, setup made it after the early probe. */
     pw_title_writebroker_autostart();
+    pw_title_writebroker_watch_start();
 #if !PW_RUNTIME_GPU
     pw_title_icon_start();
 #endif

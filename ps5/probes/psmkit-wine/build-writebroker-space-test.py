@@ -56,7 +56,7 @@ server_names = ('transfer', 'discard', 'menu_remove_index', 'menu_remove_path_al
                 'repair_apply_mode', 'repair_scan_directory', 'repair_entry_at',
                 'repair_root', 'repair_all',
                 'broker_prepare_startup',
-                'read_whole', 'install_icon', 'serve_statfs', 'serve')
+                'read_whole', 'install_icon', 'serve_statfs', 'token_accepts', 'serve')
 client_names = ('bounce_acquire', 'bounce_release', 'broker_transfer', 'broker_connect',
                 'broker_get_connection', 'broker_query_fs', 'broker_request', 'broker_pwrite',
                 'get_full_size_info', 'get_full_size_info_ex')

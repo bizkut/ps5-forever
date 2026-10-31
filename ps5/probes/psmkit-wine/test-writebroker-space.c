@@ -29,6 +29,7 @@ static int client_mutex_lock(pthread_mutex_t *mutex);
 
 #define WB_CHUNK (1u << 20)
 static unsigned char token[WB_TOKEN_BYTES];
+static const char *token_file;
 static unsigned long long served_writes, served_bytes;
 static pthread_mutex_t stats_lock = PTHREAD_MUTEX_INITIALIZER;
 sigset_t ps5_title_block_set;
@@ -208,6 +209,48 @@ static int connection(void)
     assert(!transfer(pair[0], &reply, sizeof(reply), 0));
     assert(reply.magic == WB_MAGIC && !reply.result);
     return pair[0];
+}
+
+/* A replaced user data folder brings a new token file: the running broker
+ * adopts exactly that token and still refuses any other. */
+static void token_adoption_tests(void)
+{
+    unsigned char saved[WB_TOKEN_BYTES], fresh[WB_TOKEN_BYTES];
+    struct wb_hello hello = {.magic = WB_MAGIC, .version = WB_VERSION};
+    struct wb_reply reply;
+    int pair[2], fd;
+
+    memcpy(saved, token, sizeof(token));
+    for (unsigned int i = 0; i < sizeof(fresh); i++) fresh[i] = (unsigned char)(token[i] ^ 0x5a);
+    fd = open(token_path, O_WRONLY | O_TRUNC);
+    assert(fd >= 0 && write(fd, fresh, sizeof(fresh)) == sizeof(fresh));
+    close(fd);
+
+    /* neither the old token nor the new file's: refused */
+    for (unsigned int i = 0; i < sizeof(hello.token); i++) hello.token[i] = (unsigned char)(fresh[i] ^ 1);
+    assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+    start_server(serve, pair[1]);
+    assert(!transfer(pair[0], &hello, sizeof(hello), 1));
+    check(transfer(pair[0], &reply, sizeof(reply), 0) != 0, "unknown token refused");
+    close(pair[0]);
+    check(!memcmp(token, saved, sizeof(token)), "unknown token not adopted");
+
+    /* the new file's token: accepted and adopted */
+    memcpy(hello.token, fresh, sizeof(fresh));
+    assert(!socketpair(AF_UNIX, SOCK_STREAM, 0, pair));
+    start_server(serve, pair[1]);
+    assert(!transfer(pair[0], &hello, sizeof(hello), 1));
+    check(!transfer(pair[0], &reply, sizeof(reply), 0) && reply.magic == WB_MAGIC && !reply.result,
+          "current token file accepted");
+    close(pair[0]);
+    check(!memcmp(token, fresh, sizeof(token)), "current token file adopted");
+
+    /* restore the shared fixture */
+    memcpy(token, saved, sizeof(token));
+    fd = open(token_path, O_WRONLY | O_TRUNC);
+    assert(fd >= 0 && write(fd, saved, sizeof(saved)) == sizeof(saved));
+    close(fd);
+    say("token adoption: replaced token file adopted, unknown token refused");
 }
 
 static struct wb_statfs_reply query(int fd, const char *path)
@@ -939,6 +982,7 @@ int main(void)
     wine_ps5_title_critical_signals(&ps5_title_block_set);
     assert(mkdtemp(directory));
     snprintf(token_path, sizeof(token_path), "%s/token", directory);
+    token_file = token_path;
     snprintf(writes_path, sizeof(writes_path), "%s/writes", directory);
     fd = open(token_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
     assert(fd >= 0 && write(fd, token, sizeof(token)) == sizeof(token));
@@ -947,6 +991,7 @@ int main(void)
     pool_tests();
     protocol_tests();
     menu_removal_tests();
+    token_adoption_tests();
     permission_repair_tests();
     close_connections();
     client_tests();
