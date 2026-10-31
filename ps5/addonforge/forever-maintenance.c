@@ -208,9 +208,12 @@ static HANDLE start_battlenet(void)
     static const char explorer[] = "C:\\windows\\system32\\explorer.exe";
     STARTUPINFOA startup = {.cb = sizeof(startup)};
     PROCESS_INFORMATION process;
+    /* launch_uid selects a product page without starting the game; wowf is
+     * WoW Forever (the retired wow_classic_beta made Battle.net fall back to
+     * another game's page) */
     char command[] =
         "explorer.exe /desktop \"C:\\Program Files (x86)\\Battle.net\\Battle.net Launcher.exe\" "
-        "\"--exec=launch_uid wow_classic_beta\"";
+        "\"--exec=launch_uid wowf\"";
     memset(&process, 0, sizeof(process));
     if (!CreateProcessA(explorer, command, NULL, NULL, FALSE, 0, NULL,
                         "C:\\Program Files (x86)\\Battle.net", &startup, &process))
