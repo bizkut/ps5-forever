@@ -6,6 +6,20 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.022
+
+**Faster Battle.net downloads, and fixes for a Battle.net crash and Add-ons error 61.**
+
+- Download connections get a larger network receive buffer (the PS5 stopped
+  growing it at 128 KB), and Battle.net's archive writes are merged into fewer,
+  larger disk writes. A WoW Forever update on one PS5 went from 6-7 MB/s to
+  11-14 MB/s; the gain depends on the line and on Blizzard's servers.
+- Chromium's audio service now runs inside Battle.net, so opening the WoW
+  Forever page during an update no longer crashes Battle.net.
+- Battle.net opens on the WoW Forever page when it starts.
+- The Add-ons helper moves to port 9143, so another homebrew helper on port
+  9142 (for example Savage Wind's) no longer causes Add-ons error 61.
+
 ### Forever Launcher 01.000.021
 
 **Adds PS5 VRR support for WoW at up to 120 Hz.**

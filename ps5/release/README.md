@@ -27,19 +27,22 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
-## What's new in 01.000.021
+## What's new in 01.000.022
 
-- **Adds PS5 VRR support for WoW at up to 120 Hz.** The game title now declares
-  the retail VRR and high-frame-rate metadata instead of the older combination
-  that disabled system VRR.
-- **Keeps 119.88 Hz active in VRR mode.** Before the first frames, a VRR display
-  may idle at its 48 Hz floor. Forever no longer mistakes that valid idle rate
-  for failed 120 Hz and restores 59.94 Hz.
-- On a compatible display, set PS5 **VRR** to **Automatic**. If VideoOut does
-  not offer or accept the 119.88 Hz mode, Forever continues at 59.94 Hz.
+- **Faster Battle.net downloads.** Each download connection now gets a larger
+  network receive buffer (the PS5 stopped growing it at 128 KB), and Battle.net's
+  archive writes are merged into fewer, larger disk writes. A WoW Forever update
+  on one PS5 went from 6-7 MB/s to 11-14 MB/s; the gain depends on your line
+  and on Blizzard's servers.
+- **Fixes a Battle.net crash** when the WoW Forever page plays a video during an
+  update: Chromium's audio service now runs inside Battle.net, so page renderers
+  are not refused.
+- **Battle.net opens on the WoW Forever page** when it starts.
+- **Fixes Add-ons error 61** after running another homebrew app whose helper
+  keeps port 9142 (for example Savage Wind). Forever's Add-ons helper now uses
+  port 9143.
 
-01.000.020 repaired Battle.net signature setup, completed large add-on
-downloads, and moved add-on staging into the bounded native worker.
+01.000.021 added PS5 VRR support for WoW at up to 120 Hz.
 
 Older release notes are on the [releases page](https://github.com/bizkut/ps5-forever/releases).
 
