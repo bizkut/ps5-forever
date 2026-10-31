@@ -435,7 +435,8 @@ const char *pw_redact_spawn_argv(char *const argv[], char *text, size_t size)
     {
         const char *value = strchr(*arg, '=');
         int count;
-        if (arg == argv + 1 || !strncmp(*arg, "--type=", 7) || (**arg == '-' && !value))
+        if (arg == argv + 1 || !strncmp(*arg, "--type=", 7) ||
+            !strncmp(*arg, "--utility-sub-type=", 19) || (**arg == '-' && !value))
             count = snprintf(text + used, size - used, "%s%s", used ? " " : "", *arg);
         else if (**arg == '-')
             count = snprintf(text + used, size - used, "%s%.*s=...", used ? " " : "",

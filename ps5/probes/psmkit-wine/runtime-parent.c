@@ -1738,7 +1738,8 @@ static int is_chromium_subprocess(const struct wine_ps5_title_spawn *spawn)
 /* The Windows command line of a spawn request, shortened, for the log:
  * which program takes or is refused a slot. Arguments may carry account
  * values (a game's login, a session), so only the program and option names
- * are shown; a value is shown only for Chromium's --type=. */
+ * are shown; a value is shown only for Chromium's --type= and the service
+ * name in --utility-sub-type=. */
 static const char *spawn_command(const struct wine_ps5_title_spawn *spawn, char *text, size_t size)
 {
     return pw_redact_spawn_argv(spawn->argv, text, size);

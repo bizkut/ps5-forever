@@ -433,6 +433,10 @@ static void spawn_log_redaction(void)
     char *chromium[] = {"wine", "Battle.net.exe", "--type=renderer", "--token=private", NULL};
     assert(!strcmp(pw_redact_spawn_argv(chromium, text, sizeof(text)),
                    "Battle.net.exe --type=renderer --token=..."));
+    char *utility[] = {"wine", "Battle.net.exe", "--type=utility",
+                       "--utility-sub-type=audio.mojom.AudioService", "--lang=en-US", NULL};
+    assert(!strcmp(pw_redact_spawn_argv(utility, text, sizeof(text)),
+                   "Battle.net.exe --type=utility --utility-sub-type=audio.mojom.AudioService --lang=..."));
 }
 
 int main(void)
