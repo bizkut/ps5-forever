@@ -6,6 +6,21 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.023
+
+**The write helper now recovers by itself.**
+
+- Forever checks its write helper every 30 seconds and starts it again if it
+  stops answering.
+- After a reset or deleted Forever data folder, the helper takes over the new
+  key instead of blocking until a PS5 restart, so Battle.net keeps fast disk
+  writes and sees the real free space instead of 16 GB.
+
+Also in this release, from 01.000.022: faster Battle.net downloads (larger
+network buffers and merged archive writes), a fix for a Battle.net crash on the
+WoW Forever page, Battle.net opening on the WoW Forever page, and a fix for
+Add-ons error 61 when another homebrew helper uses port 9142.
+
 ### Forever Launcher 01.000.022
 
 **Faster Battle.net downloads, and fixes for a Battle.net crash and Add-ons error 61.**

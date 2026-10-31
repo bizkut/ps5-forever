@@ -27,6 +27,14 @@ or work online.
 
 [![Watch Forever Launcher running on PS5](https://img.youtube.com/vi/hlHsBxf-G6Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=hlHsBxf-G6Y)
 
+## What's new in 01.000.023
+
+- **The write helper now recovers by itself.** Forever checks it every 30
+  seconds and starts it again if it stops answering. After a reset or deleted
+  Forever data folder, the helper also takes over the new key instead of
+  blocking until a PS5 restart, so Battle.net keeps fast disk writes and sees
+  the real free space (not 16 GB).
+
 ## What's new in 01.000.022
 
 - **Faster Battle.net downloads.** Each download connection now gets a larger
