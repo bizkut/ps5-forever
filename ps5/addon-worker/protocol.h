@@ -2,7 +2,8 @@
 #ifndef FOREVER_ADDON_WORKER_PROTOCOL_H
 #define FOREVER_ADDON_WORKER_PROTOCOL_H
 
-#define AW_PORT 9142u
+/* 9142 is Savage Wind's storage broker, which outlives its game */
+#define AW_PORT 9143u
 #define AW_MAGIC 0x31574146u /* "FAW1" little-endian */
 #define AW_VERSION 2u
 #define AW_TOKEN_BYTES 64u

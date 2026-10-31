@@ -572,7 +572,7 @@ index 0000000..39db96e
 +
 +const MAGIC: u32 = 0x3157_4146;
 +const VERSION: u32 = 2;
-+const PORT: u16 = 9142;
++const PORT: u16 = 9143;
 +const TOKEN_BYTES: usize = 64;
 +const OPERATION_BYTES: usize = 32;
 +const MAX_ARCHIVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
