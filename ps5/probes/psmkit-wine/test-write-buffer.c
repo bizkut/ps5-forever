@@ -885,15 +885,30 @@ static void test_multiextent_and_overlap(void)
                                    title_buffer_mutation_generation, 1, &handled, &pos));
         assert(handled);
     }
-    assert(backing_calls == WINE_PS5_TITLE_BUFFER_EXTENTS_PER_HANDLE);
-    assert(title_buffer_test_pending_count() == 1);
-    assert(title_buffer_diag.extents_opened == 5);
+    /* a new stream at the per-handle cap writes out only the oldest extent;
+     * the handle's other streams stay buffered */
+    assert(backing_calls == 1 && flush_log[0] == '0');
+    assert(title_buffer_test_pending_count() == WINE_PS5_TITLE_BUFFER_EXTENTS_PER_HANDLE);
+    assert(title_buffer_diag.extents_opened == WINE_PS5_TITLE_BUFFER_EXTENTS_PER_HANDLE + 1);
     assert(title_buffer_diag.handle_evictions == 1);
     assert(title_buffer_diag.global_evictions == 0);
+    {
+        char byte = '0' + 1;
+        assert(!title_buffer_write(handle_a, fd_a, &byte, 1, 101, NULL, 0, 0,
+                                   title_buffer_mutation_generation, 1, &handled, &pos));
+        assert(handled && pos == 102 && backing_calls == 1);
+    }
     assert(!title_buffer_flush_path_reason(
         path_a, WINE_PS5_TITLE_BUFFER_BARRIER_QUERY));
     assert(!title_buffer_test_pending_count());
     assert(backing_calls == WINE_PS5_TITLE_BUFFER_EXTENTS_PER_HANDLE + 1);
+    {
+        char got[2];
+        assert(pread(fd_a, got, 1, 0) == 1 && got[0] == '0');
+        assert(pread(fd_a, got, 2, 100) == 2 && got[0] == '1' && got[1] == '1');
+        for (unsigned int i = 2; i <= WINE_PS5_TITLE_BUFFER_EXTENTS_PER_HANDLE; i++)
+            assert(pread(fd_a, got, 1, i * 100) == 1 && got[0] == (char)('0' + i));
+    }
 
     close(fd_a);
     close(fd_b);
@@ -1177,6 +1192,42 @@ static void test_per_run_idle(void)
     assert(!title_buffer_test_pending_count() && backing_calls == 2 && flush_log[1] == 'b');
     close(fd_a); close(fd_b); unlink(path_a); unlink(path_b);
     puts("write-buffer production: per-run idle deadlines PASS");
+}
+
+static void test_same_handle_idle_extents(void)
+{
+    char path[64];
+    HANDLE handle = (HANDLE)(uintptr_t)0x129;
+    struct wine_ps5_title_lock lock;
+    struct stat st;
+    int handled, fd = make_file(path);
+    off_t pos;
+
+    reset_buffer();
+    start_run(handle, fd, path, "aaa", 3);
+    assert(!fstat(fd, &st));
+    assert(!title_buffer_write(handle, fd, "bbb", 3, 100, NULL, st.st_dev, st.st_ino,
+                               title_buffer_mutation_generation, 1, &handled, &pos));
+    assert(handled && title_buffer_test_pending_count() == 2);
+    title_buffer_lock(&lock);
+    for (unsigned int i = 0; i < WINE_PS5_TITLE_BUFFER_RUNS; i++)
+        if (title_buffer.runs[i].length)
+            title_buffer.runs[i].first_us = title_buffer.runs[i].start ? 200 : 100;
+    title_buffer_unlock(&lock);
+    /* the idle stream is written out; the other stream of the same file stays */
+    assert(!title_buffer_flush_idle_due(100 + WINE_PS5_TITLE_BUFFER_RESIDENCE_US, 0));
+    assert(title_buffer_test_pending_count() == 1 && backing_calls == 1 && flush_log[0] == 'a');
+    assert(!title_buffer_write(handle, fd, "ccc", 3, 103, NULL, st.st_dev, st.st_ino,
+                               title_buffer_mutation_generation, 1, &handled, &pos));
+    assert(handled && pos == 106 && backing_calls == 1);
+    assert(!title_buffer_flush_idle_due(200 + WINE_PS5_TITLE_BUFFER_RESIDENCE_US, 0));
+    assert(!title_buffer_test_pending_count() && backing_calls == 2 && flush_log[1] == 'b');
+    {
+        char got[6];
+        assert(pread(fd, got, 6, 100) == 6 && !memcmp(got, "bbbccc", 6));
+    }
+    close(fd); unlink(path);
+    puts("write-buffer production: idle stream flushes alone; same-file streams retained PASS");
 }
 
 static void test_total_run_cap(void)
@@ -1729,6 +1780,7 @@ int main(void)
     test_unrelated_close_drain_attribution();
     test_same_identity_two_handles();
     test_per_run_idle();
+    test_same_handle_idle_extents();
     test_total_run_cap();
     test_multirun_error_and_shutdown();
     test_partial_shutdown_retry();
