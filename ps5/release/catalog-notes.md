@@ -6,6 +6,21 @@ Battle.net launcher for World of Warcraft (Retail, Classic and Forever) with a b
 
 ## Release notes (GitHub release description, shown by the catalog)
 
+### Forever Launcher 01.000.024
+
+**Fixes Add-ons "The add-on service did not answer in time" / error 61 after a PS5 restart.**
+
+- The write helper's startup permission repair also opened up the Add-ons
+  helper's private staging folder, which the Add-ons helper refuses to use. The
+  write helper now leaves that folder alone.
+- The Add-ons helper locks a folder that was opened up back down by itself, so
+  affected consoles recover without any manual step.
+
+Also in this release, from 01.000.022 and 01.000.023: faster Battle.net
+downloads, a fix for a Battle.net crash on the WoW Forever page, Battle.net
+opening on the WoW Forever page, Add-ons on its own port (9143), and a write
+helper that recovers by itself.
+
 ### Forever Launcher 01.000.023
 
 **The write helper now recovers by itself.**
