@@ -758,12 +758,37 @@ def main():
         refused = subprocess.run([sys.argv[1]], env=invalid_env, capture_output=True, timeout=5)
         assert refused.returncode != 0
         assert TOKEN not in refused.stdout + refused.stderr
-    # Refuse writable replacements without chmod-adopting them. Reject links in
-    # every ancestor, not merely the final root component.
+    # A root this worker owns but others can write to (the write broker's
+    # permission repair widened it before 01.000.024) is re-secured and
+    # adopted, including a widened leftover session, as long as every entry is
+    # a plain file or folder this worker owns. A planted link is refused.
     root.chmod(0o777)
+    planted = root / "planted"
+    planted.symlink_to(temporary)
     refused = subprocess.run([sys.argv[1]], env=env, capture_output=True, timeout=5)
-    assert refused.returncode != 0 and root.stat().st_mode & 0o777 == 0o777
-    root.chmod(0o700)
+    assert refused.returncode != 0 and planted.is_symlink()
+    planted.unlink()
+    root.chmod(0o777)
+    stale = root / f"{0x31:032x}"
+    (stale / "parts").mkdir(parents=True)
+    (stale / "parts/archive").write_bytes(b"partial download")
+    (stale / "parts/archive").chmod(0o666)
+    for widened in (stale / "parts", stale):
+        widened.chmod(0o777)
+    server = subprocess.Popen([sys.argv[1]], env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True)
+    try:
+        wait_ready(server)
+        assert root.stat().st_mode & 0o777 == 0o711
+        assert not stale.exists()  # the secured session was cleaned at startup
+        assert command(QUIT)[3] == 0
+        assert server.wait(timeout=5) == 0
+    finally:
+        if server.poll() is None:
+            server.kill()
+        server.stdout.close()
+        server.stderr.close()
+    # Links in every ancestor are refused, not merely the final root component.
     link = temporary / "linked"
     link.symlink_to(root, target_is_directory=True)
     linked_env = dict(env, FOREVER_ADDON_WORKER_ROOT=str(link / "child"))

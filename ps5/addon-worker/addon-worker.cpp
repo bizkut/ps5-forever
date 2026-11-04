@@ -1692,4 +1692,47 @@ bool clean_all_sessions(const std::string &root, const std::string &wow_root, st
         error.clear();
     return ok;
 }
+
+namespace
+{
+// Lock down one widened tree of plain files and folders this worker owns.
+// Each folder is secured before its entries are listed, so once it is 0700
+// nobody else can add, rename or swap entries in it.
+bool secure_owned_tree(int directory, unsigned depth, std::size_t &count)
+{
+    std::vector<std::string> names;
+    if (depth > kMaxDepth || !directory_names(directory, names))
+        return false;
+    for (const auto &name : names)
+    {
+        struct stat info{};
+        if (++count > kMaxArchiveEntries ||
+            fstatat(directory, name.c_str(), &info, AT_SYMLINK_NOFOLLOW) != 0 ||
+            info.st_uid != geteuid() || !(S_ISDIR(info.st_mode) || S_ISREG(info.st_mode)) ||
+            (S_ISREG(info.st_mode) && info.st_nlink != 1))
+            return false;
+        Descriptor entry(S_ISDIR(info.st_mode)
+                             ? open_directory_child(directory, name.c_str())
+                             : openat(directory, name.c_str(),
+                                      O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK));
+        struct stat opened{};
+        if (entry.get() < 0 || fstat(entry.get(), &opened) != 0 ||
+            opened.st_dev != info.st_dev || opened.st_ino != info.st_ino ||
+            opened.st_uid != geteuid())
+            return false;
+        if ((opened.st_mode & 0022) &&
+            fchmod(entry.get(), S_ISDIR(opened.st_mode) || (opened.st_mode & 0100) ? 0700 : 0600) != 0)
+            return false;
+        if (S_ISDIR(opened.st_mode) && !secure_owned_tree(entry.get(), depth + 1, count))
+            return false;
+    }
+    return true;
+}
+} // namespace
+
+bool secure_widened_root(int root)
+{
+    std::size_t count = 0;
+    return fchmod(root, 0711) == 0 && secure_owned_tree(root, 0, count);
+}
 } // namespace forever::addon_worker

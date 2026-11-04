@@ -269,7 +269,15 @@ struct wb_permission_repair
     unsigned failed;
     int result;
     dev_t device;
+    int private_valid;
+    dev_t private_device;
+    ino_t private_inode;
 };
+
+/* The Add-ons worker's private staging root (AW_NATIVE_ROOT in
+ * ps5/addon-worker/protocol.h). The worker refuses a root that others can
+ * write to, so widening it here broke Add-ons after every broker start. */
+#define WB_REPAIR_PRIVATE_ROOT "forever/prefix/drive_c/Forever/AddonStaging"
 
 static int repair_entry_at(
     int parent, const char *name, unsigned depth, struct wb_permission_repair *repair);
@@ -395,6 +403,12 @@ static int repair_entry_at(
     {
         result = -errno;
         goto failed;
+    }
+    if (repair->private_valid && before.st_dev == repair->private_device &&
+        before.st_ino == repair->private_inode)
+    {
+        repair->skipped++;
+        return 0;
     }
     if (before.st_dev != repair->device)
     {
@@ -592,13 +606,25 @@ static int repair_all(struct wb_permission_repair *repair)
         {"prosperostore/previous/PPSA99030", 0},
         {"prosperostore/previous/PPSA99030/wine", 1},
     };
-    int data_fd = repair_open_data_root(&repair->device);
+    int data_fd = repair_open_data_root(&repair->device), private_fd;
+    struct stat private_status;
 
     if (data_fd < 0)
     {
         repair->failed++;
         repair->result = data_fd;
         return data_fd;
+    }
+    private_fd = repair_open_relative_directory(data_fd, WB_REPAIR_PRIVATE_ROOT, repair->device);
+    if (private_fd >= 0)
+    {
+        if (!fstat(private_fd, &private_status))
+        {
+            repair->private_valid = 1;
+            repair->private_device = private_status.st_dev;
+            repair->private_inode = private_status.st_ino;
+        }
+        close(private_fd);
     }
     for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); i++)
     {

@@ -283,11 +283,20 @@ bool make_root()
                             O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     close(parent);
     struct stat info{};
-    // Never adopt a title-owned or writable replacement. Parent-directory
-    // mutation may detach this inode, but cannot redirect descriptor operations.
-    const bool ok = root >= 0 && fstat(root, &info) == 0 && S_ISDIR(info.st_mode) &&
-                    info.st_uid == geteuid() && (info.st_mode & 0022) == 0 &&
-                    fchmod(root, 0711) == 0;
+    // Never adopt a title-owned replacement. A root this worker owns that others
+    // could write to (the write broker's permission repair widened it before
+    // 01.000.024) is secured again if it holds only this worker's own files and
+    // folders. Parent-directory mutation may detach this inode, but cannot
+    // redirect descriptor operations.
+    bool ok = root >= 0 && fstat(root, &info) == 0 && S_ISDIR(info.st_mode) &&
+              info.st_uid == geteuid();
+    if (ok && (info.st_mode & 0022))
+    {
+        ok = secure_widened_root(root);
+        log_line(ok ? "staging root was writable by others; secured it"
+                    : "staging root was writable by others and holds unexpected entries");
+    }
+    ok = ok && fchmod(root, 0711) == 0;
     if (root >= 0)
         close(root);
     return ok;

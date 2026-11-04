@@ -411,6 +411,7 @@ static void permission_repair_tests(void)
     char hardlinked[1024], hardlink_outside[1024], other_device[1024];
     char legacy_parent[1024], legacy_root[1024], legacy_file[1024], sibling[1024];
     char store_parent[1024], store_root[1024], store_file[1024];
+    char staging[1024], staging_session[1024], staging_file[1024], staging_parent[1024];
     struct wb_permission_repair repair = {0};
     struct stat status;
     dev_t device;
@@ -439,6 +440,10 @@ static void permission_repair_tests(void)
              repair_data_root);
     snprintf(store_root, sizeof(store_root), "%s/wine", store_parent);
     snprintf(store_file, sizeof(store_file), "%s/home/settings", store_root);
+    snprintf(staging_parent, sizeof(staging_parent), "%s/drive_c/Forever", prefix);
+    snprintf(staging, sizeof(staging), "%s/AddonStaging", staging_parent);
+    snprintf(staging_session, sizeof(staging_session), "%s/0123", staging);
+    snprintf(staging_file, sizeof(staging_file), "%s/journal", staging_session);
 
     fixture_put(child, "child");
     fixture_put(executable, "exec");
@@ -454,6 +459,7 @@ static void permission_repair_tests(void)
     fixture_put(legacy_file, "registry");
     fixture_put(sibling, "immutable sibling");
     fixture_put(store_file, "settings");
+    fixture_put(staging_file, "private journal");
     snprintf(link_path, sizeof(link_path), "%s/outside-link", locked);
     assert(!symlink(outside, link_path));
 
@@ -471,6 +477,10 @@ static void permission_repair_tests(void)
     assert(!chmod(legacy_file, 0400));
     assert(!chmod(sibling, 0400));
     assert(!chmod(store_file, 0400));
+    assert(!chmod(staging_file, 0600));
+    assert(!chmod(staging_session, 0700));
+    assert(!chmod(staging, 0711));
+    assert(!chmod(staging_parent, 0555));
     snprintf(made, sizeof(made), "%s/new", locked);
     errno = 0;
     check(mkdir(made, 0700) && (errno == EACCES || errno == EPERM),
@@ -502,6 +512,9 @@ static void permission_repair_tests(void)
           "legacy repair changes only the rename parent and recursive wine tree");
     check(fixture_mode(store_parent) == 0777 && fixture_mode(store_file) == 0666,
           "store legacy root and rename parent are repaired");
+    check(fixture_mode(staging_parent) == 0777 && fixture_mode(staging) == 0711 &&
+          fixture_mode(staging_session) == 0700 && fixture_mode(staging_file) == 0600,
+          "startup repair leaves the Add-ons worker's private staging subtree alone");
 
     data_fd = repair_open_data_root(&device);
     assert(data_fd >= 0);

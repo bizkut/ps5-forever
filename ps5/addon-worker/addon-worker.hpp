@@ -120,6 +120,10 @@ bool clean_session(const std::string &root, const std::string &wow_root,
                    const std::string &id, std::string &error);
 bool clean_all_sessions(const std::string &root, const std::string &wow_root,
                         std::string &error);
+// Makes an owned staging root 0711 again after others could write to it, and
+// its owned files and folders private; false when any entry is not a plain
+// file or folder this worker owns.
+bool secure_widened_root(int root);
 std::string digest_hex(const Digest &digest);
 bool parse_digest_hex(const std::string &text, Digest &digest);
 }
